@@ -14,11 +14,13 @@ import (
 	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/team"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 	"github.com/ezemacchi/ekanban/internal/ticketui"
+	"github.com/ezemacchi/ekanban/internal/ui"
 )
 
 func dumpPipeline(client *herdr.Client, repo string) error {
@@ -75,11 +77,47 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 func ticketSettings(cfg config.Settings) ticketui.Settings {
 	teams, problems := loadTeams()
 	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
+	problems = append(problems, colProblems...)
 	return ticketui.Settings{
 		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams},
 		Columns:  cols,
+		Keys:     cfg.Keys,
 		Icons:    cfg.Icons,
-		Problems: append(problems, colProblems...),
+		Problems: append(problems, unknownKeys(cfg.Keys)...),
+	}
+}
+
+// unknownKeys reports [keys] names that no screen has.
+func unknownKeys(bindings map[string][]string) []string {
+	return keys.Unknown(bindings, ui.BoardActions, ui.PipelineActions, ui.ArchiveActions, ticketui.Actions)
+}
+
+// showKeys lists every action by screen: what [keys] in config.toml can bind.
+func showKeys() {
+	cfg := config.Load()
+	screens := []struct {
+		name    string
+		actions []keys.Action
+	}{
+		{"board (outside a repository)", ui.BoardActions},
+		{"board (in a repository: computed columns)", ui.PipelineActions},
+		{"archive of accepted tickets", ui.ArchiveActions},
+		{"ticket board", ticketui.Actions},
+	}
+	for _, s := range screens {
+		km, _ := keys.New(s.actions, cfg.Keys)
+		fmt.Println(s.name)
+		for _, a := range km.Actions() {
+			fixed := ""
+			if a.Fixed {
+				fixed = "  (fixed)"
+			}
+			fmt.Printf("  %-18s %-16s %s%s\n", a.Name, keys.Display(a.Keys), a.Help, fixed)
+		}
+		fmt.Println()
+	}
+	for _, p := range unknownKeys(cfg.Keys) {
+		fmt.Println(p)
 	}
 }
 

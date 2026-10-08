@@ -285,16 +285,21 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
+	// The key map turns a rebound key into the default key switched on below.
+	key := m.keyMap().Resolve(msg.String())
+	if key == "" {
+		return m, nil
+	}
 	if m.pipelineOn() {
 		if m.archiveView {
-			return m.handleArchiveKey(msg.String())
+			return m.handleArchiveKey(key)
 		}
-		if handled, model, cmd := m.handlePipelineKey(msg.String()); handled {
+		if handled, model, cmd := m.handlePipelineKey(key); handled {
 			return model, cmd
 		}
 	}
 
-	switch key := msg.String(); key {
+	switch key {
 	case "q", "esc":
 		if m.grabbed != "" {
 			m.grabbed = ""

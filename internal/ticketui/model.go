@@ -13,6 +13,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
 	"github.com/ezemacchi/ekanban/internal/ticket"
@@ -38,6 +39,7 @@ type Model struct {
 	opts     ticket.Options
 	icons    look.Icons
 	cols     columns.Set
+	keys     *keys.Map
 
 	run    *ticket.Run
 	err    error
@@ -50,18 +52,43 @@ type Model struct {
 	spinner  look.Spinner
 }
 
+// Actions are the ticket board's keys. The first key of each is what key()
+// switches on; config.toml's [keys] binds others by name.
+var Actions = []keys.Action{
+	{Name: "left", Keys: []string{"h", "left"}, Help: "previous column"},
+	{Name: "right", Keys: []string{"l", "right"}, Help: "next column"},
+	{Name: "down", Keys: []string{"j", "down"}, Help: "next role"},
+	{Name: "up", Keys: []string{"k", "up"}, Help: "previous role"},
+	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
+	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
+	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
+	{Name: "open-issue", Keys: []string{"o"}, Help: "open the ticket in the tracker"},
+	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
+	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
+	{Name: "quit", Keys: []string{"q"}, Help: "quit"},
+}
+
 // Settings is what config.toml says about the ticket board.
 type Settings struct {
-	Options  ticket.Options // where prototypes are, which teams exist
-	Columns  columns.Set    // nil: ticket.DefaultColumns
-	Icons    bool           // Nerd Font glyphs
-	Problems []string       // configuration complaints, shown until the first key
+	Options  ticket.Options      // where prototypes are, which teams exist
+	Columns  columns.Set         // nil: ticket.DefaultColumns
+	Keys     map[string][]string // [keys]: action name -> keys
+	Icons    bool                // Nerd Font glyphs
+	Problems []string            // configuration complaints, shown until the first key
 }
 
 // New builds the board for the run in worktree.
 func New(client *herdr.Client, worktree string, s Settings) *Model {
-	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns,
-		icons: look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(s.Problems, " · ")}
+	km, problems := keys.New(Actions, s.Keys)
+	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns, keys: km,
+		icons: look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(append(s.Problems, problems...), " · ")}
+}
+
+func (m *Model) keyMap() *keys.Map {
+	if m.keys == nil {
+		m.keys, _ = keys.New(Actions, nil)
+	}
+	return m.keys
 }
 
 func (m *Model) columns() columns.Set {
@@ -139,8 +166,14 @@ func (m *Model) key(k string) tea.Cmd {
 		return nil
 	}
 	m.status = ""
+	if k == "ctrl+c" {
+		return tea.Quit
+	}
+	if k = m.keyMap().Resolve(k); k == "" {
+		return nil
+	}
 	switch k {
-	case "q", "ctrl+c":
+	case "q":
 		return tea.Quit
 	case "h", "left":
 		m.stepColumn(-1)
@@ -155,7 +188,7 @@ func (m *Model) key(k string) tea.Cmd {
 	case "G":
 		m.row = 1 << 30
 	case "r":
-		m.status = "actualizando…"
+		m.status = "refreshing…"
 		return m.load
 	case "o":
 		if m.run != nil {
@@ -345,8 +378,9 @@ func (m *Model) View() string {
 	if m.err != nil {
 		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
 	}
-	b.WriteString(keyStyle.Render("h/l") + " column  " + keyStyle.Render("j/k") + " role  " + keyStyle.Render("enter") + " go to its tab  " +
-		keyStyle.Render("o") + " Jira  " + keyStyle.Render("p") + " prototype  " + keyStyle.Render("r") + " refresh  " + keyStyle.Render("q") + " quit")
+	k := func(name string) string { return keyStyle.Render(m.keyMap().Key(name)) }
+	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  " + k("jump") + " go to its tab  " +
+		k("open-issue") + " tracker  " + k("prototype") + " prototype  " + k("refresh") + " refresh  " + k("quit") + " quit")
 	return b.String()
 }
 

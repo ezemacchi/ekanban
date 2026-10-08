@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 )
@@ -201,7 +202,9 @@ func (m *Model) viewFooter() string {
 	}
 
 	if m.pipelineOn() {
-		hint := "a accept (" + m.columns.Label(pipeline.ReadyQA) + ") · A archive · d detail · n note · enter go · r refresh · ? help"
+		k := m.hintKey
+		hint := k("accept") + " accept (" + m.columns.Label(pipeline.ReadyQA) + ") · " + k("archive") + " archive · " +
+			k("detail") + " detail · " + k("note") + " note · " + k("jump") + " go · " + k("refresh") + " refresh · " + k("help") + " help"
 		if m.status != "" {
 			hint = m.status
 		}
@@ -548,7 +551,10 @@ func (m *Model) viewManage() string {
 // short form is not the long one truncated: a clipped sentence loses its verb
 // and says nothing, so the narrow board gets phrasing written for it.
 type helpRow struct {
-	key, long, short string
+	// actions are named in actions.go; the row shows their current keys, so a
+	// binding in config.toml shows up here too.
+	actions     []string
+	long, short string
 	// wide marks a key that only does something on a board wide enough for the
 	// arrangements it switches between. Listing those in a dock, where they are
 	// deliberately inert, spends its scarcest rows on things that will not
@@ -557,30 +563,42 @@ type helpRow struct {
 }
 
 var helpRows = []helpRow{
-	{key: "K", long: "cycle the view: list → table → kanban", wide: true},
-	{key: "o", long: "table only: sort by status, name, or when it last changed", wide: true},
-	{key: "d", long: "list: show or hide the detail pane · elsewhere: detail modal", wide: true},
-	{key: "j / k", long: "move", short: "move"},
-	{key: "gg / G", long: "first row · last row", short: "first · last"},
-	{key: "gp", long: "open the pull request in a browser", short: "open the PR"},
-	{key: "gf", long: "send the failing check, with the end of its log, to that space's agent", short: "send the failure"},
-	{key: "h / l", long: "kanban: move between columns · list: collapse / expand", short: "fold · unfold"},
-	{key: "v", long: "grab a row, then move it — leaving its group changes its status", short: "grab and move"},
-	{key: "enter", long: "jump to space (reopens archived ones)", short: "jump to space"},
-	{key: "1-9", long: "send to that status, numbered along the bottom", short: "set status"},
-	{key: "s", long: "status picker", short: "status picker"},
-	{key: "n", long: "edit note — who or what you are waiting on", short: "edit note"},
-	{key: "R", long: "rename the space — renames the Herdr workspace too", short: "rename space"},
-	{key: "m", long: "type a message into that space's agent, then go there to send it", short: "message agent"},
-	{key: "space", long: "collapse / expand group", short: "fold group"},
-	{key: "F", long: "show only the status under the cursor — F or esc for all", short: "this status only"},
-	{key: "O", long: "reorder Herdr's own Spaces sidebar to match this board", short: "reorder Spaces"},
-	{key: "a", long: "show or hide archived spaces", short: "archived"},
-	{key: "/", long: "filter by name, path or note", short: "filter"},
-	{key: "S", long: "manage statuses (add, rename, reorder, delete)", short: "statuses"},
-	{key: "x", long: "forget the selected space", short: "forget space"},
-	{key: "r", long: "refresh", short: "refresh"},
-	{key: "q", long: "quit", short: "quit"},
+	{actions: []string{"layout"}, long: "cycle the view: list → table → kanban", wide: true},
+	{actions: []string{"sort"}, long: "table only: sort by status, name, or when it last changed", wide: true},
+	{actions: []string{"detail"}, long: "list: show or hide the detail pane · elsewhere: detail modal", wide: true},
+	{actions: []string{"down", "up"}, long: "move", short: "move"},
+	{actions: []string{"top", "bottom"}, long: "first row · last row", short: "first · last"},
+	{actions: []string{"open-pr"}, long: "open the pull request in a browser", short: "open the PR"},
+	{actions: []string{"send-failure"}, long: "send the failing check, with the end of its log, to that space's agent", short: "send the failure"},
+	{actions: []string{"left", "right"}, long: "kanban: move between columns · list: collapse / expand", short: "fold · unfold"},
+	{actions: []string{"grab"}, long: "grab a row, then move it — leaving its group changes its status", short: "grab and move"},
+	{actions: []string{"jump"}, long: "jump to space (reopens archived ones)", short: "jump to space"},
+	{actions: []string{"set-status"}, long: "send to that status, numbered along the bottom", short: "set status"},
+	{actions: []string{"status-picker"}, long: "status picker", short: "status picker"},
+	{actions: []string{"note"}, long: "edit note — who or what you are waiting on", short: "edit note"},
+	{actions: []string{"rename"}, long: "rename the space — renames the Herdr workspace too", short: "rename space"},
+	{actions: []string{"message"}, long: "type a message into that space's agent, then go there to send it", short: "message agent"},
+	{actions: []string{"fold"}, long: "collapse / expand group", short: "fold group"},
+	{actions: []string{"status-only"}, long: "show only the status under the cursor — F or esc for all", short: "this status only"},
+	{actions: []string{"reorder-spaces"}, long: "reorder Herdr's own Spaces sidebar to match this board", short: "reorder Spaces"},
+	{actions: []string{"archived"}, long: "show or hide archived spaces", short: "archived"},
+	{actions: []string{"filter"}, long: "filter by name, path or note", short: "filter"},
+	{actions: []string{"statuses"}, long: "manage statuses (add, rename, reorder, delete)", short: "statuses"},
+	{actions: []string{"forget"}, long: "forget the selected space", short: "forget space"},
+	{actions: []string{"refresh"}, long: "refresh", short: "refresh"},
+	{actions: []string{"quit"}, long: "quit", short: "quit"},
+}
+
+// helpKeys is a row's key column: each action's first current key. False
+// when the screen in front has none of them (archived, on the computed board).
+func (m *Model) helpKeys(r helpRow) (string, bool) {
+	var parts []string
+	for _, name := range r.actions {
+		if k := m.hintKey(name); k != "?" {
+			parts = append(parts, keys.Display([]string{k}))
+		}
+	}
+	return strings.Join(parts, " / "), len(parts) > 0
 }
 
 // helpKeyColumn is how much room the keys get. "gg / G" is the longest, and in
@@ -606,11 +624,15 @@ func (m *Model) viewHelp() string {
 	if m.pipelineOn() {
 		lines = append(lines,
 			dimStyle.Render(indent+truncate("Columns come from the run, Jenkins and git; they are not moved by hand.", room+keyCol)),
-			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
-			indent+keyStyle.Render(pad("A", keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
+			indent+keyStyle.Render(pad(m.hintKey("accept"), keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
+			indent+keyStyle.Render(pad(m.hintKey("archive"), keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
 			"")
 	}
 	for _, r := range helpRows {
+		key, ok := m.helpKeys(r)
+		if !ok {
+			continue
+		}
 		text := r.long
 		if narrow {
 			// A key that does nothing here is not worth a row.
@@ -619,7 +641,7 @@ func (m *Model) viewHelp() string {
 			}
 			text = r.short
 		}
-		lines = append(lines, indent+keyStyle.Render(pad(r.key, keyCol))+
+		lines = append(lines, indent+keyStyle.Render(pad(key, keyCol))+
 			dimStyle.Render(truncate(text, room)))
 	}
 

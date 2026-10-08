@@ -227,6 +227,8 @@ type Model struct {
 	archiveView    bool
 	archiveIdx     int
 	spinner        look.Spinner
+
+	keys keyMaps // config.toml's [keys] applied; zero means the defaults
 }
 
 // New builds the initial model.

@@ -26,9 +26,13 @@ const pipelineEvery = 60 * time.Second
 // SetProblems shows configuration complaints (an unknown rule name) on the
 // status line, so a typo in config.toml is not silently ignored.
 func (m *Model) SetProblems(problems []string) {
-	if len(problems) > 0 {
-		m.status = strings.Join(problems, " · ")
+	if len(problems) == 0 {
+		return
 	}
+	if m.status != "" {
+		problems = append([]string{m.status}, problems...)
+	}
+	m.status = strings.Join(problems, " · ")
 }
 
 // SetPipeline turns pipeline mode on with src as its source.
@@ -366,7 +370,9 @@ func (m *Model) viewArchive() string {
 			b.WriteString("     " + dimStyle.Render(truncate(facts, width-2)) + "\n")
 		}
 	}
-	b.WriteString("\n" + dimStyle.Render(" j/k move · o Jira · p pull request · u back to the board · / search · A or esc back"))
+	k := m.hintKey
+	b.WriteString("\n" + dimStyle.Render(" "+k("down")+"/"+k("up")+" move · "+k("open-issue")+" tracker · "+k("open-pull-request")+
+		" pull request · "+k("restore")+" back to the board · "+k("filter")+" search · "+k("archive")+" back"))
 	return lipgloss.NewStyle().MaxHeight(max(m.height, 1)).Render(b.String())
 }
 

@@ -30,7 +30,7 @@ import (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "herdr-board:", err)
+		fmt.Fprintln(os.Stderr, "ekanban:", err)
 		os.Exit(1)
 	}
 }
@@ -43,6 +43,10 @@ func run(args []string) error {
 		switch args[0] {
 		case "config":
 			return showConfig(args[1:])
+
+		case "keys":
+			showKeys()
+			return nil
 
 		case "version", "--version", "-v":
 			fmt.Println(version.Version)
@@ -135,7 +139,7 @@ func run(args []string) error {
 			// entries and neither tells the process which one opened it.
 			sidebar = true
 		default:
-			return fmt.Errorf("unknown command %q (want: sync, sidebar, watch, startup, config, version, prune)", args[0])
+			return fmt.Errorf("unknown command %q (want: sync, sidebar, watch, startup, config, keys, version, prune)", args[0])
 		}
 	}
 
@@ -149,6 +153,8 @@ func run(args []string) error {
 	}
 	settings := config.Load()
 	model.SetIcons(settings.Icons)
+	model.SetKeys(settings.Keys)
+	model.SetProblems(unknownKeys(settings.Keys))
 	cwd, _ := os.Getwd()
 	if cwd != "" {
 		model.SetScope(cwd)

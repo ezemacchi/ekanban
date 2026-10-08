@@ -42,6 +42,8 @@ type Config struct {
 	Pipeline PipelineConfig `toml:"pipeline"`
 	// Ticket is how the ticket board shows a run.
 	Ticket TicketConfig `toml:"ticket"`
+	// Keys binds keys to actions by name: accept = "y" or accept = ["y", "Y"].
+	Keys map[string]any `toml:"keys"`
 }
 
 // TicketConfig is the [ticket] table.
@@ -90,6 +92,7 @@ type Settings struct {
 	IssueURL      string
 	Pipeline      PipelineConfig
 	Ticket        TicketConfig
+	Keys          map[string][]string // action name -> keys
 	// Path is where the file was read from, whether or not it existed.
 	Path string
 	// Problems are complaints about the file's contents. A bad value falls back
@@ -166,10 +169,34 @@ func Load() Settings {
 	s.IssueURL = c.IssueURL
 	s.Pipeline = c.Pipeline
 	s.Ticket = c.Ticket
+	s.Keys, s.Problems = bindings(c.Keys, s.Problems)
 	if len(s.Pipeline.Targets) == 0 {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
 	return s
+}
+
+// bindings reads [keys]: each action takes one key or a list of them.
+func bindings(raw map[string]any, problems []string) (map[string][]string, []string) {
+	out := map[string][]string{}
+	for name, v := range raw {
+		switch v := v.(type) {
+		case string:
+			out[name] = []string{v}
+		case []any:
+			for _, k := range v {
+				s, ok := k.(string)
+				if !ok || s == "" {
+					problems = append(problems, fmt.Sprintf("keys.%s: every key must be a non-empty string", name))
+					continue
+				}
+				out[name] = append(out[name], s)
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("keys.%s: use a key in quotes or a list of them", name))
+		}
+	}
+	return out, problems
 }
 
 // Example is the commented template written by `ekanban config --init`.
@@ -229,6 +256,13 @@ icons = false
 # [[ticket.column]]
 # id = "waiting"
 # label = "Waiting on you"
+
+# Keys, by action name: one key or a list. A rebound action stops answering
+# its old key. The help screen (?) shows the current keys and the names are
+# listed by ` + "`ekanban keys`" + `. gg, gp, gf and 1-9 are fixed.
+# [keys]
+# accept = "y"
+# archive = ["A", "z"]
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

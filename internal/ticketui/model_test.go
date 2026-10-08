@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ezemacchi/ekanban/internal/columns"
+	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
@@ -52,6 +53,20 @@ func TestConfiguredColumnOrderCarriesTheCards(t *testing.T) {
 	}
 	if out := m.View(); !strings.Contains(out, "Finished (1)") {
 		t.Fatalf("renamed column missing:\n%s", out)
+	}
+}
+
+// [keys] right = "n": n moves right, l no longer does.
+func TestReboundColumnKey(t *testing.T) {
+	m := boardWith(ticket.Pending, ticket.Done)
+	m.keys, _ = keys.New(Actions, map[string][]string{"right": {"n"}})
+	m.key("l")
+	if m.col != 0 {
+		t.Fatalf("l still moves after right moved to n, col %d", m.col)
+	}
+	m.key("n")
+	if m.col != 3 {
+		t.Fatalf("n did not move right, col %d", m.col)
 	}
 }
 
