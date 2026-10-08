@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ezemacchi/herdr-phin-board/internal/links"
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
@@ -34,6 +35,7 @@ func (m *Model) SetProblems(problems []string) {
 func (m *Model) SetPipeline(src *pipeline.Source) {
 	m.pipe = src
 	m.pipeInfo = map[string]pipeline.Info{}
+	m.spinner = look.NewSpinner()
 	m.manualStatuses = m.board.Statuses
 	m.manualDefault = m.board.Default
 	m.board.Statuses = append([]store.Status(nil), pipeline.Statuses...)
@@ -69,7 +71,7 @@ func (m *Model) loadPipeline(force bool) tea.Cmd {
 	}
 	m.pipeLoading = true
 	src, client := m.pipe, m.client
-	return func() tea.Msg {
+	return tea.Batch(m.spinner.Start(), func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		if refresh {
@@ -85,7 +87,13 @@ func (m *Model) loadPipeline(force bool) tea.Cmd {
 			at = time.Now()
 		}
 		return pipelineMsg{infos: infos, at: at}
-	}
+	})
+}
+
+// pipelineBusy is when the spinner turns: a load is running, or nothing has
+// been read yet.
+func (m *Model) pipelineBusy() bool {
+	return m.pipelineOn() && (m.pipeLoading || m.pipeAt.IsZero())
 }
 
 func (m *Model) applyPipeline(msg pipelineMsg) {
@@ -130,17 +138,17 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 func (m *Model) pipelineLines(sp *space, width int) []string {
 	info, ok := m.pipeInfo[sp.Key]
 	if !ok {
-		return []string{dimStyle.Render(truncate("calculando…", width))}
+		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" calculando", width))}
 	}
 	var lines []string
 	if info.Waiting {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph("\uf059", "te está preguntando algo"), width)))
+		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "te está preguntando algo"), width)))
 	}
 	if info.Lost {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph("\uf071", "se perdieron agentes"), width)))
+		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Warning, "se perdieron agentes"), width)))
 	}
 	if info.Phase != "" && info.Stage == pipeline.InProgress {
-		lines = append(lines, dimStyle.Render(truncate(m.glyph("\uf0c0", info.Phase), width)))
+		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Team, info.Phase), width)))
 	}
 	if info.PR > 0 {
 		pr := fmt.Sprintf("PR #%d", info.PR)
@@ -159,13 +167,13 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 		if info.MergedTo != "" {
 			pr += " · en " + info.MergedTo
 		}
-		lines = append(lines, style.Render(truncate(m.glyph("\uf407", pr), width)))
+		lines = append(lines, style.Render(truncate(m.glyph(look.PullReq, pr), width)))
 	}
 	if info.Deployed != "" {
-		lines = append(lines, prPassStyle.Render(truncate(m.glyph("\uf135", "publicado en "+info.Deployed), width)))
+		lines = append(lines, prPassStyle.Render(truncate(m.glyph(look.Rocket, "publicado en "+info.Deployed), width)))
 	}
 	if info.Unknown != "" {
-		lines = append(lines, dimStyle.Render(truncate(m.glyph("\uf1eb", info.Unknown), width)))
+		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Wifi, info.Unknown), width)))
 	}
 	return lines
 }
@@ -327,7 +335,7 @@ func openURLCmd(url string) tea.Cmd {
 func (m *Model) viewArchive() string {
 	items := m.archive()
 	var b strings.Builder
-	title := m.glyph("\uf187", "Archivo")
+	title := m.glyph(look.Archive, "Archivo")
 	head := " " + titleStyle.Render(title) + dimStyle.Render(fmt.Sprintf("  %d aceptados", len(items)))
 	if m.filter != "" {
 		head += dimStyle.Render("  /" + m.filter)

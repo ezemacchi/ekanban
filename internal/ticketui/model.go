@@ -4,9 +4,7 @@ package ticketui
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 	"github.com/ezemacchi/herdr-phin-board/internal/nav"
 	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
 )
@@ -21,14 +20,14 @@ import (
 const refreshEvery = 5 * time.Second
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true)
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	titleStyle  = look.Title
+	dimStyle    = look.Dim
+	cursorStyle = look.Cursor
+	errStyle    = look.Err
+	keyStyle    = look.Key
 	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
-	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 	waitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	doneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 )
 
 // Model is the bubbletea model for one ticket.
@@ -36,7 +35,7 @@ type Model struct {
 	client   *herdr.Client
 	worktree string
 	specRoot string
-	icons    glyphs
+	icons    look.Icons
 
 	run    *ticket.Run
 	err    error
@@ -46,13 +45,14 @@ type Model struct {
 	chord    string
 	width    int
 	height   int
+	spinner  look.Spinner
 }
 
 // New builds the board for the run in worktree. specRoot is the
 // specifications clone prototypes are found in; icons turns on Nerd Font
 // glyphs.
 func New(client *herdr.Client, worktree, specRoot string, icons bool) *Model {
-	return &Model{client: client, worktree: worktree, specRoot: specRoot, icons: glyphs{on: icons}}
+	return &Model{client: client, worktree: worktree, specRoot: specRoot, icons: look.Icons{On: icons}, spinner: look.NewSpinner()}
 }
 
 type loadedMsg struct {
@@ -88,7 +88,7 @@ func tick() tea.Cmd {
 }
 
 // Init loads the run and starts the refresh clock.
-func (m *Model) Init() tea.Cmd { return tea.Batch(m.load, tick()) }
+func (m *Model) Init() tea.Cmd { return tea.Batch(m.load, tick(), m.spinner.Start()) }
 
 // Update handles keys, refreshes and resizes.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,6 +100,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp()
 	case tickMsg:
 		return m, tea.Batch(m.load, tick())
+	case look.SpinMsg:
+		return m, m.spinner.Update(msg, m.run == nil && m.err == nil)
 	case tea.KeyMsg:
 		return m, m.key(msg.String())
 	}
@@ -137,7 +139,7 @@ func (m *Model) key(k string) tea.Cmd {
 		if m.run != nil {
 			url := m.run.JiraURL
 			m.status = "abriendo " + url
-			return func() tea.Msg { _ = openURL(url); return nil }
+			return func() tea.Msg { _ = look.OpenURL(url); return nil }
 		}
 	case "p":
 		if m.run == nil {
@@ -149,7 +151,7 @@ func (m *Model) key(k string) tea.Cmd {
 		}
 		page := m.run.Prototype
 		m.status = "abriendo el prototipo"
-		return func() tea.Msg { _ = openURL(page); return nil }
+		return func() tea.Msg { _ = look.OpenURL(page); return nil }
 	case "enter":
 		return m.focusSelected()
 	}
@@ -214,7 +216,7 @@ func (m *Model) View() string {
 		return errStyle.Render("No encuentro una corrida en "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render("Busco .runs/<KEY>/STATE.md · q salir")
 	}
 	if m.run == nil {
-		return dimStyle.Render("cargando…")
+		return dimStyle.Render(m.spinner.Frame() + " cargando")
 	}
 	r := m.run
 	ic := m.icons
@@ -225,22 +227,22 @@ func (m *Model) View() string {
 		team = "equipo desconocido"
 	}
 	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(r.Key), dimStyle.Render(fmt.Sprintf("%s · %s · %s",
-		team, ic.g(glyphTarget, orDash(r.Target)), ic.g(glyphBranch, orDash(r.Branch)))))
-	fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphJira, r.JiraURL)))
+		team, ic.With(look.Target, orDash(r.Target)), ic.With(look.Branch, orDash(r.Branch)))))
+	fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Jira, r.JiraURL)))
 	switch {
 	case r.Prototype != "":
-		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphPrototype, "Prototipo "+r.Spec+": "+filepath.Base(r.Prototype)+"  (p)")))
+		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Brush, "Prototipo "+r.Spec+": "+filepath.Base(r.Prototype)+"  (p)")))
 	case r.Spec != "":
-		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphPrototype, "Sin prototipo para "+r.Spec)))
+		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Brush, "Sin prototipo para "+r.Spec)))
 	}
 	for _, l := range r.Objective {
-		fmt.Fprintf(&b, "%s\n", truncate(l, width))
+		fmt.Fprintf(&b, "%s\n", look.Truncate(l, width))
 	}
 	orch := "sin orquestador abierto"
 	if r.OrchestratorStatus != "" {
 		orch = "orquestador: " + statusWord(r.OrchestratorStatus)
 	}
-	fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(ic.g(glyphOrch, orch)))
+	fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(ic.With(look.Sitemap, orch)))
 
 	colWidth := (width - 3) / len(ticket.Columns)
 	if colWidth < 14 {
@@ -250,9 +252,9 @@ func (m *Model) View() string {
 	for i, c := range ticket.Columns {
 		var cb strings.Builder
 		cards := m.cardsIn(c.Col)
-		cb.WriteString(headStyle.Render(ic.g(columnGlyph[c.Col], fmt.Sprintf("%s (%d)", c.Label, len(cards)))) + "\n")
+		cb.WriteString(headStyle.Render(ic.With(columnGlyph[c.Col], fmt.Sprintf("%s (%d)", c.Label, len(cards)))) + "\n")
 		for j, card := range cards {
-			line := ic.g(roleGlyph[card.Role.ID], card.Role.Label)
+			line := ic.With(roleGlyph[card.Role.ID], card.Role.Label)
 			style := lipgloss.NewStyle()
 			switch c.Col {
 			case ticket.Waiting:
@@ -265,13 +267,13 @@ func (m *Model) View() string {
 				prefix = cursorStyle.Render("❯ ")
 				style = cursorStyle
 			}
-			cb.WriteString(prefix + style.Render(truncate(line, colWidth-2)) + "\n")
+			cb.WriteString(prefix + style.Render(look.Truncate(line, colWidth-2)) + "\n")
 			if card.Note != "" {
 				note, style := card.Note, dimStyle
 				if card.Stuck {
-					note, style = ic.g(glyphStuck, note), waitStyle
+					note, style = ic.With(look.Warning, note), waitStyle
 				}
-				cb.WriteString("    " + style.Render(truncate(note, colWidth-4)) + "\n")
+				cb.WriteString("    " + style.Render(look.Truncate(note, colWidth-4)) + "\n")
 			}
 		}
 		cols[i] = lipgloss.NewStyle().Width(colWidth).Render(cb.String())
@@ -280,13 +282,13 @@ func (m *Model) View() string {
 	b.WriteString("\n")
 
 	if len(r.CurrentStep) > 0 {
-		b.WriteString(headStyle.Render(ic.g(glyphNow, "Ahora")) + "\n")
+		b.WriteString(headStyle.Render(ic.With(look.Play, "Ahora")) + "\n")
 		for _, l := range r.CurrentStep {
-			b.WriteString(truncate(l, width) + "\n")
+			b.WriteString(look.Truncate(l, width) + "\n")
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(headStyle.Render(ic.g(glyphQuestion, fmt.Sprintf("Preguntas abiertas (%d)", len(r.Questions)))) + "\n")
+	b.WriteString(headStyle.Render(ic.With(look.Question, fmt.Sprintf("Preguntas abiertas (%d)", len(r.Questions)))) + "\n")
 	if len(r.Questions) == 0 {
 		b.WriteString(dimStyle.Render("ninguna en STATE.md") + "\n")
 	}
@@ -296,10 +298,10 @@ func (m *Model) View() string {
 			b.WriteString(dimStyle.Render(fmt.Sprintf("y %d más en STATE.md", len(r.Questions)-limit)) + "\n")
 			break
 		}
-		b.WriteString("- " + truncate(q, width-2) + "\n")
+		b.WriteString("- " + look.Truncate(q, width-2) + "\n")
 	}
 	if r.Landed {
-		b.WriteString("\n" + doneStyle.Render(ic.g(glyphLanded, "Landed: el pull request está listo para que lo revisen")) + "\n")
+		b.WriteString("\n" + doneStyle.Render(ic.With(look.Rocket, "Landed: el pull request está listo para que lo revisen")) + "\n")
 	}
 
 	b.WriteString("\n")
@@ -331,25 +333,4 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
-}
-
-func truncate(s string, w int) string {
-	if w <= 1 || lipgloss.Width(s) <= w {
-		return s
-	}
-	r := []rune(s)
-	for len(r) > 0 && lipgloss.Width(string(r)) > w-1 {
-		r = r[:len(r)-1]
-	}
-	return string(r) + "…"
-}
-
-var openURL = func(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	}
-	return exec.Command("xdg-open", url).Start()
 }

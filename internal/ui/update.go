@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 	"github.com/ezemacchi/herdr-phin-board/internal/nav"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
@@ -32,6 +33,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pipelineMsg:
 		m.applyPipeline(msg)
 		return m, nil
+
+	case look.SpinMsg:
+		return m, m.spinner.Update(msg, m.pipelineBusy())
 
 	case branchesMsg:
 		m.branchLoading = false

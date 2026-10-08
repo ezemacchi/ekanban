@@ -7,17 +7,19 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 )
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true)
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	titleStyle    = look.Title
+	dimStyle      = look.Dim
+	cursorStyle   = look.Cursor
+	errStyle      = look.Err
+	keyStyle      = look.Key
 	noteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
 	labelStyle    = lipgloss.NewStyle()
 	archivedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	errStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	keyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 	focusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 	grabStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true)
 	branchStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
@@ -202,9 +204,12 @@ func (m *Model) viewFooter() string {
 		if m.status != "" {
 			hint = m.status
 		}
-		state := "Jenkins y git: cargando…"
+		state := m.spinner.Frame() + " leyendo Jenkins y git"
 		if !m.pipeAt.IsZero() {
 			state = "Jenkins y git leídos a las " + m.pipeAt.Local().Format("15:04")
+			if m.pipeLoading {
+				state += " " + m.spinner.Frame()
+			}
 		}
 		return dimStyle.Render(" "+truncate(state, m.width-2)) + "\n" + dimStyle.Render(" "+truncate(hint, m.width-2))
 	}
@@ -664,19 +669,7 @@ func pad(s string, n int) string {
 	return s
 }
 
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= n {
-		return s
-	}
-	r := []rune(s)
-	if n <= 1 {
-		return string(r[:1])
-	}
-	return string(r[:min(len(r), n-1)]) + "…"
-}
+var truncate = look.Truncate
 
 // truncateStyled clips an already-styled string without cutting through an
 // escape sequence, which plain slicing would do.

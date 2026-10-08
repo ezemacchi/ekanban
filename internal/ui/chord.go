@@ -2,10 +2,10 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
-	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 )
 
 // g is a chord prefix, vim style: gg jumps to the top, gp opens the pull
@@ -14,15 +14,7 @@ import (
 
 // openURL launches a URL in the user's browser. A variable so tests can
 // observe it without opening anything.
-var openURL = func(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	}
-	return exec.Command("xdg-open", url).Start()
-}
+var openURL = look.OpenURL
 
 // chordModes are the modes where g means a chord rather than a letter.
 func (m *Model) chordMode() bool {

@@ -15,6 +15,7 @@ import (
 	"github.com/ezemacchi/herdr-phin-board/internal/alert"
 	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
@@ -222,6 +223,7 @@ type Model struct {
 	manualDefault  string
 	archiveView    bool
 	archiveIdx     int
+	spinner        look.Spinner
 }
 
 // New builds the initial model.

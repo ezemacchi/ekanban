@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ezemacchi/herdr-phin-board/internal/links"
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 )
 
 // The detail view exists because a row can only show a truncated note. In the
@@ -112,16 +113,16 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 
 	// The note is the reason this view exists, so it gets the room it needs.
 	if sp.Note != "" {
-		noteWidth := width - lipgloss.Width(m.glyph(noteGlyph, ""))
+		noteWidth := width - lipgloss.Width(m.glyph(look.Pencil, ""))
 		for i, line := range wrap(sp.Note, noteWidth) {
-			lead := m.glyph(noteGlyph, "")
+			lead := m.glyph(look.Pencil, "")
 			if i > 0 {
 				lead = strings.Repeat(" ", lipgloss.Width(lead))
 			}
 			lines = append(lines, plain(noteStyle.Render(lead+line))...)
 		}
 	} else {
-		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(noteGlyph, "no note — press n to add one"), width)))...)
+		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Pencil, "no note — press n to add one"), width)))...)
 	}
 	lines = append(lines, plain("")...)
 
@@ -159,13 +160,13 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 		lines = append(lines, plain("")...)
 	}
 
-	for _, line := range wrap(m.glyph(folderGlyph, abbreviate(sp.Key)), width) {
+	for _, line := range wrap(m.glyph(look.Folder, abbreviate(sp.Key)), width) {
 		lines = append(lines, plain(dimStyle.Render(line))...)
 	}
 	if branch := m.branchFor(sp.Key); branch != "" {
 		mark := "⎇ " + branch
 		if m.icons {
-			mark = worktreeGlyph + " " + branch
+			mark = look.Branch + " " + branch
 		}
 		lines = append(lines, plain(branchStyle.Render(truncate(mark, width)))...)
 	}
@@ -180,10 +181,10 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 			where += " · " + sp.AgentStatus
 		}
 	}
-	lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(agentGlyphIcon, where), width)))...)
+	lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Monitor, where), width)))...)
 
 	if !sp.UpdatedAt.IsZero() {
-		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(clockGlyph, "changed "+humanAge(sp.UpdatedAt)), width)))...)
+		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Clock, "changed "+humanAge(sp.UpdatedAt)), width)))...)
 	}
 	return lines
 }
@@ -252,9 +253,9 @@ func (m *Model) modalTitle(sp *space, width int) string {
 	if !m.icons {
 		return titleStyle.Render(name)
 	}
-	edge := lipgloss.NewStyle().Foreground(pillColor)
-	fill := lipgloss.NewStyle().Background(pillColor).Foreground(lipgloss.Color("231")).Bold(true)
-	return edge.Render(pillLeft) + fill.Render(" "+name+" ") + edge.Render(pillRight)
+	edge := lipgloss.NewStyle().Foreground(look.PillColor)
+	fill := lipgloss.NewStyle().Background(look.PillColor).Foreground(lipgloss.Color("231")).Bold(true)
+	return edge.Render(look.PillLeft) + fill.Render(" "+name+" ") + edge.Render(look.PillRight)
 }
 
 // overlay draws box over base with its top-left corner at x, y, keeping the
