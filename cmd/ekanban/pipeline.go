@@ -36,7 +36,7 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 	if why := src.Offline(); why != "" {
 		fmt.Fprintln(os.Stderr, why)
 	}
-	agents, _ := client.Agents()
+	live, _ := ticket.ReadLive(client)
 
 	cmd := exec.CommandContext(ctx, "git", "-C", repo, "worktree", "list", "--porcelain")
 	gh.HideWindow(cmd)
@@ -50,7 +50,7 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 		if !ok {
 			continue
 		}
-		info := src.Classify(ctx, path, agents, 0)
+		info := src.Classify(ctx, path, live, 0)
 		if err := enc.Encode(map[string]any{"worktree": path, "info": info}); err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	ci, ciProblems := pipeline.NewCI(pipeline.CIConfig{Kind: cfg.Pipeline.CI.Kind, URL: cfg.Pipeline.CI.URL})
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
-	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Columns: cols}
+	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Lead: cfg.Lead, Columns: cols}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
@@ -84,17 +84,25 @@ func ticketSettings(cfg config.Settings) ticketui.Settings {
 	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
 	problems = append(problems, colProblems...)
 	return ticketui.Settings{
-		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams},
+		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Lead: cfg.Lead},
 		Columns:  cols,
-		Keys:     cfg.Keys,
+		Keys:     cfg.KeysFor("ticket"),
 		Icons:    cfg.Icons,
-		Problems: append(problems, unknownKeys(cfg.Keys)...),
+		Problems: append(problems, unknownKeys(cfg)...),
 	}
 }
 
-// unknownKeys reports [keys] names that no screen has.
-func unknownKeys(bindings map[string][]string) []string {
-	return keys.Unknown(bindings, ui.BoardActions, ui.PipelineActions, ui.ArchiveActions, ticketui.Actions)
+// unknownKeys reports [keys] names that no screen has, and [keys.board] or
+// [keys.ticket] names that board does not have.
+func unknownKeys(cfg config.Settings) []string {
+	out := keys.Unknown(cfg.Keys, ui.BoardActions, ui.PipelineActions, ui.ArchiveActions, ticketui.Actions)
+	for _, p := range keys.Unknown(cfg.ScreenKeys["board"], ui.BoardActions, ui.PipelineActions, ui.ArchiveActions) {
+		out = append(out, strings.Replace(p, "[keys]", "[keys.board]", 1))
+	}
+	for _, p := range keys.Unknown(cfg.ScreenKeys["ticket"], ticketui.Actions) {
+		out = append(out, strings.Replace(p, "[keys]", "[keys.ticket]", 1))
+	}
+	return out
 }
 
 // showKeys lists every action by screen: what [keys] in config.toml can bind.
@@ -102,15 +110,16 @@ func showKeys() {
 	cfg := config.Load()
 	screens := []struct {
 		name    string
+		screen  string // the [keys.<screen>] table that applies
 		actions []keys.Action
 	}{
-		{"board (outside a repository)", ui.BoardActions},
-		{"board (in a repository: computed columns)", ui.PipelineActions},
-		{"archive of accepted tickets", ui.ArchiveActions},
-		{"ticket board", ticketui.Actions},
+		{"board (outside a repository)", "board", ui.BoardActions},
+		{"board (in a repository: computed columns)", "board", ui.PipelineActions},
+		{"archive of accepted tickets", "board", ui.ArchiveActions},
+		{"ticket board", "ticket", ticketui.Actions},
 	}
 	for _, s := range screens {
-		km, _ := keys.New(s.actions, cfg.Keys)
+		km, _ := keys.New(s.actions, cfg.KeysFor(s.screen))
 		fmt.Println(s.name)
 		for _, a := range km.Actions() {
 			fixed := ""
@@ -121,7 +130,7 @@ func showKeys() {
 		}
 		fmt.Println()
 	}
-	for _, p := range unknownKeys(cfg.Keys) {
+	for _, p := range unknownKeys(cfg) {
 		fmt.Println(p)
 	}
 }

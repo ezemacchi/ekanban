@@ -31,8 +31,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spacesChanged(), m.loadPipeline(false))
 
 	case pipelineMsg:
-		m.applyPipeline(msg)
-		return m, nil
+		return m, m.applyPipeline(msg)
 
 	case look.SpinMsg:
 		return m, m.spinner.Update(msg, m.pipelineBusy())
@@ -68,11 +67,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "sent to " + msg.label
 		return m, m.focusAgentAndQuit(msg.pane)
 
+	case leadMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		m.status = msg.text
+		return m, m.loadPipeline(false)
+
 	case eventMsg:
-		// Any workspace change invalidates the list; refetch and keep listening.
-		return m, tea.Batch(m.refresh(), waitForEvent(m.events))
+		return m.onEvent(msg)
+
+	case settledMsg:
+		m.settling = false
+		return m, m.loadPipeline(false)
 
 	case eventsDoneMsg:
+		if msg.ch == m.events {
+			// Dropped; the next pipeline load subscribes again.
+			m.events, m.subPanes = nil, ""
+		}
 		return m, nil
 
 	case tokensSyncedMsg:

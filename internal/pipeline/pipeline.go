@@ -28,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/ezemacchi/ekanban/internal/columns"
-	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/team"
 	"github.com/ezemacchi/ekanban/internal/ticket"
@@ -90,6 +89,7 @@ type Settings struct {
 	Targets   []Target
 	Rules     []Rule      // nil: DefaultRules
 	Teams     []team.Team // nil: the built-in teams
+	Lead      team.Lead   // config.toml's [lead], over each team's
 	Columns   columns.Set // nil: DefaultColumns
 }
 
@@ -184,12 +184,17 @@ func (s *Source) Refresh(ctx context.Context) {
 	s.published = pubs
 }
 
+// Run reads worktree's run with the board's teams and lead.
+func (s *Source) Run(worktree string, live ticket.Live) (*ticket.Run, error) {
+	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Lead: s.set.Lead}, live)
+}
+
 // Classify places one worktree. knownPR is a pull request number remembered
 // from an earlier look, for when Jenkins has dropped the job of a closed one.
-func (s *Source) Classify(ctx context.Context, worktree string, agents []herdr.Agent, knownPR int) (info Info) {
+func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live, knownPR int) (info Info) {
 	branch := ticket.ReadBranch(worktree)
 	branchKey := s.keyIn(branch)
-	run, err := ticket.Load(worktree, ticket.Options{Teams: s.set.Teams}, agents, nil)
+	run, err := s.Run(worktree, live)
 	// Only a run named by a ticket key, and the branch's key when it has one,
 	// is this ticket's run; checkouts also hold older runs of other work.
 	key := s.set.TicketKey
@@ -285,11 +290,11 @@ func notStarted(run *ticket.Run) bool {
 			return false
 		}
 	}
-	return run.OrchestratorStatus == ""
+	return run.LeadStatus == ""
 }
 
 func describeRun(info *Info, run *ticket.Run) {
-	if run.OrchestratorStatus == "blocked" {
+	if run.LeadStatus == "blocked" {
 		info.Waiting = true
 	}
 	var current *ticket.Card

@@ -3,7 +3,9 @@
 package ticketui
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,12 +16,21 @@ import (
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/keys"
+	"github.com/ezemacchi/ekanban/internal/lead"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
-const refreshEvery = 5 * time.Second
+// Herdr events (an agent appearing, changing status, closing) reload the board
+// at once. The run's files raise no event, so every checkEvery the run folder
+// is looked at and reread when it changed, and everything is reread every
+// fullEvery regardless.
+const (
+	checkEvery = 3 * time.Second
+	fullEvery  = 30 * time.Second
+	settle     = 250 * time.Millisecond // events come in bursts
+)
 
 var (
 	titleStyle  = look.Title
@@ -50,6 +61,17 @@ type Model struct {
 	width    int
 	height   int
 	spinner  look.Spinner
+
+	loading  bool      // a load is running
+	again    bool      // something changed during it: load once more
+	settling bool      // an event is waiting out settle
+	loadedAt time.Time // the last load finished
+	stamp    string    // the run folder as last read, see runStamp
+	opening  bool      // the lead is being opened
+
+	events    chan herdr.Event
+	subCancel context.CancelFunc
+	subPanes  string // the agent panes the subscription covers
 }
 
 // Actions are the ticket board's keys. The first key of each is what key()
@@ -62,7 +84,8 @@ var Actions = []keys.Action{
 	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
 	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
 	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
-	{Name: "open-issue", Keys: []string{"o"}, Help: "open the ticket in the tracker"},
+	{Name: "lead", Keys: []string{"o"}, Help: "go to the orchestrator (the team's lead), or open one"},
+	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
 	{Name: "quit", Keys: []string{"q"}, Help: "quit"},
@@ -105,39 +128,99 @@ func (m *Model) columnAt(i int) ticket.Column {
 }
 
 type loadedMsg struct {
-	run *ticket.Run
-	err error
+	run   *ticket.Run
+	err   error
+	panes []string // agent panes, for the status subscription
+	stamp string
 }
 type tickMsg struct{}
+type settledMsg struct{}
+type eventMsg struct {
+	ch chan herdr.Event
+	ok bool
+}
+type leadMsg struct {
+	text string
+	err  error
+}
 
 func (m *Model) load() tea.Msg {
-	agents, err := m.client.Agents()
+	live, err := ticket.ReadLive(m.client)
 	if err != nil {
 		return loadedMsg{err: err}
 	}
-	labels := map[string]string{}
-	seen := map[string]bool{}
-	for _, a := range agents {
-		if seen[a.WorkspaceID] {
-			continue
-		}
-		seen[a.WorkspaceID] = true
-		if tabs, err := m.client.Tabs(a.WorkspaceID); err == nil {
-			for _, t := range tabs {
-				labels[t.ID] = t.Label
-			}
+	run, err := ticket.Load(m.worktree, m.opts, live)
+	msg := loadedMsg{run: run, err: err, panes: live.AgentPanes()}
+	if run != nil {
+		msg.stamp = runStamp(run.Dir)
+	}
+	return msg
+}
+
+// reload loads now, or right after the load already running.
+func (m *Model) reload() tea.Cmd {
+	if m.loading {
+		m.again = true
+		return nil
+	}
+	m.loading = true
+	return m.load
+}
+
+// runStamp changes whenever a file of the run folder is added, removed or
+// written.
+func runStamp(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var latest time.Time
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.ModTime().After(latest) {
+			latest = info.ModTime()
 		}
 	}
-	run, err := ticket.Load(m.worktree, m.opts, agents, labels)
-	return loadedMsg{run: run, err: err}
+	return fmt.Sprintf("%d@%d", len(entries), latest.UnixNano())
 }
 
 func tick() tea.Cmd {
-	return tea.Tick(refreshEvery, func(time.Time) tea.Msg { return tickMsg{} })
+	return tea.Tick(checkEvery, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// subscribe listens to Herdr for agents coming, going and changing status.
+// Status events are per pane, so a new set of agent panes subscribes again.
+func (m *Model) subscribe(panes []string) tea.Cmd {
+	key := strings.Join(panes, ",")
+	if m.events != nil && key == m.subPanes {
+		return nil
+	}
+	if m.subCancel != nil {
+		m.subCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan herdr.Event, 64)
+	m.events, m.subCancel, m.subPanes = ch, cancel, key
+	client := m.client
+	stream := func() tea.Msg {
+		_ = client.SubscribeTo(ctx, herdr.AgentSubscriptions(panes), ch)
+		close(ch)
+		return nil
+	}
+	return tea.Batch(stream, waitFor(ch))
+}
+
+func waitFor(ch chan herdr.Event) tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-ch
+		return eventMsg{ch: ch, ok: ok}
+	}
 }
 
 // Init loads the run and starts the refresh clock.
-func (m *Model) Init() tea.Cmd { return tea.Batch(m.load, tick(), m.spinner.Start()) }
+func (m *Model) Init() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.load, tick(), m.spinner.Start())
+}
 
 // Update handles keys, refreshes and resizes.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -146,9 +229,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case loadedMsg:
 		m.run, m.err = msg.run, msg.err
+		m.loading, m.loadedAt, m.stamp = false, time.Now(), msg.stamp
 		m.clamp()
+		var cmds []tea.Cmd
+		if m.client != nil && msg.err == nil {
+			cmds = append(cmds, m.subscribe(msg.panes))
+		}
+		if m.again {
+			m.again = false
+			cmds = append(cmds, m.reload())
+		}
+		return m, tea.Batch(cmds...)
 	case tickMsg:
-		return m, tea.Batch(m.load, tick())
+		due := time.Since(m.loadedAt) >= fullEvery
+		if !due && m.run != nil && runStamp(m.run.Dir) != m.stamp {
+			due = true
+		}
+		if due {
+			return m, tea.Batch(m.reload(), tick())
+		}
+		return m, tick()
+	case eventMsg:
+		if msg.ch != m.events {
+			return m, nil // an earlier subscription, replaced
+		}
+		if !msg.ok {
+			m.events, m.subPanes = nil, "" // dropped; the next load subscribes again
+			return m, nil
+		}
+		if m.settling {
+			return m, waitFor(msg.ch)
+		}
+		m.settling = true
+		return m, tea.Batch(waitFor(msg.ch), tea.Tick(settle, func(time.Time) tea.Msg { return settledMsg{} }))
+	case settledMsg:
+		m.settling = false
+		return m, m.reload()
+	case leadMsg:
+		m.opening = false
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		m.status = msg.text
+		return m, m.reload()
 	case look.SpinMsg:
 		return m, m.spinner.Update(msg, m.run == nil && m.err == nil)
 	case tea.KeyMsg:
@@ -189,8 +313,10 @@ func (m *Model) key(k string) tea.Cmd {
 		m.row = 1 << 30
 	case "r":
 		m.status = "refreshing…"
-		return m.load
+		return m.reload()
 	case "o":
+		return m.goLead()
+	case "t":
 		if m.run != nil {
 			url := m.run.JiraURL
 			m.status = "opening " + url
@@ -248,6 +374,26 @@ func (m *Model) clamp() {
 	}
 }
 
+// goLead goes to the run's lead, or opens a new one when none is open.
+func (m *Model) goLead() tea.Cmd {
+	if m.run == nil {
+		return nil
+	}
+	if m.opening {
+		m.status = "already opening the " + strings.ToLower(m.run.Lead.Label) + "…"
+		return nil
+	}
+	run, client := m.run, m.client
+	if run.LeadPane == "" {
+		m.opening = true
+		m.status = m.spinner.Frame() + " opening a new " + strings.ToLower(run.Lead.Label) + "…"
+	}
+	return func() tea.Msg {
+		text, err := lead.Go(client, run)
+		return leadMsg{text: text, err: err}
+	}
+}
+
 func (m *Model) focusSelected() tea.Cmd {
 	cards := m.cardsIn(m.columnAt(m.col))
 	if m.row >= len(cards) {
@@ -295,9 +441,10 @@ func (m *Model) View() string {
 	for _, l := range r.Objective {
 		fmt.Fprintf(&b, "%s\n", look.Truncate(l, width))
 	}
-	orch := "no orchestrator open"
-	if r.OrchestratorStatus != "" {
-		orch = "orchestrator: " + statusWord(r.OrchestratorStatus)
+	leadName := strings.ToLower(r.Lead.Label)
+	orch := fmt.Sprintf("no %s open · %s opens one", leadName, m.keyMap().Key("lead"))
+	if r.LeadStatus != "" {
+		orch = leadName + ": " + statusWord(r.LeadStatus) + " · " + m.keyMap().Key("lead") + " goes there"
 	}
 	fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(ic.With(look.Sitemap, orch)))
 
@@ -380,7 +527,7 @@ func (m *Model) View() string {
 	}
 	k := func(name string) string { return keyStyle.Render(m.keyMap().Key(name)) }
 	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  " + k("jump") + " go to its tab  " +
-		k("open-issue") + " tracker  " + k("prototype") + " prototype  " + k("refresh") + " refresh  " + k("quit") + " quit")
+		k("lead") + " " + leadName + "  " + k("open-issue") + " tracker  " + k("prototype") + " prototype  " + k("refresh") + " refresh  " + k("quit") + " quit")
 	return b.String()
 }
 

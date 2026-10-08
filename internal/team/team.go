@@ -39,11 +39,85 @@ type Role struct {
 // Matches reports whether text (lower case) names this role.
 func (r Role) Matches(text string) bool { return r.re != nil && r.re.MatchString(text) }
 
+// Lead is the agent that runs the team. The board finds it among the ticket's
+// agents, and opens one when there is none.
+type Lead struct {
+	Label string `toml:"label"` // shown on the board: "Orchestrator"
+	// Match is a regex on agent names and tab labels.
+	Match string `toml:"match"`
+	// Tab is the label of the tab a new lead opens in.
+	Tab string `toml:"tab"`
+	// Kind is the Herdr agent kind a new lead starts as: cursor, claude, ...
+	// Empty means the board cannot start one.
+	Kind string   `toml:"kind"`
+	Args []string `toml:"args"` // passed to the agent
+	// Prompt is sent to a new lead, written to a file in the run folder and
+	// pointed at. Placeholders: {label} {key} {team} {target} {branch}
+	// {worktree} {run} {state} {workspace} {issue}.
+	Prompt string `toml:"prompt"`
+
+	re *regexp.Regexp
+}
+
+// DefaultPrompt is a new lead's prompt when the team and config.toml give none.
+const DefaultPrompt = "You are the {label} of ticket {key}, team {team}. The run's folder is {run}. " +
+	"Read {state} in full, then continue the run from where it stopped. Work only in {worktree}."
+
+// Matches reports whether text (lower case) names the lead.
+func (l Lead) Matches(text string) bool { return l.re != nil && l.re.MatchString(text) }
+
+// With is l with the fields o sets replacing its own: config.toml's [lead]
+// over the team's.
+func (l Lead) With(o Lead) (Lead, error) {
+	if o.Label != "" {
+		l.Label = o.Label
+	}
+	if o.Match != "" {
+		l.Match = o.Match
+	}
+	if o.Tab != "" {
+		l.Tab = o.Tab
+	}
+	if o.Kind != "" {
+		l.Kind = o.Kind
+	}
+	if o.Args != nil {
+		l.Args = o.Args
+	}
+	if o.Prompt != "" {
+		l.Prompt = o.Prompt
+	}
+	return l, l.compile()
+}
+
+func (l *Lead) compile() error {
+	if l.Label == "" {
+		l.Label = "Lead"
+	}
+	if l.Tab == "" {
+		l.Tab = strings.ToLower(l.Label)
+	}
+	if l.Prompt == "" {
+		l.Prompt = DefaultPrompt
+	}
+	l.re = nil
+	if l.Match == "" {
+		return nil
+	}
+	re, err := regexp.Compile(l.Match)
+	if err != nil {
+		return fmt.Errorf("lead match: %v", err)
+	}
+	l.re = re
+	return nil
+}
+
 // Team is a named set of roles.
 type Team struct {
 	Name    string `toml:"name"`
 	Match   string `toml:"match"`
 	Default bool   `toml:"default"`
+	Lead    Lead   `toml:"lead"`
 	Roles   []Role `toml:"role"`
 
 	file string
@@ -107,6 +181,9 @@ func parse(file string, data []byte) (Team, error) {
 			return t, fmt.Errorf("match: %v", err)
 		}
 		t.re = re
+	}
+	if err := t.Lead.compile(); err != nil {
+		return t, err
 	}
 	for i := range t.Roles {
 		r := &t.Roles[i]

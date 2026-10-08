@@ -3,6 +3,8 @@ package herdr
 import (
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 )
 
 // Workspace is one entry from a session snapshot. Note that the API's workspace
@@ -18,8 +20,22 @@ type Workspace struct {
 	PaneCount   int    `json:"pane_count"`
 	TabCount    int    `json:"tab_count"`
 
+	// Worktree is set when the workspace was opened on a git checkout.
+	Worktree *struct {
+		CheckoutPath string `json:"checkout_path"`
+	} `json:"worktree"`
+
 	Cwd     string   `json:"-"`
 	PaneIDs []string `json:"-"`
+}
+
+// Checkout is the git checkout the workspace was opened on, as a plain path
+// (Herdr sometimes reports it with the \\?\ prefix), or "".
+func (w Workspace) Checkout() string {
+	if w.Worktree == nil {
+		return ""
+	}
+	return strings.TrimPrefix(w.Worktree.CheckoutPath, `\\?\`)
 }
 
 type pane struct {
@@ -195,6 +211,49 @@ func (c *Client) SendToAgent(paneID, text string) error {
 // FocusAgent brings an agent's pane to the foreground.
 func (c *Client) FocusAgent(paneID string) error {
 	return c.Request("agent.focus", map[string]any{"target": paneID}, nil)
+}
+
+// CreateTab opens a tab in a workspace, in the background, and returns it with
+// its first pane.
+func (c *Client) CreateTab(workspaceID, cwd, label string) (tabID, paneID string, err error) {
+	var res struct {
+		Tab struct {
+			ID string `json:"tab_id"`
+		} `json:"tab"`
+		RootPane struct {
+			ID string `json:"pane_id"`
+		} `json:"root_pane"`
+	}
+	params := map[string]any{"workspace_id": workspaceID, "label": label, "focus": false}
+	if cwd != "" {
+		params["cwd"] = cwd
+	}
+	if err := c.Request("tab.create", params, &res); err != nil {
+		return "", "", err
+	}
+	if res.Tab.ID == "" || res.RootPane.ID == "" {
+		return "", "", fmt.Errorf("tab.create returned no tab or pane")
+	}
+	return res.Tab.ID, res.RootPane.ID, nil
+}
+
+// agentStartTimeout is how long Herdr may take to see a started agent come up.
+const agentStartTimeout = 60 * time.Second
+
+// StartAgent starts an agent of a kind Herdr knows (cursor, claude, ...) in a
+// pane, under a name later calls can target. It returns once Herdr sees the
+// agent running.
+func (c *Client) StartAgent(name, kind, paneID string, args []string) error {
+	params := map[string]any{"name": name, "kind": kind, "pane_id": paneID, "timeout_ms": agentStartTimeout.Milliseconds()}
+	if len(args) > 0 {
+		params["args"] = args
+	}
+	return c.requestWithin(agentStartTimeout+10*time.Second, "agent.start", params, nil)
+}
+
+// PromptAgent submits text to an agent, as if typed and sent.
+func (c *Client) PromptAgent(target, text string) error {
+	return c.Request("agent.prompt", map[string]any{"target": target, "text": text}, nil)
 }
 
 // Notify raises a Herdr notification. Whether it lands as an in-app toast or a

@@ -11,11 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 
 	"github.com/ezemacchi/ekanban/internal/columns"
+	"github.com/ezemacchi/ekanban/internal/team"
 )
 
 // PluginID must match herdr-plugin.toml, since Herdr keys the config directory
@@ -44,6 +47,9 @@ type Config struct {
 	Ticket TicketConfig `toml:"ticket"`
 	// Keys binds keys to actions by name: accept = "y" or accept = ["y", "Y"].
 	Keys map[string]any `toml:"keys"`
+	// Lead overrides the teams' [lead]: how the agent running a ticket is
+	// recognised and started.
+	Lead team.Lead `toml:"lead"`
 }
 
 // TicketConfig is the [ticket] table.
@@ -105,7 +111,9 @@ type Settings struct {
 	IssueURL      string
 	Pipeline      PipelineConfig
 	Ticket        TicketConfig
-	Keys          map[string][]string // action name -> keys
+	Keys          map[string][]string            // action name -> keys
+	ScreenKeys    map[string]map[string][]string // [keys.board], [keys.ticket]
+	Lead          team.Lead                      // [lead], over each team's
 	// Path is where the file was read from, whether or not it existed.
 	Path string
 	// Problems are complaints about the file's contents. A bad value falls back
@@ -182,7 +190,12 @@ func Load() Settings {
 	s.IssueURL = c.IssueURL
 	s.Pipeline = c.Pipeline
 	s.Ticket = c.Ticket
-	s.Keys, s.Problems = bindings(c.Keys, s.Problems)
+	s.Keys, s.ScreenKeys, s.Problems = bindings(c.Keys, s.Problems)
+	if _, err := (team.Lead{}).With(c.Lead); err != nil {
+		s.Problems = append(s.Problems, fmt.Sprintf("[lead]: %v — ignored", err))
+	} else {
+		s.Lead = c.Lead
+	}
 	if s.Pipeline.CI.Kind == "" && s.Pipeline.CI.URL == "" && s.Pipeline.JenkinsPRJobs != "" {
 		s.Pipeline.CI = CIConfig{Kind: "jenkins", URL: s.Pipeline.JenkinsPRJobs}
 	}
@@ -195,24 +208,61 @@ func Load() Settings {
 	return s
 }
 
-// bindings reads [keys]: each action takes one key or a list of them.
-func bindings(raw map[string]any, problems []string) (map[string][]string, []string) {
+// Screens are the boards [keys.<screen>] can address.
+var Screens = []string{"board", "ticket"}
+
+// KeysFor is [keys] with [keys.<screen>] over it.
+func (s Settings) KeysFor(screen string) map[string][]string {
+	out := map[string][]string{}
+	for name, ks := range s.Keys {
+		out[name] = ks
+	}
+	for name, ks := range s.ScreenKeys[screen] {
+		out[name] = ks
+	}
+	return out
+}
+
+// bindings reads [keys]: each action takes one key or a list of them (an
+// empty list turns it off), and [keys.board] / [keys.ticket] do the same for
+// one board only.
+func bindings(raw map[string]any, problems []string) (map[string][]string, map[string]map[string][]string, []string) {
+	flat := map[string]any{}
+	screens := map[string]map[string][]string{}
+	for name, v := range raw {
+		table, ok := v.(map[string]any)
+		if !ok {
+			flat[name] = v
+			continue
+		}
+		if !slices.Contains(Screens, name) {
+			problems = append(problems, fmt.Sprintf("[keys.%s]: no such board (known: %s)", name, strings.Join(Screens, ", ")))
+			continue
+		}
+		screens[name], problems = bindingsOf(table, "keys."+name, problems)
+	}
+	out, problems := bindingsOf(flat, "keys", problems)
+	return out, screens, problems
+}
+
+func bindingsOf(raw map[string]any, where string, problems []string) (map[string][]string, []string) {
 	out := map[string][]string{}
 	for name, v := range raw {
 		switch v := v.(type) {
 		case string:
 			out[name] = []string{v}
 		case []any:
+			out[name] = []string{}
 			for _, k := range v {
 				s, ok := k.(string)
 				if !ok || s == "" {
-					problems = append(problems, fmt.Sprintf("keys.%s: every key must be a non-empty string", name))
+					problems = append(problems, fmt.Sprintf("%s.%s: every key must be a non-empty string", where, name))
 					continue
 				}
 				out[name] = append(out[name], s)
 			}
 		default:
-			problems = append(problems, fmt.Sprintf("keys.%s: use a key in quotes or a list of them", name))
+			problems = append(problems, fmt.Sprintf("%s.%s: use a key in quotes or a list of them", where, name))
 		}
 	}
 	return out, problems
@@ -288,12 +338,27 @@ icons = false
 # id = "waiting"
 # label = "Waiting on you"
 
+# The agent that runs a ticket: the team's [lead] (the orchestrator, for the
+# built-in teams). o on the boards goes to it, or opens one in a new tab of the
+# ticket's workspace when none is open. kind is the Herdr agent kind to start
+# (cursor, claude, ...); without it the boards only go to an open one. prompt
+# is written to the run folder and the new agent is told to read it.
+# Placeholders: {label} {key} {team} {target} {branch} {worktree} {run}
+# {state} {workspace} {issue}.
+# [lead]
+# kind = "cursor"
+# args = ["--model", "some-model"]
+# prompt = "You are the {label} of {key}. Read {state} in full and continue the run."
+
 # Keys, by action name: one key or a list. A rebound action stops answering
-# its old key. The help screen (?) shows the current keys and the names are
-# listed by ` + "`ekanban keys`" + `. gg, gp, gf and 1-9 are fixed.
+# its old key, and an empty list turns it off. The help screen (?) shows the
+# current keys and the names are listed by ` + "`ekanban keys`" + `. gg, gp,
+# gf and 1-9 are fixed. [keys.board] and [keys.ticket] apply to one board only.
 # [keys]
 # accept = "y"
 # archive = ["A", "z"]
+# [keys.board]
+# lead = []
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

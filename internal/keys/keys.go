@@ -21,6 +21,9 @@ type Action struct {
 	// Fixed actions are shown in help but cannot be rebound: chords such as
 	// gp, or the digits that pick a status by position.
 	Fixed bool
+	// Canon is what the screen switches on when it is not the first key: a
+	// screen that gives a shared action another key keeps its code path.
+	Canon string
 }
 
 // Map is a screen's actions with the user's bindings applied.
@@ -38,12 +41,13 @@ func New(actions []Action, bindings map[string][]string) (*Map, []string) {
 	m := &Map{byKey: map[string]int{}, moved: map[string]bool{}}
 	var problems []string
 	for _, a := range actions {
-		canon := ""
-		if len(a.Keys) > 0 {
+		canon := a.Canon
+		if canon == "" && len(a.Keys) > 0 {
 			canon = a.Keys[0]
 		}
 		m.canon = append(m.canon, canon)
-		if keys, ok := bindings[a.Name]; ok && !a.Fixed && len(keys) > 0 {
+		if keys, ok := bindings[a.Name]; ok && !a.Fixed {
+			// An empty list turns the action off on this screen.
 			for _, k := range a.Keys {
 				m.moved[k] = true
 			}

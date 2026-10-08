@@ -10,10 +10,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ezemacchi/ekanban/internal/lead"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/store"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 // Pipeline mode: the board's columns are delivery stages computed from each
@@ -60,13 +62,21 @@ func (m *Model) pipelineOn() bool { return m.pipe != nil }
 type pipelineMsg struct {
 	infos map[string]pipeline.Info
 	at    time.Time
+	panes []string // agent panes, for the status subscription
 }
 
 // loadPipeline classifies every space in scope in the background. The build
 // server and git are refreshed at most once per pipelineEvery; the run files and agents
 // are reread every time, so a role finishing shows within one tick.
 func (m *Model) loadPipeline(force bool) tea.Cmd {
-	if m.pipe == nil || m.pipeLoading {
+	if m.pipe == nil {
+		return nil
+	}
+	if m.pipeLoading {
+		// Something changed while a load runs: load once more after it,
+		// rather than dropping the change.
+		m.pipeAgain = true
+		m.pipeForce = m.pipeForce || force
 		return nil
 	}
 	refresh := force || time.Since(m.pipeAt) >= pipelineEvery
@@ -85,16 +95,16 @@ func (m *Model) loadPipeline(force bool) tea.Cmd {
 		if refresh {
 			src.Refresh(ctx)
 		}
-		agents, _ := client.Agents()
+		live, _ := ticket.ReadLive(client)
 		infos := map[string]pipeline.Info{}
 		for key, pr := range keys {
-			infos[key] = src.Classify(ctx, key, agents, pr)
+			infos[key] = src.Classify(ctx, key, live, pr)
 		}
 		at := time.Time{}
 		if refresh {
 			at = time.Now()
 		}
-		return pipelineMsg{infos: infos, at: at}
+		return pipelineMsg{infos: infos, at: at, panes: live.AgentPanes()}
 	})
 }
 
@@ -104,7 +114,7 @@ func (m *Model) pipelineBusy() bool {
 	return m.pipelineOn() && (m.pipeLoading || m.pipeAt.IsZero())
 }
 
-func (m *Model) applyPipeline(msg pipelineMsg) {
+func (m *Model) applyPipeline(msg pipelineMsg) tea.Cmd {
 	m.pipeLoading = false
 	if !msg.at.IsZero() {
 		m.pipeAt = msg.at
@@ -121,6 +131,13 @@ func (m *Model) applyPipeline(msg pipelineMsg) {
 		m.save()
 	}
 	m.rebuild()
+	cmds := []tea.Cmd{m.subscribe(msg.panes)}
+	if m.pipeAgain {
+		force := m.pipeForce
+		m.pipeAgain, m.pipeForce = false, false
+		cmds = append(cmds, m.loadPipeline(force))
+	}
+	return tea.Batch(cmds...)
 }
 
 // pipelineStage is a space's column, and whether it belongs on the board.
@@ -211,6 +228,8 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		m.archiveView = true
 		m.archiveIdx = 0
 		return true, m, nil
+	case "lead":
+		return true, m, m.goLead()
 	case "r":
 		m.branchesAt = time.Time{}
 		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true))
@@ -220,6 +239,38 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, nil
 	}
 	return false, m, nil
+}
+
+type leadMsg struct {
+	text string
+	err  error
+}
+
+// goLead goes to the selected ticket's lead, or opens a new one in its
+// workspace when none is open.
+func (m *Model) goLead() tea.Cmd {
+	sp := m.selected()
+	if sp == nil {
+		return nil
+	}
+	if m.pipeInfo[sp.Key].Key == "" {
+		m.status = sp.Label + " has no ticket run"
+		return nil
+	}
+	m.status = "looking for the orchestrator of " + sp.Label + "…"
+	src, client, worktree := m.pipe, m.client, sp.Key
+	return func() tea.Msg {
+		live, err := ticket.ReadLive(client)
+		if err != nil {
+			return leadMsg{err: err}
+		}
+		run, err := src.Run(worktree, live)
+		if err != nil {
+			return leadMsg{err: fmt.Errorf("no run found in %s", worktree)}
+		}
+		text, err := lead.Go(client, run)
+		return leadMsg{text: text, err: err}
+	}
 }
 
 // acceptSelected archives a ticket in the ready_qa column.

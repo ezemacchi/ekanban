@@ -78,6 +78,71 @@ type Options struct {
 	SpecRoot string
 	// Teams are the team definitions; nil means the built-in ones.
 	Teams []team.Team
+	// Lead overrides fields of the team's [lead]: config.toml's [lead].
+	Lead team.Lead
+}
+
+// Live is what Herdr shows right now.
+type Live struct {
+	Agents []herdr.Agent
+	Tabs   map[string]string // tab id -> label
+	// Workspaces maps a workspace id to the checkout it was opened on.
+	Workspaces map[string]string
+}
+
+// ReadLive asks Herdr for its agents, workspaces and tab labels.
+func ReadLive(c *herdr.Client) (Live, error) {
+	live := Live{Tabs: map[string]string{}, Workspaces: map[string]string{}}
+	agents, err := c.Agents()
+	if err != nil {
+		return live, err
+	}
+	live.Agents = agents
+	if ws, err := c.Workspaces(); err == nil {
+		for _, w := range ws {
+			live.Workspaces[w.ID] = w.Checkout()
+		}
+	}
+	asked := map[string]bool{}
+	for _, a := range agents {
+		if asked[a.WorkspaceID] {
+			continue
+		}
+		asked[a.WorkspaceID] = true
+		if tabs, err := c.Tabs(a.WorkspaceID); err == nil {
+			for _, t := range tabs {
+				live.Tabs[t.ID] = t.Label
+			}
+		}
+	}
+	return live, nil
+}
+
+// WorkspaceOf is the open workspace of worktree, or "".
+func (l Live) WorkspaceOf(worktree string) string {
+	ids := make([]string, 0, len(l.Workspaces))
+	for id := range l.Workspaces {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if l.Workspaces[id] != "" && samePath(l.Workspaces[id], worktree) {
+			return id
+		}
+	}
+	return ""
+}
+
+// AgentPanes are the panes of every agent, for status subscriptions.
+func (l Live) AgentPanes() []string {
+	var out []string
+	for _, a := range l.Agents {
+		if a.Agent != nil {
+			out = append(out, a.PaneID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Card is one role on the board.
@@ -113,8 +178,13 @@ type Run struct {
 	Questions   []string
 	Landed      bool
 
-	OrchestratorStatus string
-	OrchestratorPane   string
+	// Lead is the team's lead definition; LeadStatus and LeadPane are its live
+	// agent, empty when none is open.
+	Lead       team.Lead
+	LeadStatus string
+	LeadPane   string
+	// Workspace is the Herdr workspace open on the worktree, or "".
+	Workspace string
 
 	Cards []Card
 
@@ -144,7 +214,7 @@ func Find(worktree string) (dir, key string, ok bool) {
 }
 
 // Load reads the run and places each role of its team on the board.
-func Load(worktree string, opts Options, agents []herdr.Agent, tabLabels map[string]string) (*Run, error) {
+func Load(worktree string, opts Options, live Live) (*Run, error) {
 	dir, key, ok := Find(worktree)
 	if !ok {
 		return nil, os.ErrNotExist
@@ -181,10 +251,12 @@ func Load(worktree string, opts Options, agents []herdr.Agent, tabLabels map[str
 	}
 	t, _ := team.Pick(teams, r.Team)
 	r.TeamName = t.Name
+	r.Lead, _ = t.Lead.With(opts.Lead)
+	r.Workspace = live.WorkspaceOf(worktree)
 
-	mine := agentsIn(worktree, agents)
-	r.placeOrchestrator(mine, tabLabels)
-	r.placeRoles(t.Roles, mine, tabLabels)
+	mine := agentsIn(worktree, r.Workspace, live.Agents)
+	r.placeLead(t.Roles, mine, live.Tabs)
+	r.placeRoles(t.Roles, mine, live.Tabs)
 	return r, nil
 }
 
@@ -254,33 +326,61 @@ func (r *Run) openQuestions() []string {
 	return out
 }
 
-func agentsIn(worktree string, agents []herdr.Agent) []herdr.Agent {
-	root := strings.ToLower(filepath.Clean(worktree))
+// agentsIn are the ticket's agents: those in its workspace, wherever their
+// folder is, and those working inside the worktree from another workspace.
+func agentsIn(worktree, workspace string, agents []herdr.Agent) []herdr.Agent {
 	var out []herdr.Agent
 	for _, a := range agents {
-		if a.Agent == nil || a.Cwd == "" {
+		if a.Agent == nil {
 			continue
 		}
-		cwd := strings.ToLower(filepath.Clean(a.Cwd))
-		if cwd == root || strings.HasPrefix(cwd, root+string(filepath.Separator)) {
+		if workspace != "" && a.WorkspaceID == workspace || a.Cwd != "" && within(a.Cwd, worktree) {
 			out = append(out, a)
 		}
 	}
 	return out
 }
 
+func cleanPath(p string) string {
+	return strings.ToLower(filepath.Clean(strings.TrimPrefix(p, `\\?\`)))
+}
+
+func samePath(a, b string) bool { return cleanPath(a) == cleanPath(b) }
+
+func within(path, root string) bool {
+	p, r := cleanPath(path), cleanPath(root)
+	return p == r || strings.HasPrefix(p, r+string(filepath.Separator))
+}
+
 func describe(a herdr.Agent, tabLabels map[string]string) string {
 	return strings.ToLower(a.Name + " " + tabLabels[a.TabID])
 }
 
-func (r *Run) placeOrchestrator(agents []herdr.Agent, tabLabels map[string]string) {
+// placeLead finds the lead among the ticket's agents: one its match names,
+// else one named after the ticket, else one in the ticket's workspace that is
+// no role's (a lead started by hand, in a tab nobody renamed).
+func (r *Run) placeLead(roles []team.Role, agents []herdr.Agent, tabLabels map[string]string) {
 	key := strings.ToLower(r.Key)
-	for _, a := range agents {
+	isRole := func(a herdr.Agent) bool {
 		d := describe(a, tabLabels)
-		if strings.Contains(d, "orchestrator") || strings.TrimSpace(a.Name) == key {
-			r.OrchestratorStatus = a.AgentStatus
-			r.OrchestratorPane = a.PaneID
-			return
+		for _, role := range roles {
+			if role.Matches(d) {
+				return true
+			}
+		}
+		return false
+	}
+	tests := []func(herdr.Agent) bool{
+		func(a herdr.Agent) bool { return r.Lead.Matches(describe(a, tabLabels)) },
+		func(a herdr.Agent) bool { return strings.ToLower(strings.TrimSpace(a.Name)) == key },
+		func(a herdr.Agent) bool { return r.Workspace != "" && a.WorkspaceID == r.Workspace && !isRole(a) },
+	}
+	for _, test := range tests {
+		for _, a := range agents {
+			if test(a) {
+				r.LeadStatus, r.LeadPane = a.AgentStatus, a.PaneID
+				return
+			}
 		}
 	}
 }

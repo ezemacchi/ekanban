@@ -64,12 +64,18 @@ func (c *Client) nextID(method string) string {
 
 // Request performs one request/response round trip.
 func (c *Client) Request(method string, params any, out any) error {
+	return c.requestWithin(10*time.Second, method, params, out)
+}
+
+// requestWithin is Request for calls that legitimately take longer, such as
+// starting an agent.
+func (c *Client) requestWithin(limit time.Duration, method string, params any, out any) error {
 	conn, err := dial(c.socketPath, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial herdr socket: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(limit))
 
 	payload, err := json.Marshal(request{ID: c.nextID(method), Method: method, Params: params})
 	if err != nil {
@@ -111,8 +117,8 @@ type Event struct {
 }
 
 // WorkspaceSubscriptions are the workspace-scoped event types the board cares
-// about. Pane-scoped subscriptions are deliberately excluded: they require a
-// pane_id, and agent activity is not what this board tracks.
+// about. The background watcher needs nothing else; the boards add
+// AgentSubscriptions.
 var WorkspaceSubscriptions = []string{
 	"workspace.created",
 	"workspace.updated",
@@ -122,9 +128,57 @@ var WorkspaceSubscriptions = []string{
 	"workspace.metadata_updated",
 }
 
-// Subscribe streams events until ctx is cancelled or the connection drops.
-// It holds its own connection for the lifetime of the stream.
+// AgentEvents are the session-wide events that mean an agent may have come or
+// gone: a tab or pane opened, closed or renamed, or Herdr recognising an agent.
+var AgentEvents = []string{
+	"tab.created",
+	"tab.closed",
+	"tab.renamed",
+	"pane.created",
+	"pane.closed",
+	"pane.exited",
+	"pane.agent_detected",
+	"worktree.created",
+	"worktree.opened",
+	"worktree.removed",
+}
+
+// StatusChanged is the event of an agent's status changing. Herdr only sends
+// it per pane, so it is subscribed once for every agent pane.
+const StatusChanged = "pane.agent_status_changed"
+
+// Subscription is one entry of events.subscribe.
+type Subscription struct {
+	Type   string `json:"type"`
+	PaneID string `json:"pane_id,omitempty"`
+}
+
+// AgentSubscriptions are the workspace events, the agent events, and a status
+// subscription for each of panes.
+func AgentSubscriptions(panes []string) []Subscription {
+	var subs []Subscription
+	for _, t := range append(append([]string(nil), WorkspaceSubscriptions...), AgentEvents...) {
+		subs = append(subs, Subscription{Type: t})
+	}
+	for _, p := range panes {
+		subs = append(subs, Subscription{Type: StatusChanged, PaneID: p})
+	}
+	return subs
+}
+
+// Subscribe streams events of the given types until ctx is cancelled or the
+// connection drops.
 func (c *Client) Subscribe(ctx context.Context, types []string, out chan<- Event) error {
+	subs := make([]Subscription, 0, len(types))
+	for _, t := range types {
+		subs = append(subs, Subscription{Type: t})
+	}
+	return c.SubscribeTo(ctx, subs, out)
+}
+
+// SubscribeTo streams events until ctx is cancelled or the connection drops.
+// It holds its own connection for the lifetime of the stream.
+func (c *Client) SubscribeTo(ctx context.Context, subs []Subscription, out chan<- Event) error {
 	conn, err := dial(c.socketPath, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial herdr socket: %w", err)
@@ -136,10 +190,6 @@ func (c *Client) Subscribe(ctx context.Context, types []string, out chan<- Event
 		_ = conn.Close()
 	}()
 
-	subs := make([]map[string]string, 0, len(types))
-	for _, t := range types {
-		subs = append(subs, map[string]string{"type": t})
-	}
 	payload, err := json.Marshal(request{
 		ID:     c.nextID("events.subscribe"),
 		Method: "events.subscribe",

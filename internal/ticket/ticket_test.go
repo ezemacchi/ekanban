@@ -29,7 +29,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	wt := t.TempDir()
 	run := filepath.Join(wt, ".runs", "ABC-1")
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\nSpec: e7-us-42\n")
-	r, err := Load(wt, Options{SpecRoot: specsDir}, nil, nil)
+	r, err := Load(wt, Options{SpecRoot: specsDir}, Live{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	// No Spec field: the story the run's files mention most wins.
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\n")
 	write(t, filepath.Join(run, "ENVELOPE.md"), "E7_US_42 E7_US_42 related: E7_US_05")
-	if r, _ = Load(wt, Options{SpecRoot: specsDir}, nil, nil); r.Spec != "E7_US_42" {
+	if r, _ = Load(wt, Options{SpecRoot: specsDir}, Live{}); r.Spec != "E7_US_42" {
 		t.Fatalf("most mentioned: %q", r.Spec)
 	}
 }
@@ -59,7 +59,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 		{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", Cwd: filepath.Join(wt, "src")},
 		{Agent: &agent, AgentStatus: "blocked", PaneID: "w:p9", TabID: "w:t9", Cwd: filepath.Join(t.TempDir())},
 	}
-	r, err := Load(wt, Options{}, agents, map[string]string{"w:t3": "implementer", "w:t9": "qa"})
+	r, err := Load(wt, Options{}, Live{Agents: agents, Tabs: map[string]string{"w:t3": "implementer", "w:t9": "qa"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,5 +84,59 @@ func TestLoadPlacesRoles(t *testing.T) {
 		if c.Role.ID == "implementer" && (c.Note != "round 2" || c.PaneID != "w:p3") {
 			t.Errorf("implementer: %+v", c)
 		}
+	}
+}
+
+// An agent in the ticket's workspace belongs to it wherever its folder is,
+// and one that is no role's is the lead: an orchestrator started by hand in
+// the main clone, in a tab nobody renamed.
+func TestWorkspaceAgentsAndLead(t *testing.T) {
+	wt := t.TempDir()
+	write(t, filepath.Join(wt, ".runs", "ABC-1", "STATE.md"), "Team: Big Team\n")
+	write(t, filepath.Join(wt, ".runs", "ABC-1", "DISPATCH-01-implementer.md"), "x")
+	agent := "cursor"
+	elsewhere := t.TempDir()
+	live := Live{
+		Agents: []herdr.Agent{
+			{Agent: &agent, AgentStatus: "idle", PaneID: "w:p1", TabID: "w:t1", WorkspaceID: "w", Cwd: elsewhere},
+			{Agent: &agent, AgentStatus: "working", PaneID: "w:p2", TabID: "w:t2", WorkspaceID: "w", Name: "abc-1-implementer4", Cwd: wt},
+			{Agent: &agent, AgentStatus: "working", PaneID: "x:p1", TabID: "x:t1", WorkspaceID: "x", Cwd: elsewhere},
+		},
+		Tabs:       map[string]string{"w:t1": "2", "w:t2": "implementer-rebase", "x:t1": "orchestrator"},
+		Workspaces: map[string]string{"w": `\\?\` + wt, "x": elsewhere},
+	}
+	r, err := Load(wt, Options{}, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Workspace != "w" {
+		t.Fatalf("workspace = %q", r.Workspace)
+	}
+	if r.LeadPane != "w:p1" || r.LeadStatus != "idle" || r.Lead.Label != "Orchestrator" {
+		t.Fatalf("lead = %q %q %q", r.LeadPane, r.LeadStatus, r.Lead.Label)
+	}
+	for _, c := range r.Cards {
+		if c.Role.ID == "implementer" && (c.Column != Working || c.PaneID != "w:p2") {
+			t.Fatalf("implementer: %+v", c)
+		}
+	}
+
+	// A tab its match names wins over an unnamed one.
+	live.Tabs["w:t1"] = "notes"
+	live.Agents = append(live.Agents, herdr.Agent{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", WorkspaceID: "w", Cwd: wt})
+	live.Tabs["w:t3"] = "orchestrator"
+	if r, _ = Load(wt, Options{}, live); r.LeadPane != "w:p3" {
+		t.Fatalf("named lead = %q", r.LeadPane)
+	}
+
+	// No workspace open: only agents inside the worktree count, and none is
+	// the lead by elimination.
+	live.Workspaces = map[string]string{"x": elsewhere}
+	if r, _ = Load(wt, Options{}, live); r.Workspace != "" || r.LeadPane != "w:p3" {
+		t.Fatalf("without workspace: %q %q", r.Workspace, r.LeadPane)
+	}
+	live.Tabs["w:t3"] = "scratch"
+	if r, _ = Load(wt, Options{}, live); r.LeadPane != "" {
+		t.Fatalf("lead by elimination without a workspace: %q", r.LeadPane)
 	}
 }

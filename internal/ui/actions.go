@@ -46,10 +46,12 @@ var (
 		keys.Action{Name: "archived", Keys: []string{"a"}, Help: "show or hide archived spaces", Short: "archived"})
 
 	// PipelineActions are the computed board's: a accepts instead of showing
-	// archived spaces, and A opens the archive of accepted tickets.
-	PipelineActions = append(append([]keys.Action(nil), commonActions...),
+	// archived spaces, A opens the archive of accepted tickets, and o goes to
+	// a ticket's orchestrator, so sorting the table moves to ctrl+o.
+	PipelineActions = append(withKeys(commonActions, "sort", "ctrl+o"),
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
-		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"})
+		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
+		keys.Action{Name: "lead", Keys: []string{"o"}, Canon: "lead", Help: "go to the ticket's orchestrator (the team's lead), or open one", Short: "orchestrator"})
 
 	// ArchiveActions are the archive list's.
 	ArchiveActions = []keys.Action{
@@ -63,6 +65,21 @@ var (
 		{Name: "restore", Keys: []string{"u"}, Help: "back to the board", Short: "restore"},
 	}
 )
+
+// withKeys is a copy of actions with name's keys replaced, keeping the code
+// path it had.
+func withKeys(actions []keys.Action, name string, ks ...string) []keys.Action {
+	out := append([]keys.Action(nil), actions...)
+	for i, a := range out {
+		if a.Name == name {
+			if a.Canon == "" && len(a.Keys) > 0 {
+				out[i].Canon = a.Keys[0]
+			}
+			out[i].Keys = ks
+		}
+	}
+	return out
+}
 
 // keyMaps are the screens' maps with the user's bindings.
 type keyMaps struct {

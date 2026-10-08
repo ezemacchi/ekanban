@@ -202,9 +202,16 @@ type Model struct {
 	status string // transient message shown in the footer
 	err    error
 
-	events   chan herdr.Event
-	cancel   context.CancelFunc
-	quitting bool
+	// events is the current subscription's stream. In pipeline mode it also
+	// carries agent events and each agent pane's status (subPanes), so it is
+	// replaced when the agent panes change.
+	events    chan herdr.Event
+	cancel    context.CancelFunc
+	subCtx    context.Context
+	subCancel context.CancelFunc
+	subPanes  string
+	settling  bool // an agent event is waiting out settle
+	quitting  bool
 	// sidebar renders for a narrow docked region: grouped list, no detail
 	// pane, and no layout switching. Set by the `sidebar` entrypoint.
 	sidebar bool
@@ -222,6 +229,8 @@ type Model struct {
 	columns        columns.Set // the computed columns, with their icons
 	pipeAt         time.Time
 	pipeLoading    bool
+	pipeAgain      bool // something changed during a load: load once more
+	pipeForce      bool // ... and refresh the build server and git too
 	manualStatuses []store.Status
 	manualDefault  string
 	archiveView    bool
@@ -272,7 +281,6 @@ func New(client *herdr.Client, board *store.Board) *Model {
 		sort:     parseSort(board.TableSort),
 		width:    80,
 		height:   24,
-		events:   make(chan herdr.Event, 64),
 	}
 }
 
@@ -281,8 +289,16 @@ func New(client *herdr.Client, board *store.Board) *Model {
 type workspacesMsg []herdr.Workspace
 type errMsg struct{ err error }
 type statusMsg string
-type eventMsg struct{}
-type eventsDoneMsg struct{}
+type eventMsg struct {
+	ch   chan herdr.Event
+	name string
+}
+type eventsDoneMsg struct{ ch chan herdr.Event }
+type settledMsg struct{}
+
+// settle is how long an agent event waits for the rest of its burst.
+const settle = 300 * time.Millisecond
+
 type tickMsg struct{}
 
 // refreshEvery is how often the board looks for work of its own. The check
@@ -299,12 +315,11 @@ func tick() tea.Cmd {
 
 func (m *Model) Init() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
+	m.cancel, m.subCtx = cancel, ctx
 
 	return tea.Batch(
 		m.refresh(),
-		m.subscribe(ctx),
-		waitForEvent(m.events),
+		m.subscribe(nil),
 		tick(),
 	)
 }
@@ -363,22 +378,66 @@ func (m *Model) spacesChanged() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *Model) subscribe(ctx context.Context) tea.Cmd {
-	return func() tea.Msg {
+// subscribe listens to Herdr: workspace events always, and in pipeline mode
+// agents coming, going and changing status, which move cards. Status events
+// are per pane, so a new set of agent panes subscribes again.
+func (m *Model) subscribe(panes []string) tea.Cmd {
+	if m.client == nil || m.subCtx == nil {
+		return nil
+	}
+	key := strings.Join(panes, ",")
+	if m.events != nil && key == m.subPanes {
+		return nil
+	}
+	if m.subCancel != nil {
+		m.subCancel()
+	}
+	ctx, cancel := context.WithCancel(m.subCtx)
+	ch := make(chan herdr.Event, 64)
+	m.events, m.subCancel, m.subPanes = ch, cancel, key
+	subs := herdr.AgentSubscriptions(panes)
+	if !m.pipelineOn() {
+		subs = herdr.AgentSubscriptions(nil)[:len(herdr.WorkspaceSubscriptions)]
+	}
+	client := m.client
+	stream := func() tea.Msg {
 		// Errors here are not fatal: the board still works, it just stops
 		// updating on its own. `r` forces a refresh.
-		_ = m.client.Subscribe(ctx, herdr.WorkspaceSubscriptions, m.events)
-		return eventsDoneMsg{}
+		_ = client.SubscribeTo(ctx, subs, ch)
+		close(ch)
+		return nil
 	}
+	return tea.Batch(stream, waitForEvent(ch))
 }
 
 func waitForEvent(ch chan herdr.Event) tea.Cmd {
-	return func() tea.Msg {
-		if _, ok := <-ch; !ok {
-			return eventsDoneMsg{}
-		}
-		return eventMsg{}
+	if ch == nil {
+		return nil
 	}
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return eventsDoneMsg{ch: ch}
+		}
+		return eventMsg{ch: ch, name: ev.Event}
+	}
+}
+
+// onEvent: a workspace event refreshes the workspace list, as it always did;
+// an agent, tab or pane event reclassifies the cards once its burst settles.
+func (m *Model) onEvent(msg eventMsg) (tea.Model, tea.Cmd) {
+	if msg.ch != m.events {
+		return m, nil // an earlier subscription, replaced
+	}
+	cmds := []tea.Cmd{waitForEvent(msg.ch)}
+	switch {
+	case strings.HasPrefix(msg.name, "workspace."):
+		cmds = append(cmds, m.refresh())
+	case m.pipelineOn() && !m.settling:
+		m.settling = true
+		cmds = append(cmds, tea.Tick(settle, func(time.Time) tea.Msg { return settledMsg{} }))
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // syncTokens pushes each space's status into Herdr's workspace metadata, which

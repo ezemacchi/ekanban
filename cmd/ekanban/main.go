@@ -153,8 +153,8 @@ func run(args []string) error {
 	}
 	settings := config.Load()
 	model.SetIcons(settings.Icons)
-	model.SetKeys(settings.Keys)
-	model.SetProblems(unknownKeys(settings.Keys))
+	model.SetKeys(settings.KeysFor("board"))
+	model.SetProblems(unknownKeys(settings))
 	cwd, _ := os.Getwd()
 	if cwd != "" {
 		model.SetScope(cwd)
