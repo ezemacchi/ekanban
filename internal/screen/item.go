@@ -169,8 +169,8 @@ var placeholder = look.Button.Foreground(lipgloss.Color("244"))
 // its lead (a glyph, or the key that focuses it), then text, or hint dimmed
 // when there is none. While typing it shows input, the text input's own view.
 func Input(lead, text, hint string, typing bool, input string, width int) string {
+	room := InputRoom(lead, width)
 	lead = " " + lead + " "
-	room := max(width-lipgloss.Width(lead)-1, 4)
 	var body string
 	switch {
 	case typing:
@@ -184,6 +184,12 @@ func Input(lead, text, hint string, typing bool, input string, width int) string
 		body += look.Button.Render(strings.Repeat(" ", gap))
 	}
 	return look.ButtonKey.Render(lead) + body + look.Button.Render(" ")
+}
+
+// InputRoom is how many cells of text a field width cells wide shows after
+// lead. A text input drawn in it should be one narrower, for its cursor.
+func InputRoom(lead string, width int) int {
+	return max(width-lipgloss.Width(" "+lead+" ")-1, 4)
 }
 
 // TextBox is a field holding text of several lines, width cells wide: the

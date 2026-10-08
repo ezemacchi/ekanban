@@ -403,3 +403,26 @@ func TestArrowsGoThroughTheReadyMadeMessages(t *testing.T) {
 		t.Fatalf("up: %q", m.input.Value())
 	}
 }
+
+// A field's text uses the field's whole width: the one text input is sized
+// to each field it is drawn in, not to whichever field drew it last.
+func TestTheMessageUsesTheFieldsWidth(t *testing.T) {
+	m := pipelineBoard(t)
+	m.width, m.height = 160, 40
+	long := "Fetch and rebase your branch onto origin/{target}, run the checks, and push."
+	m.SetBroadcast([]string{long})
+	m.View() // the search field draws the input narrow first, as on the board
+	send(t, m, key("B"))
+	m.View()
+	send(t, m, key("down"))
+	// The field's own line: the ready-made list below says it whole anyway.
+	field := ""
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(l, " › ") {
+			field = l
+		}
+	}
+	if !strings.Contains(field, long) {
+		t.Fatalf("the message is cut in its field: %q", field)
+	}
+}

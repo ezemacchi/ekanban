@@ -189,15 +189,15 @@ func (m *Model) viewFooter() string {
 		if m.noteInDetail() {
 			return screen.Say(" "+noteHelp, dimStyle, m.width-1)
 		}
-		return keyStyle.Render(" note: ") + m.input.View()
+		return m.prompt("note")
 	case modeRename:
-		return keyStyle.Render(" rename: ") + m.input.View()
+		return m.prompt("rename")
 	case modeMessage:
-		return keyStyle.Render(" to agent: ") + m.input.View()
+		return m.prompt("to agent")
 	case modeFilter:
 		// A dock has no top bar: the field is down here.
 		if m.sidebar {
-			return keyStyle.Render(" filter: ") + m.input.View()
+			return m.prompt("filter")
 		}
 		return screen.Say(" "+searchHelp, dimStyle, m.width-1)
 	}
@@ -588,9 +588,9 @@ func (m *Model) viewManage() string {
 	b.WriteString("\n")
 	switch m.mode {
 	case modeManageAdd:
-		b.WriteString(keyStyle.Render(" new status: ") + m.input.View())
+		b.WriteString(m.prompt("new status"))
 	case modeManageRename:
-		b.WriteString(keyStyle.Render(" rename to: ") + m.input.View())
+		b.WriteString(m.prompt("rename to"))
 	default:
 		k := screen.Key
 		b.WriteString(screen.Say(" "+k("a")+" add · "+k("r")+" rename · "+k("d")+" delete · "+k("D")+" set default · "+k("J/K")+" reorder · "+k("esc")+" back", dimStyle, m.width-1))

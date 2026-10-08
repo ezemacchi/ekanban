@@ -18,9 +18,8 @@ import (
 // viewHeader is the top bar.
 func (m *Model) viewHeader() string {
 	left := []screen.Item{screen.Control(titleStyle.Render(m.title()), "views")}
-	m.input.Width = screen.SearchWidth - 6
 	left = append(left, screen.Search(m.filter, m.searchPlaceholder(), m.hintKey("filter"),
-		m.mode == modeFilter, m.input.View(), screen.SearchWidth)...)
+		m.mode == modeFilter, m.inputIn(screen.InputRoom("/", screen.SearchWidth)), screen.SearchWidth)...)
 	if m.filter != "" {
 		left = append(left, screen.Text(dimStyle.Render(plural(m.found(), "found", "found"))))
 	}
@@ -110,6 +109,25 @@ func keyItem(text, key string) screen.Item {
 		return screen.Text(text)
 	}
 	return screen.Item{Text: text, On: &screen.Zone{Kind: screen.OnButton, Key: key}}
+}
+
+// inputIn is the text input drawn to show room cells of text, its cursor
+// included. The one input serves every field and prompt, each of its own
+// width, so each sets it as it draws.
+func (m *Model) inputIn(room int) string {
+	m.input.Width = max(room-1, 1)
+	// The input works out what part of its text shows when the text or the
+	// cursor moves, not when it is drawn: putting the cursor where it is
+	// works it out again for this width.
+	m.input.SetCursor(m.input.Position())
+	return m.input.View()
+}
+
+// prompt is a footer prompt: its label, then the input in the rest of the
+// line.
+func (m *Model) prompt(label string) string {
+	head := keyStyle.Render(" " + label + ": ")
+	return head + m.inputIn(m.width-lipgloss.Width(head)-1)
 }
 
 // startSearch puts the cursor in the search field.

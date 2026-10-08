@@ -377,7 +377,7 @@ func (m *Model) viewBroadcast(base string) string {
 
 	lines = append(lines, look.Label.Render("MESSAGE"))
 	clickable(zone{Kind: screen.OnControl, ID: "bc-message"})
-	lines = append(lines, screen.Input("›", m.input.Value(), "write to every orchestrator ticked below", !m.bc.list, m.input.View(), inner))
+	lines = append(lines, screen.Input("›", m.input.Value(), "write to every orchestrator ticked below", !m.bc.list, m.inputIn(screen.InputRoom("›", inner)), inner))
 
 	if len(m.bc.presets) > 0 {
 		lines = append(lines, "", look.Label.Render("READY-MADE")+dimStyle.Render("  a click, or ↑↓ in the message, puts it there"))

@@ -257,8 +257,7 @@ func (m *Model) viewDetailModal(base string) string {
 // in it, behind a pencil; while it is being written, the input itself.
 func (m *Model) noteBox(sp *space, width int) []detailLine {
 	if m.mode == modeNote && sp == m.selected() {
-		m.input.Width = max(width-6, 4)
-		return plain(screen.Input("✎", "", "", true, m.input.View(), width))
+		return plain(screen.Input("✎", "", "", true, m.inputIn(screen.InputRoom("✎", width)), width))
 	}
 	key := m.hintKey("note")
 	var lines []detailLine
