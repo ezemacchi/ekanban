@@ -10,16 +10,15 @@
 // The ids are fixed; the names are defaults that config.toml can change.
 //
 // Classify gathers Facts; the rules in rules.go decide the column. Sources
-// are read only: the run's files (package ticket), Jenkins, which answers
-// without credentials, and git's remote-tracking branches. Every address
-// comes from Settings, filled from config.toml.
+// are read only: the run's files (package ticket), the build server (a CI,
+// see ci.go) and git's remote-tracking branches, with merge commits read the
+// way the code host words them (host.go). Every address comes from Settings,
+// filled from config.toml.
 package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +26,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
@@ -58,7 +56,7 @@ var DefaultColumns = columns.Set{
 // Info is what the board shows about one ticket worktree.
 type Info struct {
 	Stage string
-	Key   string // Jira key, from the run directory or the branch
+	Key   string // ticket key, from the run directory or the branch
 	Title string // first line of the run's objective
 	// Phase is where the team is inside In Progress ("Implementer, round 2").
 	Phase   string
@@ -71,7 +69,7 @@ type Info struct {
 	MergedTo string // master or predev
 	// Deployed names the publish that includes the merge ("dev #212").
 	Deployed string
-	// Unknown explains a column chosen without full data (Jenkins offline).
+	// Unknown explains a column chosen without full data (build server offline).
 	Unknown string
 }
 
@@ -80,17 +78,27 @@ type Info struct {
 type Target struct {
 	Branch  string // "master"
 	Env     string // where its publish deploys, shown on the card: "dev"
-	Publish string // Jenkins job URL of the publish; empty: never "deployed"
+	Publish string // build server job of the publish; empty: never "deployed"
 }
 
-// Settings is where to look. Empty PRJobs means no Jenkins: pull requests are
+// Settings is where to look. A nil CI means no build server: pull requests are
 // found from the run and merge commits only.
 type Settings struct {
-	PRJobs  string // Jenkins multibranch job whose children are PR-<n>
-	Targets []Target
-	Rules   []Rule      // nil: DefaultRules
-	Teams   []team.Team // nil: the built-in teams
-	Columns columns.Set // nil: DefaultColumns
+	CI        CI       // nil: none
+	Host      CodeHost // nil: "any"
+	TicketKey *regexp.Regexp
+	Targets   []Target
+	Rules     []Rule      // nil: DefaultRules
+	Teams     []team.Team // nil: the built-in teams
+	Columns   columns.Set // nil: DefaultColumns
+}
+
+// CIName names the build server on the board, "CI" when there is none.
+func (s *Source) CIName() string {
+	if s == nil || s.set.CI == nil {
+		return "CI"
+	}
+	return s.set.CI.Name()
 }
 
 // Columns are the board's columns in order.
@@ -101,37 +109,24 @@ func (s *Source) Columns() columns.Set {
 	return s.set.Columns
 }
 
-type prJob struct {
-	Number int
-	Open   bool
-	Result string
-	Branch string
-	SHA    string
-}
-
-type publish struct {
-	Number int
-	SHA    string
-}
-
-// Source holds what was last read from Jenkins and git for one repository.
+// Source holds what was last read from the build server and git for one
+// repository.
 type Source struct {
 	repo string
 	set  Settings
-	http *http.Client
 	// hide is applied to every git process so none flashes a console window.
 	hide func(*exec.Cmd)
 
 	mu        sync.Mutex
-	jobs      []prJob
-	published map[string]publish
+	jobs      []PRBuild
+	published map[string]Publish
 	offline   string
 	// deployed remembers publishes already seen to include a merge; a merge
 	// never leaves a publish once in it.
 	deployed map[int]string
 }
 
-// New reads Jenkins and git for repo, any checkout of the worktrees.
+// New reads the build server and git for repo, any checkout of the worktrees.
 func New(repo string, set Settings, hide func(*exec.Cmd)) *Source {
 	if hide == nil {
 		hide = func(*exec.Cmd) {}
@@ -139,34 +134,40 @@ func New(repo string, set Settings, hide func(*exec.Cmd)) *Source {
 	if set.Rules == nil {
 		set.Rules, _ = Chain(nil)
 	}
+	if set.Host == nil {
+		set.Host, _ = Host("")
+	}
+	if set.TicketKey == nil {
+		set.TicketKey, _ = TicketKey("")
+	}
 	return &Source{
 		repo:      repo,
 		set:       set,
-		http:      &http.Client{Timeout: 20 * time.Second},
 		hide:      hide,
-		published: map[string]publish{},
+		published: map[string]Publish{},
 		deployed:  map[int]string{},
 	}
 }
 
-// Refresh fetches the target branches and rereads Jenkins. Offline Jenkins is
-// not an error: columns that need it say so instead.
+// Refresh fetches the target branches and rereads the build server. An
+// offline server is not an error: columns that need it say so instead.
 func (s *Source) Refresh(ctx context.Context) {
 	if branches := s.targetBranches(); len(branches) > 0 {
 		s.git(ctx, append([]string{"fetch", "--quiet", "origin"}, branches...)...)
 	}
-	if s.set.PRJobs == "" {
+	ci := s.set.CI
+	if ci == nil {
 		return
 	}
 
-	jobs, err := s.readJobs(ctx)
-	pubs := map[string]publish{}
+	jobs, err := ci.PRBuilds(ctx)
+	pubs := map[string]Publish{}
 	if err == nil {
 		for _, t := range s.set.Targets {
 			if t.Publish == "" {
 				continue
 			}
-			if p, perr := s.readPublish(ctx, t.Publish); perr == nil {
+			if p, perr := ci.LastPublish(ctx, t); perr == nil {
 				pubs[t.Branch] = p
 			}
 		}
@@ -175,7 +176,7 @@ func (s *Source) Refresh(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
-		s.offline = "Jenkins is not answering (VPN?)"
+		s.offline = ci.Name() + " is not answering (VPN?)"
 		return
 	}
 	s.offline = ""
@@ -187,11 +188,12 @@ func (s *Source) Refresh(ctx context.Context) {
 // from an earlier look, for when Jenkins has dropped the job of a closed one.
 func (s *Source) Classify(ctx context.Context, worktree string, agents []herdr.Agent, knownPR int) (info Info) {
 	branch := ticket.ReadBranch(worktree)
-	branchKey := keyIn(branch)
+	branchKey := s.keyIn(branch)
 	run, err := ticket.Load(worktree, ticket.Options{Teams: s.set.Teams}, agents, nil)
-	// Only a run named by a Jira key, and the branch's key when it has one,
+	// Only a run named by a ticket key, and the branch's key when it has one,
 	// is this ticket's run; checkouts also hold older runs of other work.
-	if err == nil && (!jiraKey.MatchString(run.Key) || jiraKey.FindString(run.Key) != run.Key || branchKey != "" && run.Key != branchKey) {
+	key := s.set.TicketKey
+	if err == nil && (key.FindString(run.Key) != run.Key || run.Key == "" || branchKey != "" && run.Key != branchKey) {
 		run, err = nil, os.ErrNotExist
 	}
 	info.Key = branchKey
@@ -270,7 +272,7 @@ func (s *Source) targetRefs() []string {
 	return out
 }
 
-// Offline reports why Jenkins data is missing, or "".
+// Offline reports why build server data is missing, or "".
 func (s *Source) Offline() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -320,15 +322,15 @@ func describeRun(info *Info, run *ticket.Run) {
 	}
 }
 
-func (s *Source) jobFor(ctx context.Context, branch string) (prJob, bool) {
+func (s *Source) jobFor(ctx context.Context, branch string) (PRBuild, bool) {
 	if branch == "" {
-		return prJob{}, false
+		return PRBuild{}, false
 	}
 	s.mu.Lock()
-	jobs := append([]prJob(nil), s.jobs...)
+	jobs := append([]PRBuild(nil), s.jobs...)
 	s.mu.Unlock()
 
-	var hits []prJob
+	var hits []PRBuild
 	for _, j := range jobs {
 		if j.Branch == branch {
 			hits = append(hits, j)
@@ -345,7 +347,7 @@ func (s *Source) jobFor(ctx context.Context, branch string) (prJob, bool) {
 		}
 	}
 	if len(hits) == 0 {
-		return prJob{}, false
+		return PRBuild{}, false
 	}
 	best := hits[0]
 	for _, h := range hits[1:] {
@@ -389,33 +391,30 @@ func prMentioned(dir string) int {
 	return 0
 }
 
-// prFromMergeCommit finds the pull request whose Bitbucket merge commit names
-// this branch: "Merge pull request #<n> in SP/<repo> from <branch> to ...".
+// prFromMergeCommit finds the pull request whose merge commit names this
+// branch, when the code host's subjects name it.
 func (s *Source) prFromMergeCommit(ctx context.Context, branch string) int {
 	refs := s.targetRefs()
-	if branch == "" || len(refs) == 0 {
+	grep := s.set.Host.BranchSubject(branch)
+	if branch == "" || grep == "" || len(refs) == 0 {
 		return 0
 	}
-	out := s.git(ctx, append(append([]string{"log"}, refs...), "--format=%s", "-F", "--grep", "from "+branch+" to ", "-1")...)
-	if m := regexp.MustCompile(`#(\d+)`).FindStringSubmatch(out); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return n
-	}
-	return 0
+	out := s.git(ctx, append(append([]string{"log"}, refs...), "--format=%s", "-F", "--grep", grep, "-1")...)
+	return numberIn(out)
 }
 
 // mergeOf finds the merge commit of a pull request and the branch it went into.
 func (s *Source) mergeOf(ctx context.Context, pr int) (sha, target string) {
 	refs := s.targetRefs()
-	if len(refs) == 0 {
+	subjects := s.set.Host.MergeSubjects(pr)
+	if len(refs) == 0 || len(subjects) == 0 {
 		return "", ""
 	}
-	// Bitbucket and GitHub merge-commit subjects.
-	args := append(append([]string{"log"}, refs...), "--format=%H", "-F",
-		"--grep", fmt.Sprintf("Pull request #%d:", pr),
-		"--grep", fmt.Sprintf("Merge pull request #%d in ", pr),
-		"--grep", fmt.Sprintf("Merge pull request #%d from ", pr), "-1")
-	out := s.git(ctx, args...)
+	args := append(append([]string{"log"}, refs...), "--format=%H", "-F")
+	for _, subject := range subjects {
+		args = append(args, "--grep", subject)
+	}
+	out := s.git(ctx, append(args, "-1")...)
 	if out == "" {
 		return "", ""
 	}
@@ -474,101 +473,11 @@ func (s *Source) gitIn(ctx context.Context, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-type jenkinsRevision struct {
-	LastBuiltRevision *struct {
-		SHA1   string `json:"SHA1"`
-		Branch []struct {
-			Name string `json:"name"`
-		} `json:"branch"`
-	} `json:"lastBuiltRevision"`
+// keyIn is the ticket key a branch names, matched as written and then in
+// upper case (branch names are often lower case).
+func (s *Source) keyIn(branch string) string {
+	if k := s.set.TicketKey.FindString(branch); k != "" {
+		return k
+	}
+	return s.set.TicketKey.FindString(strings.ToUpper(branch))
 }
-
-func revisionOf(actions []jenkinsRevision) (sha, branch string) {
-	for _, a := range actions {
-		if a.LastBuiltRevision != nil {
-			sha = a.LastBuiltRevision.SHA1
-			if len(a.LastBuiltRevision.Branch) > 0 {
-				branch = strings.TrimPrefix(a.LastBuiltRevision.Branch[0].Name, "origin/")
-			}
-			return
-		}
-	}
-	return
-}
-
-func (s *Source) readJobs(ctx context.Context) ([]prJob, error) {
-	var body struct {
-		Jobs []struct {
-			Name      string `json:"name"`
-			Color     string `json:"color"`
-			LastBuild *struct {
-				Result   string            `json:"result"`
-				Building bool              `json:"building"`
-				Actions  []jenkinsRevision `json:"actions"`
-			} `json:"lastBuild"`
-		} `json:"jobs"`
-	}
-	tree := "jobs[name,color,lastBuild[result,building,actions[lastBuiltRevision[SHA1,branch[name]]]]]"
-	if err := s.getJSON(ctx, strings.TrimRight(s.set.PRJobs, "/")+"/api/json?tree="+tree, &body); err != nil {
-		return nil, err
-	}
-	var jobs []prJob
-	for _, j := range body.Jobs {
-		n, err := strconv.Atoi(strings.TrimPrefix(j.Name, "PR-"))
-		if err != nil || !strings.HasPrefix(j.Name, "PR-") {
-			continue
-		}
-		job := prJob{Number: n, Open: j.Color != "disabled"}
-		if j.LastBuild != nil {
-			job.Result = j.LastBuild.Result
-			if j.LastBuild.Building {
-				job.Result = "RUNNING"
-			}
-			job.SHA, job.Branch = revisionOf(j.LastBuild.Actions)
-		}
-		jobs = append(jobs, job)
-	}
-	return jobs, nil
-}
-
-func (s *Source) readPublish(ctx context.Context, url string) (publish, error) {
-	var body struct {
-		Builds []struct {
-			Number  int               `json:"number"`
-			Result  string            `json:"result"`
-			Actions []jenkinsRevision `json:"actions"`
-		} `json:"builds"`
-	}
-	tree := "builds[number,result,actions[lastBuiltRevision[SHA1]]]{0,6}"
-	if err := s.getJSON(ctx, strings.TrimRight(url, "/")+"/api/json?tree="+tree, &body); err != nil {
-		return publish{}, err
-	}
-	for _, b := range body.Builds {
-		if b.Result == "SUCCESS" {
-			sha, _ := revisionOf(b.Actions)
-			return publish{Number: b.Number, SHA: sha}, nil
-		}
-	}
-	return publish{}, fmt.Errorf("no successful publish")
-}
-
-func (s *Source) getJSON(ctx context.Context, url string, into any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d from Jenkins", resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(into)
-}
-
-var jiraKey = regexp.MustCompile(`[A-Z][A-Z0-9]+-\d+`)
-
-func keyIn(branch string) string { return jiraKey.FindString(strings.ToUpper(branch)) }

@@ -208,9 +208,9 @@ func (m *Model) viewFooter() string {
 		if m.status != "" {
 			hint = m.status
 		}
-		state := m.spinner.Frame() + " reading Jenkins and git"
+		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
 		if !m.pipeAt.IsZero() {
-			state = "Jenkins and git read at " + m.pipeAt.Local().Format("15:04")
+			state = m.pipe.CIName() + " and git read at " + m.pipeAt.Local().Format("15:04")
 			if m.pipeLoading {
 				state += " " + m.spinner.Frame()
 			}
@@ -623,7 +623,7 @@ func (m *Model) viewHelp() string {
 	lines := []string{titleStyle.Render(" Board"), ""}
 	if m.pipelineOn() {
 		lines = append(lines,
-			dimStyle.Render(indent+truncate("Columns come from the run, Jenkins and git; they are not moved by hand.", room+keyCol)),
+			dimStyle.Render(indent+truncate("Columns come from the run, "+m.pipe.CIName()+" and git; they are not moved by hand.", room+keyCol)),
 			indent+keyStyle.Render(pad(m.hintKey("accept"), keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
 			indent+keyStyle.Render(pad(m.hintKey("archive"), keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
 			"")

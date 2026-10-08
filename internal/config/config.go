@@ -56,8 +56,15 @@ type TicketConfig struct {
 type PipelineConfig struct {
 	// PRURL is a pull request's link, with {pr} for its number.
 	PRURL string `toml:"pr_url"`
-	// JenkinsPRJobs is the Jenkins multibranch job whose children are PR-<n>.
+	// CI is the build server pull request builds and publishes are read from.
+	CI CIConfig `toml:"ci"`
+	// JenkinsPRJobs is the older spelling of ci = {kind = "jenkins", url = ...},
+	// still read when [pipeline.ci] is absent.
 	JenkinsPRJobs string `toml:"jenkins_pr_jobs"`
+	// CodeHost is how merge commits are worded: bitbucket, github or any.
+	CodeHost string `toml:"code_host"`
+	// TicketKey is the regular expression a ticket key matches in a branch.
+	TicketKey string `toml:"ticket_key"`
 	// Rules names the column rules in the order they are tried.
 	Rules []string `toml:"rules"`
 	// Targets are the branches pull requests merge into, most downstream
@@ -66,6 +73,12 @@ type PipelineConfig struct {
 	// Columns rename, recolour, reorder or re-icon the computed columns, and
 	// add one for a custom rule to return.
 	Columns []columns.Column `toml:"column"`
+}
+
+// CIConfig is the [pipeline.ci] table.
+type CIConfig struct {
+	Kind string `toml:"kind"`
+	URL  string `toml:"url"`
 }
 
 // TargetConfig is one [[pipeline.target]].
@@ -170,6 +183,12 @@ func Load() Settings {
 	s.Pipeline = c.Pipeline
 	s.Ticket = c.Ticket
 	s.Keys, s.Problems = bindings(c.Keys, s.Problems)
+	if s.Pipeline.CI.Kind == "" && s.Pipeline.CI.URL == "" && s.Pipeline.JenkinsPRJobs != "" {
+		s.Pipeline.CI = CIConfig{Kind: "jenkins", URL: s.Pipeline.JenkinsPRJobs}
+	}
+	if s.Pipeline.CI.Kind == "" && s.Pipeline.CI.URL != "" {
+		s.Problems = append(s.Problems, "pipeline.ci has a url but no kind — no build server is read")
+	}
 	if len(s.Pipeline.Targets) == 0 {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
@@ -225,17 +244,29 @@ icons = false
 # issue_url = "https://your-site.atlassian.net/browse/{key}"
 
 # The global board's computed columns. Everything here is optional: without
-# Jenkins, pull requests are found from the run and merge commits only.
+# a build server, pull requests are found from the run and merge commits only.
 [pipeline]
 # pr_url = "https://git.example.com/projects/P/repos/r/pull-requests/{pr}"
-# jenkins_pr_jobs = "https://jenkins.example.com/job/Folder/job/Repo"
+
+# How merge commits are worded, to find a merged pull request in git:
+# bitbucket, github or any (both; the default).
+# code_host = "any"
+
+# The regular expression a ticket key matches in a branch name. The default
+# is a Jira-style key, PROJ-123.
+# ticket_key = '[A-Z][A-Z0-9]+-\d+'
+
+# The build server. kind "jenkins" is built in; url is the multibranch job
+# whose children are the pull request builds (PR-<n>). Leave it out for
+# none. (The older jenkins_pr_jobs = "<url>" still works.)
+# ci = { kind = "jenkins", url = "https://jenkins.example.com/job/Folder/job/Repo" }
 
 # Rules decide a card's column, tried in order; the first that decides wins.
 # Known: deployed, merged, not-started, working, landed.
 # rules = ["deployed", "merged", "not-started", "working", "landed"]
 
 # Branches pull requests merge into, most downstream first. publish is the
-# Jenkins job that deploys the branch; env is how the card names it.
+# build server job that deploys the branch; env is how the card names it.
 # [[pipeline.target]]
 # branch = "main"
 # env = "dev"

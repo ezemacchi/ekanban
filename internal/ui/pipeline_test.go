@@ -43,7 +43,7 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 
 	selectSpace(t, m, "/tmp/api")
 	send(t, m, key("1"))
-	if m.status != computedColumns {
+	if m.status != m.computedColumns() {
 		t.Fatalf("a number key must not retag in pipeline mode, status %q", m.status)
 	}
 	if got := labelsIn(m, pipeline.ReadyQA); !equal(got, []string{"api"}) {

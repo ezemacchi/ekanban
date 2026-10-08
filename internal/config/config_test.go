@@ -136,6 +136,22 @@ func TestExampleIsValidAndMatchesDefaults(t *testing.T) {
 	}
 }
 
+// [pipeline.ci] names the server; the older jenkins_pr_jobs still means Jenkins.
+func TestCIConfig(t *testing.T) {
+	write(t, "[pipeline]\nci = { kind = \"fake\", url = \"u\" }\njenkins_pr_jobs = \"old\"\n")
+	if ci := Load().Pipeline.CI; ci.Kind != "fake" || ci.URL != "u" {
+		t.Fatalf("ci = %+v", ci)
+	}
+	write(t, "[pipeline]\njenkins_pr_jobs = \"old\"\n")
+	if ci := Load().Pipeline.CI; ci.Kind != "jenkins" || ci.URL != "old" {
+		t.Fatalf("jenkins_pr_jobs = %+v", ci)
+	}
+	write(t, "[pipeline.ci]\nurl = \"u\"\n")
+	if s := Load(); len(s.Problems) == 0 {
+		t.Fatal("a url without a kind was ignored silently")
+	}
+}
+
 // Writing over somebody's settings would be unforgivable.
 func TestWriteExampleRefusesToOverwrite(t *testing.T) {
 	dir := write(t, "poll_interval = \"9m\"\n")

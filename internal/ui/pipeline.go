@@ -17,7 +17,7 @@ import (
 )
 
 // Pipeline mode: the board's columns are delivery stages computed from each
-// ticket's run, Jenkins and git (package pipeline), not statuses set by hand.
+// ticket's run, the build server and git (package pipeline), not statuses set by hand.
 // It is on when the board is scoped to a repository. Notes, names and manual
 // order still belong to the user; the column does not.
 
@@ -48,7 +48,7 @@ func (m *Model) SetPipeline(src *pipeline.Source) {
 		m.board.Statuses = append(m.board.Statuses, store.Status{ID: c.ID, Label: c.Label, Color: c.Color})
 	}
 	m.board.Default = pipeline.ToDo
-	// Pull requests come from Jenkins here; the GitHub client stays off.
+	// Pull requests come from the build server here; the GitHub client stays off.
 	m.gh = nil
 	if m.layout == layoutList {
 		m.layout = layoutKanban
@@ -62,8 +62,8 @@ type pipelineMsg struct {
 	at    time.Time
 }
 
-// loadPipeline classifies every space in scope in the background. Jenkins and
-// git are refreshed at most once per pipelineEvery; the run files and agents
+// loadPipeline classifies every space in scope in the background. The build
+// server and git are refreshed at most once per pipelineEvery; the run files and agents
 // are reread every time, so a role finishing shows within one tick.
 func (m *Model) loadPipeline(force bool) tea.Cmd {
 	if m.pipe == nil || m.pipeLoading {
@@ -163,13 +163,13 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 		style := dimStyle
 		switch info.Build {
 		case "SUCCESS":
-			pr += " · Jenkins green"
+			pr += " · " + m.pipe.CIName() + " green"
 			style = prPassStyle
 		case "FAILURE", "UNSTABLE":
-			pr += " · Jenkins " + strings.ToLower(info.Build)
+			pr += " · " + m.pipe.CIName() + " " + strings.ToLower(info.Build)
 			style = prFailStyle
 		case "RUNNING":
-			pr += " · Jenkins running"
+			pr += " · " + m.pipe.CIName() + " running"
 			style = prPendingStyle
 		}
 		if info.MergedTo != "" {
@@ -186,19 +186,22 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 	return lines
 }
 
-const computedColumns = "columns are computed from the run, Jenkins and git"
+// computedColumns is the answer to a key that would move a card by hand.
+func (m *Model) computedColumns() string {
+	return "columns are computed from the run, " + m.pipe.CIName() + " and git"
+}
 
 // handlePipelineKey takes the keys whose meaning changes in pipeline mode:
 // everything that would set a column by hand is refused, a accepts, A opens
-// the archive, r also rereads Jenkins.
+// the archive, r also rereads the build server.
 func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 	switch key {
 	case "s", "S":
-		m.status = computedColumns
+		m.status = m.computedColumns()
 		return true, m, nil
 	case "h", "left", "l", "right":
 		if m.grabbed != "" {
-			m.status = computedColumns
+			m.status = m.computedColumns()
 			return true, m, nil
 		}
 	case "a":
@@ -213,7 +216,7 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true))
 	}
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
-		m.status = computedColumns
+		m.status = m.computedColumns()
 		return true, m, nil
 	}
 	return false, m, nil

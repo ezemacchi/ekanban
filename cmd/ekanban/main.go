@@ -161,7 +161,7 @@ func run(args []string) error {
 	}
 	if model.Scoped() {
 		// Inside a repository the columns are its tickets' delivery stages,
-		// read from Jenkins and git rather than GitHub.
+		// read from the build server and git rather than GitHub.
 		set, problems := pipelineSettings(settings)
 		model.SetPipeline(pipeline.New(cwd, set, gh.HideWindow))
 		model.SetProblems(problems)

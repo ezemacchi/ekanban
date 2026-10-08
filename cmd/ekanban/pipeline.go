@@ -65,12 +65,17 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	rules, problems := pipeline.Chain(cfg.Pipeline.Rules)
 	teams, teamProblems := loadTeams()
 	cols, colProblems := columns.Merge(pipeline.DefaultColumns, cfg.Pipeline.Columns, true)
-	set := pipeline.Settings{PRJobs: cfg.Pipeline.JenkinsPRJobs, Rules: rules, Teams: teams, Columns: cols}
+	ci, ciProblems := pipeline.NewCI(pipeline.CIConfig{Kind: cfg.Pipeline.CI.Kind, URL: cfg.Pipeline.CI.URL})
+	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
+	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
+	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Columns: cols}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
-	problems = append(problems, teamProblems...)
-	return set, append(problems, colProblems...)
+	for _, more := range [][]string{teamProblems, colProblems, ciProblems, hostProblems, keyProblems} {
+		problems = append(problems, more...)
+	}
+	return set, problems
 }
 
 // ticketSettings is the ticket board's share of config.toml.

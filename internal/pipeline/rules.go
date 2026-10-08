@@ -6,7 +6,7 @@ import (
 )
 
 // Facts is everything a rule may look at about one ticket. Classify gathers
-// it from the run, Jenkins and git; rules only read it, so a rule never does
+// it from the run, the build server and git; rules only read it, so a rule never does
 // I/O and can be tested with a literal.
 type Facts struct {
 	Key        string
@@ -14,11 +14,11 @@ type Facts struct {
 	NotStarted bool   // the run exists but nothing was dispatched
 	Landed     bool   // the run's landing check passed
 	PR         int    // 0 when none is known
-	PROpen     bool   // Jenkins still builds the pull request
+	PROpen     bool   // the build server still builds the pull request
 	Build      string // last pull request build: SUCCESS, FAILURE, RUNNING, ...
 	MergedTo   string // target branch the pull request was merged into, or ""
 	Deployed   string // publish that includes the merge ("dev #212"), or ""
-	Offline    string // why Jenkins data is missing, or ""
+	Offline    string // why build server data is missing, or ""
 }
 
 // Decision is a rule's answer: the column, and an optional note shown on the
