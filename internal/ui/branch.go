@@ -5,8 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // Branches come from Herdr's worktree list rather than the session snapshot,

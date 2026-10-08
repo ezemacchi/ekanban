@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 )
 
 // PR state is context, never control: it is rendered beside a space and pushed

@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/links"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/links"
 )
 
 // Column is a kanban column.
@@ -93,6 +93,10 @@ type Run struct {
 	JiraURL  string
 	Team     string
 	Target   string
+	// Spec is the story code (E7_US_42) that names the spec in the specifications clone;
+	// Prototype is its HTML prototype there, when one exists.
+	Spec      string
+	Prototype string
 
 	Objective   []string
 	CurrentStep []string
@@ -118,7 +122,7 @@ func Find(worktree string) (dir, key string, ok bool) {
 	if len(matches) == 0 {
 		return "", "", false
 	}
-	branch := readBranch(worktree)
+	branch := ReadBranch(worktree)
 	for _, m := range matches {
 		k := filepath.Base(filepath.Dir(m))
 		if branch != "" && strings.Contains(strings.ToUpper(branch), strings.ToUpper(k)) {
@@ -129,8 +133,9 @@ func Find(worktree string) (dir, key string, ok bool) {
 	return filepath.Dir(matches[0]), filepath.Base(filepath.Dir(matches[0])), true
 }
 
-// Load reads the run and places each role of its team on the board.
-func Load(worktree string, agents []herdr.Agent, tabLabels map[string]string) (*Run, error) {
+// Load reads the run and places each role of its team on the board. specRoot is
+// the specifications clone the prototype is looked up in; empty skips it.
+func Load(worktree, specRoot string, agents []herdr.Agent, tabLabels map[string]string) (*Run, error) {
 	dir, key, ok := Find(worktree)
 	if !ok {
 		return nil, os.ErrNotExist
@@ -143,12 +148,17 @@ func Load(worktree string, agents []herdr.Agent, tabLabels map[string]string) (*
 		Key:      key,
 		Dir:      dir,
 		Worktree: worktree,
-		Branch:   readBranch(worktree),
+		Branch:   ReadBranch(worktree),
 		JiraURL:  links.Issue(key),
 	}
 	r.parse(string(text))
 	r.Team = r.Field("Team")
 	r.Target = r.Field("Target")
+	r.Spec = normalizeSpec(r.Field("Spec"))
+	if r.Spec == "" {
+		r.Spec = mostMentionedSpec(dir)
+	}
+	r.Prototype = findPrototype(specRoot, r.Spec)
 	r.Objective = firstLines(r.section(`(?i)^(objective|objetivo)`), 3)
 	r.CurrentStep = firstLines(r.section(`(?i)^(current step|paso actual|pipeline)`), 4)
 	r.Questions = r.openQuestions()
@@ -328,9 +338,88 @@ func (r *Run) dispatchNames() []string {
 	return out
 }
 
-// readBranch reads the checked-out branch without running git: a worktree's
+var specCode = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(E\d+)[_-](US|TS)[_-](\d+)`)
+
+// normalizeSpec turns any spelling of a story code into E7_US_42.
+func normalizeSpec(s string) string {
+	m := specCode.FindStringSubmatch(s)
+	if m == nil {
+		return ""
+	}
+	n, _ := strconv.Atoi(m[3])
+	return strings.ToUpper(m[1]) + "_" + strings.ToUpper(m[2]) + "_" + leftPad2(n)
+}
+
+func leftPad2(n int) string {
+	if n < 10 {
+		return "0" + strconv.Itoa(n)
+	}
+	return strconv.Itoa(n)
+}
+
+// mostMentionedSpec picks the story code the run's files mention most. Runs
+// started before STATE.md carried a Spec field name related stories too, but
+// their own story dominates.
+func mostMentionedSpec(dir string) string {
+	counts := map[string]int{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, m := range specCode.FindAllString(string(data), -1) {
+			if code := normalizeSpec(m); code != "" {
+				counts[code]++
+			}
+		}
+	}
+	best, bestN := "", 0
+	for code, n := range counts {
+		if n > bestN || n == bestN && code < best {
+			best, bestN = code, n
+		}
+	}
+	return best
+}
+
+// findPrototype finds the story's prototype under
+// specifications/backlog/<E1>/: its _00_index page, else its first HTML file.
+func findPrototype(specRoot, spec string) string {
+	if specRoot == "" || spec == "" {
+		return ""
+	}
+	increment := spec[:strings.Index(spec, "_")]
+	base := filepath.Join(specRoot, "specifications", "backlog", increment)
+	var pages []string
+	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if !d.IsDir() && strings.HasPrefix(name, spec+"_") && strings.HasSuffix(strings.ToLower(name), ".html") {
+			pages = append(pages, path)
+		}
+		return nil
+	})
+	if len(pages) == 0 {
+		return ""
+	}
+	sort.Strings(pages)
+	for _, p := range pages {
+		if strings.Contains(filepath.Base(p), "_00_index") {
+			return p
+		}
+	}
+	return pages[0]
+}
+
+// ReadBranch reads the checked-out branch without running git: a worktree's
 // .git is a file naming its git directory, whose HEAD names the branch.
-func readBranch(worktree string) string {
+func ReadBranch(worktree string) string {
 	gitPath := filepath.Join(worktree, ".git")
 	gitDir := gitPath
 	if data, err := os.ReadFile(gitPath); err == nil {

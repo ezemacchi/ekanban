@@ -1,4 +1,4 @@
-module github.com/phin-tech/herdr-phin-board
+module github.com/ezemacchi/herdr-phin-board
 
 go 1.26.5
 

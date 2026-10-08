@@ -30,6 +30,33 @@ type Config struct {
 	// Icons draws Nerd Font glyphs. Off by default: without a Nerd Font in the
 	// terminal they render as empty boxes.
 	Icons *bool `toml:"icons"`
+	// SpecClone is the clone of the specifications repository the ticket
+	// board finds prototypes in. Empty turns prototype links off.
+	SpecClone string `toml:"spec_clone"`
+	// IssueURL is the tracker link of a ticket, with {key} for its key.
+	IssueURL string `toml:"issue_url"`
+	// Pipeline drives the global board's computed columns.
+	Pipeline PipelineConfig `toml:"pipeline"`
+}
+
+// PipelineConfig is the [pipeline] table.
+type PipelineConfig struct {
+	// PRURL is a pull request's link, with {pr} for its number.
+	PRURL string `toml:"pr_url"`
+	// JenkinsPRJobs is the Jenkins multibranch job whose children are PR-<n>.
+	JenkinsPRJobs string `toml:"jenkins_pr_jobs"`
+	// Rules names the column rules in the order they are tried.
+	Rules []string `toml:"rules"`
+	// Targets are the branches pull requests merge into, most downstream
+	// first, each with the publish job that deploys it.
+	Targets []TargetConfig `toml:"target"`
+}
+
+// TargetConfig is one [[pipeline.target]].
+type TargetConfig struct {
+	Branch  string `toml:"branch"`
+	Env     string `toml:"env"`
+	Publish string `toml:"publish"`
 }
 
 const (
@@ -45,6 +72,9 @@ type Settings struct {
 	PollInterval  time.Duration
 	Notifications bool
 	Icons         bool
+	SpecClone     string
+	IssueURL      string
+	Pipeline      PipelineConfig
 	// Path is where the file was read from, whether or not it existed.
 	Path string
 	// Problems are complaints about the file's contents. A bad value falls back
@@ -114,6 +144,12 @@ func Load() Settings {
 	if c.Icons != nil {
 		s.Icons = *c.Icons
 	}
+	s.SpecClone = c.SpecClone
+	s.IssueURL = c.IssueURL
+	s.Pipeline = c.Pipeline
+	if len(s.Pipeline.Targets) == 0 {
+		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
+	}
 	return s
 }
 
@@ -134,6 +170,30 @@ notifications = true
 # Nerd Font icons on the ticket board. Needs a Nerd Font in the terminal
 # (e.g. Cascadia Code NF); without one they show as empty boxes.
 icons = false
+
+# The clone of your specifications repository, where the ticket board finds
+# prototypes. Leave it out to turn prototype links off.
+# spec_clone = 'C:\repos\specs'
+
+# Tracker link of a ticket; {key} is replaced by its key.
+# issue_url = "https://your-site.atlassian.net/browse/{key}"
+
+# The global board's computed columns. Everything here is optional: without
+# Jenkins, pull requests are found from the run and merge commits only.
+[pipeline]
+# pr_url = "https://git.example.com/projects/P/repos/r/pull-requests/{pr}"
+# jenkins_pr_jobs = "https://jenkins.example.com/job/Folder/job/Repo"
+
+# Rules decide a card's column, tried in order; the first that decides wins.
+# Known: deployed, merged, not-started, working, landed.
+# rules = ["deployed", "merged", "not-started", "working", "landed"]
+
+# Branches pull requests merge into, most downstream first. publish is the
+# Jenkins job that deploys the branch; env is how the card names it.
+# [[pipeline.target]]
+# branch = "main"
+# env = "dev"
+# publish = "https://jenkins.example.com/job/Folder/job/Repo%20Publish"
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/phin-tech/herdr-phin-board/internal/alert"
-	"github.com/phin-tech/herdr-phin-board/internal/config"
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/herdr-phin-board/internal/config"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // Interval is the default cadence, overridden by poll_interval in the config

@@ -1,6 +1,6 @@
 # herdr-phin-board
 
-[![ci](https://github.com/phin-tech/herdr-phin-board/actions/workflows/ci.yml/badge.svg)](https://github.com/phin-tech/herdr-phin-board/actions/workflows/ci.yml)
+[![ci](https://github.com/ezemacchi/herdr-phin-board/actions/workflows/ci.yml/badge.svg)](https://github.com/ezemacchi/herdr-phin-board/actions/workflows/ci.yml)
 
 A [Herdr](https://herdr.dev) plugin: a status board over your spaces, in a popup,
 on a key.
@@ -17,7 +17,7 @@ machine.
  ▾ Todo (0)
  ▾ In Progress (2)
    dev-stream             ~/src/github.com/phin-tech/dev-stream                      ·working
-   herdr-phin-board       ~/src/github.com/phin-tech/herdr-phin-board                   ·idle
+   herdr-phin-board       ~/src/github.com/ezemacchi/herdr-phin-board                   ·idle
  ▾ Waiting (2)
    🔔 docs-site           vendor SLA response, chased 2026-07-18                     ·blocked
  ❯ api-gateway            waiting on Dave re: API key                                   ·idle
@@ -211,7 +211,7 @@ side by side, spaces in the other one are outside its view.
 ## Install
 
 ```sh
-herdr plugin install phin-tech/herdr-phin-board
+herdr plugin install ezemacchi/herdr-phin-board
 ```
 
 That runs the build step, which compiles from source if Go is on your `PATH`
@@ -222,7 +222,7 @@ For local development, point Herdr at a working tree instead — no build runs,
 so you compile it yourself:
 
 ```sh
-git clone https://github.com/phin-tech/herdr-phin-board
+git clone https://github.com/ezemacchi/herdr-phin-board
 cd herdr-phin-board && go build -o bin/herdr-phin-board ./cmd/herdr-phin-board
 herdr plugin link .
 ```

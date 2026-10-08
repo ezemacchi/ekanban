@@ -12,10 +12,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phin-tech/herdr-phin-board/internal/alert"
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 type mode int
@@ -210,6 +211,17 @@ type Model struct {
 	// for every space; scopeOf caches each space's answer. See scope.go.
 	scope   string
 	scopeOf map[string]string
+
+	// Pipeline mode (pipeline.go): computed columns, the archive of accepted
+	// tickets. pipe is nil when off.
+	pipe           *pipeline.Source
+	pipeInfo       map[string]pipeline.Info
+	pipeAt         time.Time
+	pipeLoading    bool
+	manualStatuses []store.Status
+	manualDefault  string
+	archiveView    bool
+	archiveIdx     int
 }
 
 // New builds the initial model.
@@ -425,7 +437,7 @@ func (m *Model) rebuild() {
 	for key, entry := range m.board.Entries {
 		sp, ok := spaces[key]
 		if !ok {
-			if !m.showArchive {
+			if !m.showArchive || m.pipe != nil {
 				continue
 			}
 			sp = &space{Key: key, Label: entry.Label}
@@ -443,6 +455,13 @@ func (m *Model) rebuild() {
 	fallback := m.board.DefaultStatusID()
 	list := make([]*space, 0, len(spaces))
 	for _, sp := range spaces {
+		if m.pipe != nil {
+			stage, show := m.pipelineStage(sp)
+			if !show {
+				continue
+			}
+			sp.StatusID = stage
+		}
 		if _, ok := m.board.StatusByID(sp.StatusID); !ok {
 			sp.StatusID = fallback
 		}

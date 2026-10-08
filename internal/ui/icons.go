@@ -3,7 +3,7 @@ package ui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // Nerd Font glyphs, drawn only when the icons setting is on.

@@ -6,7 +6,7 @@
 set -eu
 
 out="bin/herdr-phin-board"
-repo="phin-tech/herdr-phin-board"
+repo="ezemacchi/herdr-phin-board"
 
 mkdir -p bin
 
@@ -16,7 +16,7 @@ if command -v go >/dev/null 2>&1; then
   version=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml 2>/dev/null || true)
   [ -n "$version" ] || version="dev"
   exec go build -trimpath \
-    -ldflags "-X github.com/phin-tech/herdr-phin-board/internal/version.Version=${version}" \
+    -ldflags "-X github.com/ezemacchi/herdr-phin-board/internal/version.Version=${version}" \
     -o "$out" ./cmd/herdr-phin-board
 fi
 

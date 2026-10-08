@@ -16,13 +16,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phin-tech/herdr-phin-board/internal/config"
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
-	"github.com/phin-tech/herdr-phin-board/internal/ticketui"
-	"github.com/phin-tech/herdr-phin-board/internal/ui"
-	"github.com/phin-tech/herdr-phin-board/internal/version"
-	"github.com/phin-tech/herdr-phin-board/internal/watch"
+	"github.com/ezemacchi/herdr-phin-board/internal/config"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/links"
+	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/ticketui"
+	"github.com/ezemacchi/herdr-phin-board/internal/ui"
+	"github.com/ezemacchi/herdr-phin-board/internal/version"
+	"github.com/ezemacchi/herdr-phin-board/internal/watch"
 )
 
 func main() {
@@ -81,6 +84,15 @@ func run(args []string) error {
 		return err
 	}
 
+	if len(args) > 0 && args[0] == "pipeline" {
+		// Diagnostic: where each worktree of a repository lands, as JSON lines.
+		repo := "."
+		if len(args) > 1 {
+			repo = args[1]
+		}
+		return dumpPipeline(client, repo)
+	}
+
 	if len(args) > 0 && args[0] == "ticket" {
 		// One run's roles as a kanban; the first tab of a /handoff workspace.
 		worktree := ""
@@ -89,7 +101,9 @@ func run(args []string) error {
 		} else if worktree, err = os.Getwd(); err != nil {
 			return err
 		}
-		_, err := tea.NewProgram(ticketui.New(client, worktree, config.Load().Icons), tea.WithAltScreen()).Run()
+		settings := config.Load()
+		links.Configure(settings.IssueURL, settings.Pipeline.PRURL)
+		_, err := tea.NewProgram(ticketui.New(client, worktree, settings.SpecClone, settings.Icons), tea.WithAltScreen()).Run()
 		return err
 	}
 	board, err := store.Load()
@@ -125,11 +139,6 @@ func run(args []string) error {
 		}
 	}
 
-	// A watcher keeps polling after the board closes, which is the only way a
-	// notification can reach you while you are elsewhere. Spawning it here
-	// means there is nothing to set up; the lock means there is only ever one.
-	spawnWatcher()
-
 	// Mouse reporting drives the view switcher, the wheel, and clicking a row
 	// or a group header -- which is the whole interaction model in a dock,
 	// where the pointer is already on the screen. It also takes over
@@ -138,9 +147,23 @@ func run(args []string) error {
 	if sidebar {
 		model = ui.NewSidebar(client, board)
 	}
-	model.SetIcons(config.Load().Icons)
-	if cwd, err := os.Getwd(); err == nil {
+	settings := config.Load()
+	model.SetIcons(settings.Icons)
+	cwd, _ := os.Getwd()
+	if cwd != "" {
 		model.SetScope(cwd)
+	}
+	if model.Scoped() {
+		// Inside a repository the columns are its tickets' delivery stages,
+		// read from Jenkins and git rather than GitHub.
+		set, problems := pipelineSettings(settings)
+		model.SetPipeline(pipeline.New(cwd, set, gh.HideWindow))
+		model.SetProblems(problems)
+	} else {
+		// A watcher keeps polling GitHub after the board closes, which is the
+		// only way a notification can reach you while you are elsewhere. The
+		// lock means there is only ever one.
+		spawnWatcher()
 	}
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = prog.Run()

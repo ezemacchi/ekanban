@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
 )
 
 func write(t *testing.T, path, text string) {
@@ -16,6 +16,32 @@ func write(t *testing.T, path, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
+	specsDir := t.TempDir()
+	protos := filepath.Join(specsDir, "specifications", "backlog", "E7", "prototypes")
+	write(t, filepath.Join(protos, "E7_US_42_batch_01_baseline.html"), "x")
+	write(t, filepath.Join(protos, "E7_US_42_batch_00_index.html"), "x")
+	write(t, filepath.Join(protos, "E7_US_05_other_00_index.html"), "x")
+
+	wt := t.TempDir()
+	run := filepath.Join(wt, ".runs", "ABC-1")
+	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\nSpec: e7-us-42\n")
+	r, err := Load(wt, specsDir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Spec != "E7_US_42" || filepath.Base(r.Prototype) != "E7_US_42_batch_00_index.html" {
+		t.Fatalf("spec %q prototype %q", r.Spec, r.Prototype)
+	}
+
+	// No Spec field: the story the run's files mention most wins.
+	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\n")
+	write(t, filepath.Join(run, "ENVELOPE.md"), "E7_US_42 E7_US_42 related: E7_US_05")
+	if r, _ = Load(wt, specsDir, nil, nil); r.Spec != "E7_US_42" {
+		t.Fatalf("most mentioned: %q", r.Spec)
 	}
 }
 
@@ -33,7 +59,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 		{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", Cwd: filepath.Join(wt, "src")},
 		{Agent: &agent, AgentStatus: "blocked", PaneID: "w:p9", TabID: "w:t9", Cwd: filepath.Join(t.TempDir())},
 	}
-	r, err := Load(wt, agents, map[string]string{"w:t3": "implementer", "w:t9": "qa"})
+	r, err := Load(wt, "", agents, map[string]string{"w:t3": "implementer", "w:t9": "qa"})
 	if err != nil {
 		t.Fatal(err)
 	}

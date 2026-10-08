@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/ezemacchi/herdr-phin-board/internal/links"
 )
 
 // The detail view exists because a row can only show a truncated note. In the
@@ -132,7 +134,27 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 
 	// PR context sits between the note and the machine facts: it is about the
 	// work, but unlike the note it is not something you wrote.
-	if pr, ok := m.prFor(sp.Key); ok {
+	if m.pipelineOn() {
+		if info, ok := m.pipeInfo[sp.Key]; ok && info.Title != "" {
+			for _, line := range wrap(info.Title, width) {
+				lines = append(lines, plain(line)...)
+			}
+			lines = append(lines, plain("")...)
+		}
+		facts := m.pipelineLines(sp, width)
+		if info := m.pipeInfo[sp.Key]; info.PR > 0 {
+			// The pull request line opens Bitbucket on click.
+			for i, l := range facts {
+				if strings.Contains(l, fmt.Sprintf("PR #%d", info.PR)) {
+					lines = append(lines, detailLine{text: l, url: links.PullRequest(info.PR)})
+					facts = append(facts[:i:i], facts[i+1:]...)
+					break
+				}
+			}
+		}
+		lines = append(lines, plain(facts...)...)
+		lines = append(lines, plain("")...)
+	} else if pr, ok := m.prFor(sp.Key); ok {
 		lines = append(lines, prDetailLines(pr, width)...)
 		lines = append(lines, plain("")...)
 	}

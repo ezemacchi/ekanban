@@ -1,6 +1,6 @@
 package ticketui
 
-import "github.com/phin-tech/herdr-phin-board/internal/ticket"
+import "github.com/ezemacchi/herdr-phin-board/internal/ticket"
 
 // glyphs are Nerd Font code points; they are shown only when icons are on.
 type glyphs struct {
@@ -26,14 +26,15 @@ var columnGlyph = map[ticket.Column]string{
 }
 
 const (
-	glyphJira     = "\ue75a"
-	glyphBranch   = "\ue725"
-	glyphTarget   = "\uf419"
-	glyphNow      = "\uf04b"
-	glyphLanded   = "\uf135"
-	glyphStuck    = "\uf071"
-	glyphOrch     = "\uf0e8"
-	glyphQuestion = "\uf059"
+	glyphJira      = "\ue75a"
+	glyphBranch    = "\ue725"
+	glyphTarget    = "\uf419"
+	glyphNow       = "\uf04b"
+	glyphLanded    = "\uf135"
+	glyphStuck     = "\uf071"
+	glyphOrch      = "\uf0e8"
+	glyphQuestion  = "\uf059"
+	glyphPrototype = "\uf1fc" // paint brush
 )
 
 // g prefixes text with a glyph and a space, or returns the text alone.

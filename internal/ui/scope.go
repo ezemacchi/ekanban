@@ -16,6 +16,9 @@ func (m *Model) SetScope(dir string) {
 	m.scopeOf = map[string]string{}
 }
 
+// Scoped reports whether the board is limited to one repository.
+func (m *Model) Scoped() bool { return m.scope != "" }
+
 func (m *Model) inScope(key string) bool {
 	if m.scope == "" {
 		return true

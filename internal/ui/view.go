@@ -36,6 +36,10 @@ func (m *Model) viewFrame() string {
 		return ""
 	}
 
+	if m.archiveView && m.mode == modeNormal {
+		return m.viewArchive()
+	}
+
 	switch m.mode {
 	case modeHelp:
 		return m.viewHelp()
@@ -191,6 +195,18 @@ func (m *Model) viewFooter() string {
 			return ""
 		}
 		return dimStyle.Render(" " + truncate(strings.Join(parts, " · "), m.width-2))
+	}
+
+	if m.pipelineOn() {
+		hint := "a aceptar (Ready for QA) · A archivo · d detalle · n nota · enter ir · r refrescar · ? ayuda"
+		if m.status != "" {
+			hint = m.status
+		}
+		state := "Jenkins y git: cargando…"
+		if !m.pipeAt.IsZero() {
+			state = "Jenkins y git leídos a las " + m.pipeAt.Local().Format("15:04")
+		}
+		return dimStyle.Render(" "+truncate(state, m.width-2)) + "\n" + dimStyle.Render(" "+truncate(hint, m.width-2))
 	}
 
 	// The numbered statuses are the fastest way to file something, so show the
@@ -581,6 +597,13 @@ func (m *Model) viewHelp() string {
 	room := m.width - lipgloss.Width(indent) - keyCol - 1
 
 	lines := []string{titleStyle.Render(" Board"), ""}
+	if m.pipelineOn() {
+		lines = append(lines,
+			dimStyle.Render(indent+truncate("Las columnas salen de la corrida, Jenkins y git; no se mueven a mano.", room+keyCol)),
+			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("aceptar un ticket de Ready for QA: pasa al Archivo", room)),
+			indent+keyStyle.Render(pad("A", keyCol))+dimStyle.Render(truncate("Archivo de tickets aceptados (o Jira, p PR, u devolver, / buscar)", room)),
+			"")
+	}
 	for _, r := range helpRows {
 		text := r.long
 		if narrow {

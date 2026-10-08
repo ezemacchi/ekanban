@@ -166,6 +166,12 @@ func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 			lines = append(lines, "  "+noteStyle.Render(line))
 		}
 	}
+	if m.pipelineOn() {
+		for _, l := range m.pipelineLines(sp, width-2) {
+			lines = append(lines, "  "+l)
+		}
+		return lines
+	}
 	if pr, ok := m.prFor(sp.Key); ok {
 		lines = append(lines, "  "+prStyled(pr, width-2))
 	}

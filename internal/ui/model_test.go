@@ -2,20 +2,20 @@ package ui
 
 import (
 	"errors"
-	"github.com/phin-tech/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/herdr-phin-board/internal/alert"
 	"time"
 
 	"fmt"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // loadTestBoard gives every UI test the same four statuses, rather than

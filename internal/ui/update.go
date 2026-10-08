@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phin-tech/herdr-phin-board/internal/nav"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/nav"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // Update routes messages, dispatching keys to whichever mode is active.
@@ -27,7 +27,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The space list is what defines which directories to ask GitHub and
 		// Herdr about, so the lookups are kicked off from here rather than
 		// Init -- but only for what the new list actually changed.
-		return m, m.spacesChanged()
+		return m, tea.Batch(m.spacesChanged(), m.loadPipeline(false))
+
+	case pipelineMsg:
+		m.applyPipeline(msg)
+		return m, nil
 
 	case branchesMsg:
 		m.branchLoading = false
@@ -44,7 +48,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The board's own clock: PR entries age out of the cache, and branches
 		// go stale silently because a checkout raises no Herdr event. Both
 		// calls are no-ops until something is genuinely due.
-		return m, tea.Batch(m.loadPRs(), m.loadBranches(), tick())
+		return m, tea.Batch(m.loadPRs(), m.loadBranches(), m.loadPipeline(false), tick())
 
 	case prLoadedMsg:
 		return m, m.applyPRs(msg)
@@ -277,6 +281,14 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
+	if m.pipelineOn() {
+		if m.archiveView {
+			return m.handleArchiveKey(msg.String())
+		}
+		if handled, model, cmd := m.handlePipelineKey(msg.String()); handled {
+			return model, cmd
+		}
+	}
 
 	switch key := msg.String(); key {
 	case "q", "esc":
@@ -641,6 +653,7 @@ func (m *Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.sendToAgent(value)
 		case modeFilter:
 			m.filter = value
+			m.archiveIdx = 0
 			m.rebuild()
 		case modeManageAdd:
 			if value != "" {
@@ -937,6 +950,13 @@ func (m *Model) statusIndex(id string) int {
 }
 
 func (m *Model) save() {
+	// Pipeline columns are computed, never stored: the file keeps the manual
+	// statuses so the board is unchanged when opened outside a repository.
+	if m.pipe != nil {
+		computed, def := m.board.Statuses, m.board.Default
+		m.board.Statuses, m.board.Default = m.manualStatuses, m.manualDefault
+		defer func() { m.board.Statuses, m.board.Default = computed, def }()
+	}
 	if err := m.board.Save(); err != nil {
 		m.err = err
 	}

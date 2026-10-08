@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 )
 
 func failingPR() gh.PR {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdrtest"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdrtest"
 )
 
 func TestNewRequiresASocketPath(t *testing.T) {

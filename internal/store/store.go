@@ -35,6 +35,53 @@ type Entry struct {
 	// recency, so the board stays useful before anything is arranged by hand.
 	Order     int       `json:"order,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// PR is the pull request last seen for this space, kept because Jenkins
+	// drops the job of a closed one.
+	PR int `json:"pr,omitempty"`
+	// Accepted is set when the user accepts a ticket out of Ready for QA. It
+	// takes the space off the board and into the archive, and outlives the
+	// worktree so a past ticket can still be looked up.
+	Accepted *Accepted `json:"accepted,omitempty"`
+}
+
+// Accepted is the archive record of one finished ticket.
+type Accepted struct {
+	At       time.Time `json:"at"`
+	Ticket   string    `json:"ticket"`
+	Title    string    `json:"title,omitempty"`
+	Branch   string    `json:"branch,omitempty"`
+	PR       int       `json:"pr,omitempty"`
+	MergedTo string    `json:"merged_to,omitempty"`
+	Deployed string    `json:"deployed,omitempty"`
+	Worktree string    `json:"worktree,omitempty"`
+	// Repo is the repository's shared .git directory, kept because the
+	// worktree may be deleted and then nothing on disk says where it was.
+	Repo string `json:"repo,omitempty"`
+}
+
+// Accept archives a space; Unaccept puts it back on the board.
+func (b *Board) Accept(key string, a Accepted) {
+	e := b.Entries[key]
+	e.Accepted = &a
+	e.UpdatedAt = time.Now().UTC()
+	b.Entries[key] = e
+}
+
+func (b *Board) Unaccept(key string) {
+	e, ok := b.Entries[key]
+	if !ok {
+		return
+	}
+	e.Accepted = nil
+	e.UpdatedAt = time.Now().UTC()
+	b.Entries[key] = e
+}
+
+// SetPR remembers a space's pull request.
+func (b *Board) SetPR(key string, pr int) {
+	e := b.Entries[key]
+	e.PR = pr
+	b.Entries[key] = e
 }
 
 // Board is the whole persisted file.
@@ -363,7 +410,12 @@ func (b *Board) RenameStatus(id, label string) {
 // Prune drops entries for directories that no longer exist on disk.
 func (b *Board) Prune() int {
 	var gone []string
-	for key := range b.Entries {
+	for key, e := range b.Entries {
+		// An accepted ticket is the archive record; its worktree is expected
+		// to be deleted.
+		if e.Accepted != nil {
+			continue
+		}
 		if _, err := os.Stat(key); errors.Is(err, os.ErrNotExist) {
 			gone = append(gone, key)
 		}

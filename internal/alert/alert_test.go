@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 )
 
 func TestTransitionsOnlyFireOnChange(t *testing.T) {

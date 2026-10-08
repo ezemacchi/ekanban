@@ -5,6 +5,7 @@ package ticketui
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -12,9 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/phin-tech/herdr-phin-board/internal/herdr"
-	"github.com/phin-tech/herdr-phin-board/internal/nav"
-	"github.com/phin-tech/herdr-phin-board/internal/ticket"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/herdr-phin-board/internal/nav"
+	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
 )
 
 const refreshEvery = 5 * time.Second
@@ -34,6 +35,7 @@ var (
 type Model struct {
 	client   *herdr.Client
 	worktree string
+	specRoot string
 	icons    glyphs
 
 	run    *ticket.Run
@@ -46,10 +48,11 @@ type Model struct {
 	height   int
 }
 
-// New builds the board for the run in worktree. icons turns on Nerd Font
+// New builds the board for the run in worktree. specRoot is the
+// specifications clone prototypes are found in; icons turns on Nerd Font
 // glyphs.
-func New(client *herdr.Client, worktree string, icons bool) *Model {
-	return &Model{client: client, worktree: worktree, icons: glyphs{on: icons}}
+func New(client *herdr.Client, worktree, specRoot string, icons bool) *Model {
+	return &Model{client: client, worktree: worktree, specRoot: specRoot, icons: glyphs{on: icons}}
 }
 
 type loadedMsg struct {
@@ -76,7 +79,7 @@ func (m *Model) load() tea.Msg {
 			}
 		}
 	}
-	run, err := ticket.Load(m.worktree, agents, labels)
+	run, err := ticket.Load(m.worktree, m.specRoot, agents, labels)
 	return loadedMsg{run: run, err: err}
 }
 
@@ -136,6 +139,17 @@ func (m *Model) key(k string) tea.Cmd {
 			m.status = "abriendo " + url
 			return func() tea.Msg { _ = openURL(url); return nil }
 		}
+	case "p":
+		if m.run == nil {
+			return nil
+		}
+		if m.run.Prototype == "" {
+			m.status = "no encuentro un prototipo para " + orDash(m.run.Spec)
+			return nil
+		}
+		page := m.run.Prototype
+		m.status = "abriendo el prototipo"
+		return func() tea.Msg { _ = openURL(page); return nil }
 	case "enter":
 		return m.focusSelected()
 	}
@@ -213,6 +227,12 @@ func (m *Model) View() string {
 	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(r.Key), dimStyle.Render(fmt.Sprintf("%s · %s · %s",
 		team, ic.g(glyphTarget, orDash(r.Target)), ic.g(glyphBranch, orDash(r.Branch)))))
 	fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphJira, r.JiraURL)))
+	switch {
+	case r.Prototype != "":
+		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphPrototype, "Prototipo "+r.Spec+": "+filepath.Base(r.Prototype)+"  (p)")))
+	case r.Spec != "":
+		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.g(glyphPrototype, "Sin prototipo para "+r.Spec)))
+	}
 	for _, l := range r.Objective {
 		fmt.Fprintf(&b, "%s\n", truncate(l, width))
 	}
@@ -290,7 +310,7 @@ func (m *Model) View() string {
 		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
 	}
 	b.WriteString(keyStyle.Render("h/l") + " columna  " + keyStyle.Render("j/k") + " rol  " + keyStyle.Render("enter") + " ir a su pestaña  " +
-		keyStyle.Render("o") + " Jira  " + keyStyle.Render("r") + " refrescar  " + keyStyle.Render("q") + " salir")
+		keyStyle.Render("o") + " Jira  " + keyStyle.Render("p") + " prototipo  " + keyStyle.Render("r") + " refrescar  " + keyStyle.Render("q") + " salir")
 	return b.String()
 }
 

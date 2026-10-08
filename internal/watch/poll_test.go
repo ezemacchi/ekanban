@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phin-tech/herdr-phin-board/internal/alert"
-	"github.com/phin-tech/herdr-phin-board/internal/gh"
-	"github.com/phin-tech/herdr-phin-board/internal/herdrtest"
-	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/herdr-phin-board/internal/herdrtest"
+	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
 
 // tempSpace returns a directory as Herdr would report it, and as the board
