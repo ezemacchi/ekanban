@@ -202,7 +202,7 @@ func (m *Model) viewFooter() string {
 		if len(parts) == 0 {
 			return ""
 		}
-		return dimStyle.Render(" " + truncate(strings.Join(parts, " · "), m.width-2))
+		return screen.Say(" "+strings.Join(parts, " · "), dimStyle, m.width-1)
 	}
 
 	if m.pipelineOn() {
@@ -222,44 +222,51 @@ func (m *Model) viewFooter() string {
 		if s := m.statusText(); s != "" {
 			state += " · " + s
 		}
-		return dimStyle.Render(" "+truncate(state, m.width-2)) + "\n " + m.buttons(1, 1, hints, m.width-2)
+		return screen.Say(" "+state, dimStyle, m.width-1) + "\n " + m.buttons(1, 1, hints, m.width-2)
 	}
 
 	// The picker in a list or table has no card to open in, so it takes the
 	// footer: a bar of choices, then how to drive it.
 	if m.mode == modeStatusPick {
-		help := "s/arrows move · enter set · esc cancel · or click one"
+		help := " " + pickerHelp + " · or click one"
 		if m.layout == layoutKanban {
-			return " " + m.statusLegend() + "\n" + dimStyle.Render(" "+truncate(help, m.width-2))
+			return " " + m.statusLegend() + "\n" + screen.Say(help, dimStyle, m.width-1)
 		}
-		return m.pickerBar(0, m.width) + "\n" + dimStyle.Render(" "+truncate(help, m.width-2))
+		return m.pickerBar(0, m.width) + "\n" + screen.Say(help, dimStyle, m.width-1)
 	}
 
 	// The numbered statuses are the fastest way to file something, so show the
 	// actual mapping rather than a generic "1-9". Each is a button too.
 	keys := " " + m.statusLegend()
 
+	k := m.hintKey
+	pair := func(a, b string) string {
+		if k(a) == "" || k(b) == "" {
+			return ""
+		}
+		return k(a) + "/" + k(b)
+	}
 	var hints []hint
 	switch {
 	case m.grabbed != "" && m.layout == layoutKanban:
-		hints = []hint{{"h/l", "retag"}, {"j/k", "reorder"}, {"enter", "drop"}}
+		hints = []hint{{pair("left", "right"), "retag"}, {pair("down", "up"), "reorder"}, {k("jump"), "drop"}}
 	case m.grabbed != "":
-		hints = []hint{{"j/k", "move (across a group changes status)"}, {"enter", "drop"}}
+		hints = []hint{{pair("down", "up"), "move (across a group changes status)"}, {k("jump"), "drop"}}
 	case m.layout == layoutKanban:
-		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "list"}, {"?", "help"}}
+		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "list"}, {k("help"), "help"}}
 	case m.layout == layoutTable:
-		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"o", "sort"}, {"enter", "jump"}, {"K", "kanban"}, {"?", "help"}}
+		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("sort"), "sort"}, {k("jump"), "jump"}, {k("layout"), "kanban"}, {k("help"), "help"}}
 	case m.board.HideDetail:
-		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "table"}, {"?", "help"}}
+		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "table"}, {k("help"), "help"}}
 	default:
-		hints = []hint{{"s", "status"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "table"}, {"?", "help"}}
+		hints = []hint{{k("status-picker"), "status"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "table"}, {k("help"), "help"}}
 	}
 	line := " "
 	x := 1
 	if s := m.statusText(); s != "" {
-		s = truncate(s, max(m.width/2, 20))
-		line += dimStyle.Render(s + " · ")
-		x += lipgloss.Width(s) + 3
+		said := screen.Say(s+" · ", dimStyle, max(m.width/2, 20)+3)
+		line += said
+		x += lipgloss.Width(said)
 	}
 	return keys + "\n" + line + m.buttons(1, x, hints, m.width-x-1)
 }
@@ -580,9 +587,10 @@ func (m *Model) viewManage() string {
 	case modeManageRename:
 		b.WriteString(keyStyle.Render(" rename to: ") + m.input.View())
 	default:
-		b.WriteString(dimStyle.Render(" a add · r rename · d delete · D set default · J/K reorder · esc back"))
+		k := screen.Key
+		b.WriteString(screen.Say(" "+k("a")+" add · "+k("r")+" rename · "+k("d")+" delete · "+k("D")+" set default · "+k("J/K")+" reorder · "+k("esc")+" back", dimStyle, m.width-1))
 		if m.status != "" {
-			b.WriteString("\n" + dimStyle.Render(" "+m.status))
+			b.WriteString("\n" + screen.Say(" "+m.status, dimStyle, m.width-1))
 		}
 	}
 	return b.String()
@@ -620,7 +628,7 @@ var helpRows = []helpRow{
 	{actions: []string{"rename"}, long: "rename the space — renames the Herdr workspace too", short: "rename space"},
 	{actions: []string{"message"}, long: "type a message into that space's agent, then go there to send it", short: "message agent"},
 	{actions: []string{"fold"}, long: "collapse / expand group", short: "fold group"},
-	{actions: []string{"status-only"}, long: "show only the status under the cursor — F or esc for all", short: "this status only"},
+	{actions: []string{"status-only"}, long: "show only the status under the cursor; again for all", short: "this status only"},
 	{actions: []string{"reorder-spaces"}, long: "reorder Herdr's own Spaces sidebar to match this board", short: "reorder Spaces"},
 	{actions: []string{"archived"}, long: "show or hide archived spaces", short: "archived"},
 	{actions: []string{"filter"}, long: "filter by name, path or note", short: "filter"},

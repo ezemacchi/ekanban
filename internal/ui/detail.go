@@ -121,7 +121,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 			lines = append(lines, plain(noteStyle.Render(lead+line))...)
 		}
 	} else {
-		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Pencil, "no note — press n to add one"), width)))...)
+		lines = append(lines, plain(screen.Say(m.glyph(look.Pencil, "no note"+m.press("note", "to add one")), dimStyle, width))...)
 	}
 	lines = append(lines, plain("")...)
 
@@ -210,15 +210,20 @@ func (m *Model) viewDetailOverBoard() string {
 	return m.viewDetailModal(base)
 }
 
+// pickerHelp is how to drive the status picker, whose keys are its own and
+// cannot be rebound.
+var pickerHelp = screen.Key("s") + "/arrows move · " + screen.Key("enter") + " set · " + screen.Key("esc") + " cancel"
+
 func (m *Model) viewDetailModal(base string) string {
 	sp := m.selected()
 	maxInner := min(m.width-detailModalMargin, detailModalMax) - 4
 	if maxInner < detailModalMin {
 		maxInner = detailModalMin
 	}
-	hints := []hint{{"n", "note"}, {"s", "status"}, {"enter", "jump"}, {"esc", "close"}}
+	k := m.hintKey
+	hints := []hint{{k("note"), "note"}, {k("status-picker"), "status"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	if m.pipelineOn() {
-		hints = []hint{{"n", "note"}, {"enter", "jump"}, {"esc", "close"}}
+		hints = []hint{{k("note"), "note"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	}
 	picking := m.mode == modeStatusPick
 
@@ -243,7 +248,7 @@ func (m *Model) viewDetailModal(base string) string {
 		for i := range m.board.Statuses {
 			m.addZone(zone{Kind: zoneStatus, Y: i + 1, X0: 0, X1: inner, Choice: i})
 		}
-		bottom = append(bottom, dimStyle.Render(truncate("s/arrows move · enter set · esc cancel", inner)))
+		bottom = append(bottom, screen.Say(pickerHelp, dimStyle, inner))
 	} else {
 		bottom = []string{m.buttons(0, 0, hints, inner)}
 		for i := mark; i < len(m.zones); i++ {

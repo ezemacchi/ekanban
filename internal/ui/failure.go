@@ -40,7 +40,7 @@ func (m *Model) sendFailure() tea.Cmd {
 		if pr.Checks == gh.ChecksFail {
 			// The rollup says something failed but no name came with it, which
 			// happens when the cache predates the notable list.
-			m.status = fmt.Sprintf("#%d is failing — press r to fetch which check", pr.Number)
+			m.status = fmt.Sprintf("#%d is failing", pr.Number) + m.press("refresh", "to fetch which check")
 			return nil
 		}
 		m.status = fmt.Sprintf("nothing failing on #%d", pr.Number)

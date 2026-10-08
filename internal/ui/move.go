@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/ezemacchi/ekanban/internal/screen"
+
 // Grab mode: `v` picks up the selected space, then j/k walk it through the
 // board. Moving inside a group reorders it; moving off either end carries it
 // into the neighbouring group, which is what changes its status.
@@ -23,11 +25,12 @@ func (m *Model) toggleGrab() {
 	// Reordering writes a rank within a status. Sorted any other way, the row
 	// above is not the one it would swap with.
 	if m.layout == layoutTable && m.sort != sortStatus {
-		m.status = "press o to sort by status before moving rows"
+		m.status = "rows move only when sorted by status" + m.press("sort", "to sort")
 		return
 	}
 	m.grabbed = m.selected().Key
-	m.status = "moving — j/k to move, across a group to change status, enter to drop"
+	k := func(action string) string { return screen.Key(m.hintKey(action)) }
+	m.status = "moving — " + k("down") + "/" + k("up") + " to move, across a group to change status, " + k("jump") + " to drop"
 }
 
 // moveGrabbed shifts the held space by one position along the axis that

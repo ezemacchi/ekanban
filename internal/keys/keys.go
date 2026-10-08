@@ -98,12 +98,14 @@ func (m *Map) Keys(name string) []string {
 	return nil
 }
 
-// Key is the first key of name, for a hint line.
+// Key is the first key of name, for a hint line; "" when the action has no
+// key, so a hint or message for it is left out rather than naming a key that
+// does something else.
 func (m *Map) Key(name string) string {
 	if k := m.Keys(name); len(k) > 0 {
 		return k[0]
 	}
-	return "?"
+	return ""
 }
 
 // Actions are the screen's actions with their current keys, in order.

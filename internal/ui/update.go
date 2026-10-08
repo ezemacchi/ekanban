@@ -629,7 +629,9 @@ func (m *Model) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleDetailKey drives the kanban modal. It keeps the actions you would
 // reach for while reading a note, so you do not have to close it first.
 func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key := msg.String(); key {
+	// The modal's keys are the board's, rebindings included, so its buttons
+	// and the board's footer name the same keys.
+	switch key := m.keyMap().Resolve(msg.String()); key {
 	case "esc", "q", "d":
 		m.mode = modeNormal
 
@@ -933,7 +935,7 @@ func (m *Model) cycleSort() {
 	// Only the table has a sortable order; the list and kanban are arranged by
 	// status. Saying so beats doing nothing.
 	if m.layout != layoutTable {
-		m.status = "sorting is a table thing — press K to get there"
+		m.status = "sorting is a table thing" + m.press("layout", "to get there")
 		return
 	}
 	selected := m.selectedKey()
@@ -973,7 +975,7 @@ func (m *Model) toggleStatusFilter() {
 	// status, and a cursor pointing at nothing makes the next key look broken.
 	m.landed = false
 	m.rebuild()
-	m.status = "showing only " + st.Label + " — F or esc for all"
+	m.status = "showing only " + st.Label + m.press("status-only", "again for all")
 }
 
 func labelSuffix(label string) string {
@@ -989,7 +991,7 @@ func (m *Model) requireSpace() bool {
 	if m.selected() != nil {
 		return true
 	}
-	m.status = "that's a group header — press j to move down to a space"
+	m.status = "that's a group header" + m.press("down", "to move down to a space")
 	return false
 }
 

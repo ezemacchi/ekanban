@@ -523,7 +523,7 @@ func (m *Model) View() string {
 		width = 100
 	}
 	if m.err != nil && m.run == nil {
-		return errStyle.Render(" No run found in "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render(" Looking for "+m.lookingFor()+" · q quit")
+		return errStyle.Render(" No run found in "+m.worktree+": "+m.err.Error()) + "\n" + screen.Say(" Looking for "+m.lookingFor()+keyHint(m.keyMap().Key("quit"), "quit"), dimStyle, width-1)
 	}
 	if m.run == nil {
 		return dimStyle.Render(" " + m.spinner.Frame() + " loading")
@@ -625,7 +625,8 @@ func (m *Model) body(width, top int) string {
 		line(look.Truncate(l, text), "")
 	}
 	leadName := strings.ToLower(r.Lead.Label)
-	orch := fmt.Sprintf("no %s open · %s opens one", leadName, m.keyMap().Key("lead"))
+	leadKey := m.keyMap().Key("lead")
+	orch := "no " + leadName + " open" + keyHint(leadKey, "opens one")
 	orchStyle := dimStyle
 	if r.LeadPane != "" {
 		al := look.Agent(r.LeadStatus)
@@ -633,12 +634,12 @@ func (m *Model) body(width, top int) string {
 		if r.LeadTitle != "" {
 			orch += " · " + r.LeadTitle
 		}
-		orch += " · " + m.keyMap().Key("lead") + " goes there"
+		orch += keyHint(leadKey, "goes there")
 		if r.LeadStatus != "idle" {
 			orchStyle = al.Style
 		}
 	}
-	line(orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), text)), "lead")
+	line(screen.Say(ic.With(look.Sitemap, orch), orchStyle, text), "lead")
 	b.WriteString("\n")
 
 	cols := m.kanbanColumns()
@@ -764,7 +765,7 @@ func (m *Model) footer(width, below int) string {
 	if s := m.statusText(); s != "" {
 		state += " · " + s
 	}
-	first := dimStyle.Render(" " + look.Truncate(state, width-2))
+	first := screen.Say(" "+state, dimStyle, width-1)
 	if m.err != nil {
 		first = errStyle.Render(" " + look.Truncate(m.err.Error(), width-2))
 	}
@@ -775,6 +776,15 @@ func (m *Model) footer(width, below int) string {
 		{Key: k("refresh"), Label: "refresh"}, {Key: k("quit"), Label: "quit"},
 	}
 	return first + "\n " + screen.Buttons(&m.zones, 1, 1, hints, width-2)
+}
+
+// keyHint is " · <key> <what>" with the key marked for screen.Say, or ""
+// when the action has no key.
+func keyHint(key, what string) string {
+	if key == "" {
+		return ""
+	}
+	return " · " + screen.Key(key) + " " + what
 }
 
 func orDash(s string) string {

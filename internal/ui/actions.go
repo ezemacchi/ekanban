@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/ezemacchi/ekanban/internal/keys"
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
 // The global board's actions, one list per screen. The first key of each is
@@ -32,7 +33,7 @@ var (
 		{Name: "rename", Keys: []string{"R"}, Help: "rename the space — renames the Herdr workspace too", Short: "rename space"},
 		{Name: "message", Keys: []string{"m"}, Help: "type a message into that space's agent, then go there to send it", Short: "message agent"},
 		{Name: "fold", Keys: []string{" ", "tab"}, Help: "collapse / expand group", Short: "fold group"},
-		{Name: "status-only", Keys: []string{"F"}, Help: "show only the status under the cursor — F or esc for all", Short: "this status only"},
+		{Name: "status-only", Keys: []string{"F"}, Help: "show only the status under the cursor; again for all", Short: "this status only"},
 		{Name: "reorder-spaces", Keys: []string{"O"}, Help: "reorder Herdr's own Spaces sidebar to match this board", Short: "reorder Spaces"},
 		{Name: "filter", Keys: []string{"/"}, Help: "filter by name, path or note", Short: "filter"},
 		{Name: "statuses", Keys: []string{"S"}, Help: "manage statuses (add, rename, reorder, delete)", Short: "statuses"},
@@ -125,6 +126,29 @@ func (m *Model) hintKey(name string) string {
 		km, _ = keys.New(m.defaultActions(), nil)
 	}
 	return km.Key(name)
+}
+
+// pipelineKey is action's key on the computed board, whichever screen is in
+// front: the archive names the board's accept key.
+func (m *Model) pipelineKey(action string) string {
+	km := m.keys.pipeline
+	if km == nil {
+		km, _ = keys.New(PipelineActions, nil)
+	}
+	return km.Key(action)
+}
+
+// press is " — press <key> <what>" with action's current key marked for
+// screen.Say, or "" when the action has no key.
+func (m *Model) press(action, what string) string {
+	return pressWith(m.hintKey(action), what)
+}
+
+func pressWith(key, what string) string {
+	if key == "" {
+		return ""
+	}
+	return " — press " + screen.Key(key) + " " + what
 }
 
 func (m *Model) defaultActions() []keys.Action {

@@ -74,7 +74,7 @@ func (m *Model) openPR() tea.Cmd {
 	}
 	if pr.URL == "" {
 		// Cached before the URL was recorded, or gh returned none.
-		m.status = fmt.Sprintf("#%d has no URL recorded — press r to refresh", pr.Number)
+		m.status = fmt.Sprintf("#%d has no URL recorded", pr.Number) + m.press("refresh", "to refresh")
 		return nil
 	}
 

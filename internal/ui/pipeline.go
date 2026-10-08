@@ -15,6 +15,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
@@ -475,7 +476,7 @@ func (m *Model) viewArchive() string {
 	b.WriteString(head + "\n\n")
 
 	if len(items) == 0 {
-		b.WriteString(dimStyle.Render("  No accepted tickets yet. On the board, press a on a card in "+m.columns.Label(pipeline.ReadyQA)+".") + "\n")
+		b.WriteString(screen.Say("  No accepted tickets yet"+pressWith(m.pipelineKey("accept"), "on a card in "+m.columns.Label(pipeline.ReadyQA)+" on the board")+".", dimStyle, 0) + "\n")
 	}
 	width := max(m.width-4, 40)
 	for i, a := range items {
@@ -495,8 +496,12 @@ func (m *Model) viewArchive() string {
 		}
 	}
 	k := m.hintKey
-	b.WriteString("\n" + dimStyle.Render(" "+k("down")+"/"+k("up")+" move · "+k("open-issue")+" tracker · "+k("open-pull-request")+
-		" pull request · "+k("restore")+" back to the board · "+k("filter")+" search · "+k("archive")+" back"))
+	hints := []hint{{k("open-issue"), "tracker"}, {k("open-pull-request"), "pull request"},
+		{k("restore"), "back to the board"}, {k("filter"), "search"}, {k("archive"), "back"}}
+	b.WriteString("\n")
+	footer := " " + m.buttons(0, 1, hints, m.width-2)
+	m.placeFooter(linesIn(b.String()))
+	b.WriteString(footer)
 	return lipgloss.NewStyle().MaxHeight(max(m.height, 1)).Render(b.String())
 }
 
