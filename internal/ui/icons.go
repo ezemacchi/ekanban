@@ -33,8 +33,13 @@ func (m *Model) statusLabel(st store.Status) string {
 }
 
 // spaceLabel prefixes a space's name with what it is: a git worktree on a
-// branch, or a plain folder.
+// branch, or a plain folder. On the pipeline board a ticket worktree is
+// named by its ticket key: the folder names of one repository's worktrees
+// share a long prefix, so cut to a card's width they all read the same.
 func (m *Model) spaceLabel(sp *space) string {
+	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
+		return m.glyph(look.Branch, info.Key)
+	}
 	if m.branchFor(sp.Key) != "" {
 		return m.glyph(look.Branch, sp.Label)
 	}

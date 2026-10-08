@@ -183,6 +183,9 @@ func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 		name = focusStyle.Render(name)
 	}
 	lines := []string{name}
+	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Title != "" {
+		lines = append(lines, dimStyle.Render(truncate(info.Title, text)))
+	}
 
 	if sp.Note != "" {
 		for _, line := range wrap(sp.Note, text) {

@@ -94,8 +94,8 @@ func TestClosedWorktreeStaysOnTheBoard(t *testing.T) {
 		}
 	}
 	m.width = 200
-	if out := m.View(); !strings.Contains(out, "workspace closed") {
-		t.Fatalf("the closed worktree is not marked:\n%s", out)
+	if out := m.View(); !strings.Contains(out, "workspace closed") || !strings.Contains(out, "ABC-2") {
+		t.Fatalf("the closed worktree is not marked, or not named by its ticket:\n%s", out)
 	}
 }
 
