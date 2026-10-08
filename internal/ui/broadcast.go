@@ -43,6 +43,7 @@ type broadcastState struct {
 	loading bool
 	list    bool // the list of orchestrators has the keys, not the message
 	idx     int  // the highlighted orchestrator
+	preset  int  // the ready-made message in the message, -1 for none
 }
 
 // SetBroadcast sets the ready-made messages the broadcast offers.
@@ -72,7 +73,7 @@ func (m *Model) startBroadcast() tea.Cmd {
 			cards[sp.Key] = m.pipeInfo[sp.Key]
 		}
 	}
-	m.bc.to, m.bc.loading, m.bc.list, m.bc.idx = nil, true, false, 0
+	m.bc.to, m.bc.loading, m.bc.list, m.bc.idx, m.bc.preset = nil, true, false, 0, -1
 	m.mode = modeBroadcast
 	m.input.SetValue("")
 	m.input.Focus()
@@ -147,6 +148,24 @@ func (m *Model) handleBroadcastKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.askBroadcast()
 		return m, nil
+	case "up", "down":
+		// In the message the arrows go through the ready-made messages, the
+		// way a shell goes through its history.
+		if !m.bc.list && len(m.bc.presets) > 0 {
+			n := len(m.bc.presets)
+			step := 1
+			if k == "up" {
+				step = n - 1
+			}
+			next := (m.bc.preset + step) % n
+			if m.bc.preset < 0 {
+				next = map[bool]int{true: n - 1, false: 0}[k == "up"]
+			}
+			m.usePreset(next)
+			return m, nil
+		}
+		m.broadcastListKey(k)
+		return m, nil
 	default:
 		if m.bc.list {
 			m.broadcastListKey(k)
@@ -167,27 +186,45 @@ func (m *Model) broadcastListKey(k string) {
 		m.bc.idx++
 	case "k", "up":
 		m.bc.idx--
-	case " ", "x":
+	case " ":
 		if m.bc.idx < n {
 			m.bc.to[m.bc.idx].on = !m.bc.to[m.bc.idx].on
 		}
-	case "a":
-		all := len(m.chosen()) == n
-		for i := range m.bc.to {
-			m.bc.to[i].on = !all
+	case "h", "left", "l", "right":
+		// Sideways goes through the quick choices, each in force as it is
+		// reached, the way sideways goes through the board's columns.
+		picks := m.picks()
+		cur := -1
+		for i, p := range picks {
+			if m.inForce(p) {
+				cur = i
+				break
+			}
 		}
+		next := (cur + 1) % len(picks)
+		if k == "h" || k == "left" {
+			next = (cur - 1 + len(picks)) % len(picks)
+			if cur < 0 {
+				next = len(picks) - 1
+			}
+		}
+		m.choose(picks[next])
 	default:
-		if i, err := strconv.Atoi(k); err == nil && i >= 1 && i <= len(m.bc.presets) {
-			m.usePreset(i - 1)
+		// A quick choice's key picks it.
+		for _, p := range m.picks() {
+			if p.key == k {
+				m.choose(p)
+			}
 		}
 	}
 	m.bc.idx = max(0, min(m.bc.idx, n-1))
 }
 
-// pick is a quick choice of orchestrators: which it ticks.
+// pick is a quick choice of orchestrators: its key in the list, and which
+// it ticks.
 type pick struct {
-	label, color string
-	match        func(recipient) bool
+	key, label, color string
+	match             func(recipient) bool
 }
 
 // picks are the quick choices that would tick someone: everyone, nobody,
@@ -195,22 +232,29 @@ type pick struct {
 // by the column of its ticket.
 func (m *Model) picks() []pick {
 	out := []pick{
-		{"All", "252", func(recipient) bool { return true }},
-		{"None", "245", func(recipient) bool { return false }},
-		{"Open PR", "78", func(r recipient) bool { return r.openPR }},
-		{"Idle", "245", func(r recipient) bool { return r.status == "idle" }},
-		{"Working", "214", func(r recipient) bool { return r.status == "working" }},
-		{"Needs you", "203", func(r recipient) bool { return r.status == "blocked" }},
+		{"a", "All", "252", func(recipient) bool { return true }},
+		{"n", "None", "245", func(recipient) bool { return false }},
+		{"p", "Open PR", "78", func(r recipient) bool { return r.openPR }},
+		{"i", "Idle", "245", func(r recipient) bool { return r.status == "idle" }},
+		{"w", "Working", "214", func(r recipient) bool { return r.status == "working" }},
+		{"b", "Needs you", "203", func(r recipient) bool { return r.status == "blocked" }},
 	}
 	for _, c := range m.columns {
 		id := c.ID
-		out = append(out, pick{c.Label, c.Color, func(r recipient) bool { return r.stage == id }})
+		out = append(out, pick{"", c.Label, c.Color, func(r recipient) bool { return r.stage == id }})
 	}
+	// The columns are numbered as they show, so their keys are 1, 2, 3...
 	var shown []pick
+	column := 0
 	for i, p := range out {
-		if i < 2 || m.picked(p) > 0 {
-			shown = append(shown, p)
+		if i >= 2 && m.picked(p) == 0 {
+			continue
 		}
+		if p.key == "" && column < 9 {
+			column++
+			p.key = strconv.Itoa(column)
+		}
+		shown = append(shown, p)
 	}
 	return shown
 }
@@ -244,6 +288,7 @@ func (m *Model) choose(p pick) {
 }
 
 func (m *Model) usePreset(i int) {
+	m.bc.preset = i
 	m.input.SetValue(m.bc.presets[i])
 	m.input.CursorEnd()
 	m.bc.list = false
@@ -335,10 +380,14 @@ func (m *Model) viewBroadcast(base string) string {
 	lines = append(lines, screen.Input("›", m.input.Value(), "write to every orchestrator ticked below", !m.bc.list, m.input.View(), inner))
 
 	if len(m.bc.presets) > 0 {
-		lines = append(lines, "", look.Label.Render("READY-MADE")+dimStyle.Render("  a click puts it in the message"))
+		lines = append(lines, "", look.Label.Render("READY-MADE")+dimStyle.Render("  a click, or ↑↓ in the message, puts it there"))
 		for i, p := range m.bc.presets {
 			clickable(zone{Kind: screen.OnControl, ID: "preset:" + strconv.Itoa(i)})
-			lines = append(lines, look.Key.Render(fmt.Sprintf("  %d ", i+1))+truncate(p, inner-4))
+			lead, style := "  ", lipgloss.NewStyle()
+			if i == m.bc.preset {
+				lead, style = cursorStyle.Render("❯ "), cursorStyle
+			}
+			lines = append(lines, lead+style.Render(truncate(p, inner-4)))
 		}
 	}
 
@@ -352,7 +401,7 @@ func (m *Model) viewBroadcast(base string) string {
 			if p.label == "None" {
 				count = -1
 			}
-			items = append(items, screen.Badge(p.label, count, p.color, m.inForce(p), "pick:"+strconv.Itoa(i)))
+			items = append(items, screen.Badge(p.key, p.label, count, p.color, m.inForce(p), "pick:"+strconv.Itoa(i)))
 		}
 		rows := screen.ItemRows(&picks, 0, 0, items, 1, inner)
 		picks.Shift(0, 0, len(lines))
@@ -382,8 +431,11 @@ func (m *Model) viewBroadcast(base string) string {
 		clickable(zone{Kind: zoneStatus, Choice: i})
 		lines = append(lines, lead+style.Render(mark+pad(r.key, 12))+al.Style.Render(pad(al.Word, 11))+target)
 	}
-	help := screen.Key("tab") + " message ↔ list · " + screen.Key("space") + " ticks · " + screen.Key("a") + " all · " +
-		screen.Key("1") + "-" + screen.Key(strconv.Itoa(max(len(m.bc.presets), 1))) + " ready-made · or click"
+	// What the keys do depends on which part has them.
+	help := screen.Key("↑↓") + " ready-made · " + screen.Key("tab") + " to the list · or click"
+	if m.bc.list {
+		help = screen.Key("←→") + " quick choices · " + screen.Key("↑↓") + " move · " + screen.Key("space") + " ticks one · " + screen.Key("tab") + " to the message"
+	}
 	lines = append(lines, "", screen.Say(help, dimStyle, inner))
 
 	var buttons screen.Zones

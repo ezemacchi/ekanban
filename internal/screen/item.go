@@ -136,20 +136,27 @@ func Chip(label, color, id string) Item {
 	return Control(style.Render(" "+label+" ")+look.Button.Render("✕ "), id)
 }
 
-// Badge is a quick choice with how many it stands for, "Open PR 3", in
-// color; on, it is drawn filled, so the choice in force reads at a glance. A
-// click on it is the control id.
-func Badge(label string, count int, color string, on bool, id string) Item {
+// Badge is a quick choice with its key and how many it stands for,
+// "p Open PR 3", in color; on, it is drawn filled, so the choice in force
+// reads at a glance. A click on it is the control id. A count below 0 is
+// left out, and so is an empty key.
+func Badge(key, label string, count int, color string, on bool, id string) Item {
 	text := " " + label
 	if count >= 0 {
 		text += " " + strconv.Itoa(count)
 	}
 	text += " "
 	style := lipgloss.NewStyle().Background(look.ButtonBg).Foreground(lipgloss.Color(color))
+	keyStyle := look.ButtonKey
 	if on {
 		style = lipgloss.NewStyle().Background(lipgloss.Color(color)).Foreground(lipgloss.Color("232")).Bold(true)
+		keyStyle = style
 	}
-	return Control(style.Render(text), id)
+	lead := ""
+	if key != "" {
+		lead = keyStyle.Render(" " + KeyName(key))
+	}
+	return Control(lead+style.Render(text), id)
 }
 
 // SearchWidth is how wide the search field is drawn.

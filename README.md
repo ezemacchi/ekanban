@@ -309,7 +309,10 @@ tickets on the board -- "rebase onto master", say. The box lists the open
 orchestrators, all ticked, with what each is doing. Quick choices above the
 list tick exactly some of them -- All, None, the ones with a pull request
 open, idle or working ones, or those of one column -- and each says how many
-it would tick. Untick any with a click or `space`, write the message or pick a ready-made one, and `enter` asks
+it would tick. With the keys, `tab` goes to the list, where `h`/`l` (or the
+arrows) go through the quick choices and each badge's own key picks it. Untick
+any with a click or `space`, write the message (`↑`/`↓` there go through the
+ready-made ones) or pick a ready-made one, and `enter` asks
 (Y)es/(N)o, naming who gets it, before each orchestrator gets it as a message
 of its own. A busy one reads it when it is done. `{target}` and `{key}` in the
 message become each ticket's target branch and key. A search or a column

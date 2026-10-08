@@ -327,7 +327,7 @@ func TestBroadcastQuickChoices(t *testing.T) {
 		{key: "ABC-3", status: "idle", stage: pipeline.InProgress, openPR: true, on: true},
 	}})
 	out := ansi.Strip(m.View())
-	for _, want := range []string{"All 3", "None", "Open PR 2", "Idle 2", "Working 1"} {
+	for _, want := range []string{"a All 3", "n None", "p Open PR 2", "i Idle 2", "w Working 1", "1 Working 2", "2 To QA 1"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing the quick choice %q:\n%s", want, out)
 		}
@@ -351,5 +351,55 @@ func TestBroadcastQuickChoices(t *testing.T) {
 	}
 	if !m.inForce(m.picks()[pr]) {
 		t.Fatal("the choice in force is not marked")
+	}
+
+	// From the keyboard: in the list, a badge's key picks it.
+	send(t, m, key("tab"))
+	send(t, m, key("w"))
+	if got := m.chosen(); len(got) != 1 || got[0].key != "ABC-2" {
+		t.Fatalf("w ticked %v", got)
+	}
+	send(t, m, key("a"))
+	if len(m.chosen()) != 3 {
+		t.Fatal("a did not tick everyone")
+	}
+	send(t, m, key("n"))
+	if len(m.chosen()) != 0 {
+		t.Fatal("n did not tick nobody")
+	}
+	send(t, m, key("2"))
+	if got := m.chosen(); len(got) != 1 || got[0].key != "ABC-1" {
+		t.Fatalf("2 (the second column shown, To QA) ticked %v", got)
+	}
+
+	// Sideways goes through the quick choices from the one in force.
+	send(t, m, key("a")) // All, the first
+	send(t, m, key("l"))
+	if len(m.chosen()) != 0 || !m.inForce(m.picks()[1]) {
+		t.Fatal("l after All did not move to None")
+	}
+	send(t, m, key("h"))
+	send(t, m, key("h"))
+	if !m.inForce(m.picks()[len(m.picks())-1]) {
+		t.Fatal("h from All did not go round to the last choice")
+	}
+}
+
+// In the message, the arrows go through the ready-made messages.
+func TestArrowsGoThroughTheReadyMadeMessages(t *testing.T) {
+	m := pipelineBoard(t)
+	m.SetBroadcast([]string{"first", "second"})
+	send(t, m, key("B"))
+	send(t, m, key("down"))
+	if m.input.Value() != "first" {
+		t.Fatalf("down: %q", m.input.Value())
+	}
+	send(t, m, key("down"))
+	if m.input.Value() != "second" {
+		t.Fatalf("down again: %q", m.input.Value())
+	}
+	send(t, m, key("up"))
+	if m.input.Value() != "first" {
+		t.Fatalf("up: %q", m.input.Value())
 	}
 }
