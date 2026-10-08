@@ -163,6 +163,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 			}
 		}
 		lines = append(lines, plain(facts...)...)
+		lines = append(lines, m.bitbucketDetailLines(m.pipeInfo[sp.Key], width)...)
 		lines = append(lines, m.jiraDetailLines(m.ticketOf(sp), width)...)
 		lines = append(lines, plain("")...)
 	} else if pr, ok := m.prFor(sp.Key); ok {
@@ -237,7 +238,7 @@ func (m *Model) viewDetailModal(base string) string {
 	k := m.hintKey
 	hints := []hint{{k("note"), "note"}, {k("status-picker"), "status"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	if m.pipelineOn() {
-		hints = []hint{{k("note"), "note"}, {k("open-pull-request"), "pull request"}, {k("yank"), "copy"}, {k("jump"), "jump"}, {k("quit"), "close"}}
+		hints = []hint{{k("note"), "note"}, {k("open-issue"), "ticket"}, {k("prototype"), "prototype"}, {k("open-pull-request"), "pull request"}, {k("yank"), "copy"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	}
 	picking := m.mode == modeStatusPick
 
@@ -327,10 +328,16 @@ func (m *Model) modalTitle(sp *space, width int) string {
 // base visible on either side of each line it covers.
 func overlay(base, box string, x, y, width, height int) string {
 	lines := strings.Split(base, "\n")
-	for len(lines) < height {
+	// Pad only as far as the box needs. The board is one line shorter than the
+	// screen; padding it to the full height made the frame one line taller
+	// while a box was open, and when the box closed the frame shrank and the
+	// terminal erased the bottom line of the board -- the row of key hints.
+	// Keeping the frame the same height either way leaves that row alone.
+	boxLines := strings.Split(box, "\n")
+	for len(lines) < min(height, y+len(boxLines)) {
 		lines = append(lines, "")
 	}
-	for i, bl := range strings.Split(box, "\n") {
+	for i, bl := range boxLines {
 		row := y + i
 		if row < 0 || row >= len(lines) {
 			continue

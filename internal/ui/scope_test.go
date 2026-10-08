@@ -44,3 +44,52 @@ func TestGitCommonDirJoinsWorktreesToTheirRepository(t *testing.T) {
 		t.Fatal("scope must keep the worktree and drop the other repository")
 	}
 }
+
+// A worktree read before git has finished writing it must not be dismissed for
+// good. Otherwise a ticket workspace opened at that moment never reaches the
+// board until the board is restarted.
+func TestScopeRechecksAFolderThatWasNotYetAWorktree(t *testing.T) {
+	root := t.TempDir()
+	main := filepath.Join(root, "repo")
+	wt := filepath.Join(root, "repo-wt")
+	private := filepath.Join(main, ".git", "worktrees", "repo-wt")
+	for _, d := range []string{private, wt} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := &Model{}
+	m.SetScope(main)
+	if m.inScope(wt) {
+		t.Fatal("a folder with no git files is not part of the repository yet")
+	}
+
+	// Git finishes writing the worktree.
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+private+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(private, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Within the recheck window the earlier answer stands...
+	if m.inScope(wt) {
+		t.Fatal("the answer should hold until the recheck interval has passed")
+	}
+	// ...and afterwards it is read again.
+	old := m.scopeOf[wt]
+	old.at = old.at.Add(-2 * scopeRecheck)
+	m.scopeOf[wt] = old
+	if !m.inScope(wt) {
+		t.Fatal("a worktree that has since appeared must join the board")
+	}
+
+	// A yes is kept without reading again.
+	if err := os.RemoveAll(filepath.Join(wt, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if !m.inScope(wt) {
+		t.Fatal("a folder already known to belong must stay on the board")
+	}
+}

@@ -190,3 +190,29 @@ func TestWorkspaceAgentsAndOrchestrator(t *testing.T) {
 		t.Fatalf("orchestrator by elimination without a workspace: %q", r.OrchestratorPane)
 	}
 }
+
+// A ticket's worktree is the one whose branch names a run it holds. The main
+// checkout holds runs too -- they are committed -- but is nobody's ticket.
+func TestOwnsIsTrueOnlyForTheWorktreeOfARun(t *testing.T) {
+	l := DefaultLayout()
+	repo := func(branch string) string {
+		dir := t.TempDir()
+		write(t, filepath.Join(dir, ".git", "HEAD"), "ref: refs/heads/"+branch+"\n")
+		write(t, filepath.Join(dir, l.Dir, "ABC-103", l.State), "# state\n")
+		write(t, filepath.Join(dir, l.Dir, "older-run", l.State), "# state\n")
+		return dir
+	}
+	if !Owns(repo("fix/abc-103-save-dialog"), l) {
+		t.Fatal("the worktree of ABC-103 is not recognised, whatever the case")
+	}
+	if Owns(repo("master"), l) {
+		t.Fatal("the main checkout holds runs but is not a ticket's workspace")
+	}
+	if Owns(repo("feat/ABC-999-something-else"), l) {
+		t.Fatal("a branch that names none of the runs is not theirs")
+	}
+	bare := t.TempDir()
+	if Owns(bare, l) {
+		t.Fatal("a folder with no repository is nobody's")
+	}
+}

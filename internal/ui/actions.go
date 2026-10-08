@@ -54,7 +54,11 @@ var (
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
 		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"},
-		keys.Action{Name: "open-pull-request", Keys: []string{"p"}, Canon: "open-pull-request", Help: "open the selected ticket's pull request in the browser", Short: "pull request"},
+		// t and p are the same keys as on the ticket tab. The pull request moved from p to P
+		// to make room; gp still opens it too.
+		keys.Action{Name: "open-issue", Keys: []string{"t"}, Canon: "open-issue", Help: "open the ticket in Jira (the tracker)", Short: "ticket"},
+		keys.Action{Name: "prototype", Keys: []string{"p"}, Canon: "prototype", Help: "open the ticket's HTML prototype", Short: "prototype"},
+		keys.Action{Name: "open-pull-request", Keys: []string{"P"}, Canon: "open-pull-request", Help: "open the selected ticket's pull request in the browser", Short: "pull request"},
 		keys.Action{Name: "handoff", Keys: []string{"H"}, Canon: "handoff", Help: "a Jira ticket with no worktree: choose the target branch and team, then start the work (needs [jira])", Short: "hand off"})
 
 	// ArchiveActions are the archive list's.

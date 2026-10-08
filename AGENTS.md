@@ -102,8 +102,12 @@ A file kept out of git exists only in the main checkout. Boards opened in
 linked worktrees find it there.
 
 Settings never hold credentials. The plugin reads pull requests through the
-user's `gh` login and talks to the build server without signing in. The one
-credential is for Jira (`[jira]`, optional): an Atlassian API token and the
+user's `gh` login and talks to the build server without signing in. There are
+two credentials, both optional. The second is a Bitbucket personal access token
+for `[bitbucket]`, kept in the variable `token_env` names (`BITBUCKET_TOKEN` by
+default); `[bitbucket] url` and `token_env` are ignored in `.ekanban.toml`, and
+the same rule applies: never ask for it, write it, or print it. The first is for
+Jira (`[jira]`): an Atlassian API token and the
 e-mail of its account, kept in two environment variables that `email_env` and
 `token_env` name (`JIRA_EMAIL` and `JIRA_API_TOKEN` by default). The user
 creates and sets them; never ask for the value in chat, write it to a file, or
@@ -192,6 +196,7 @@ Package map:
 | `internal/pipeline` | delivery columns from git and the build server |
 | `internal/orchestrator` | going to, or starting, the agent that runs a ticket |
 | `internal/jira` | read-only Jira client: ticket list, linked tests, comments, `[jira]` column mapping and handoff command |
+| `internal/bitbucket` | read-only Bitbucket Server client: a pull request's merge checks, reviewers and Code Insights reports (SonarQube), and `Judge`, which says fit / waiting / blocked |
 | `internal/herdr` | the Herdr socket API |
 | `internal/gh` | pull requests through the `gh` CLI |
 | `internal/store` | the board's own state file |

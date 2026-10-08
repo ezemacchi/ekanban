@@ -45,6 +45,9 @@ type Pane struct {
 	TabID       string `json:"tab_id"`
 	Cwd         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
+	// Label is the pane's title. A plugin pane carries its manifest title
+	// ("Board", "Ticket"); a shell or an agent usually has none.
+	Label string `json:"label"`
 	// Agent names the agent running in the pane; absent on a shell or a
 	// plugin pane.
 	Agent *string `json:"agent"`

@@ -219,6 +219,7 @@ func (m *Model) viewFooter() string {
 		hints := []hint{
 			{k("accept"), "accept (" + m.columns.Label(pipeline.ReadyQA) + ")"}, {k("archive"), "archive"},
 			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("orchestrator"), "orchestrator"},
+			{k("open-issue"), "ticket"}, {k("prototype"), "prototype"},
 			{k("open-pull-request"), "pull request"}, {k("yank"), "copy"},
 			{k("refresh"), "refresh"}, {k("help"), "help"},
 		}
@@ -633,6 +634,8 @@ var helpRows = []helpRow{
 	{actions: []string{"down", "up"}, long: "move", short: "move"},
 	{actions: []string{"top", "bottom"}, long: "first row · last row", short: "first · last"},
 	{actions: []string{"open-pr"}, long: "open the pull request in a browser", short: "open the PR"},
+	{actions: []string{"open-issue"}, long: "open the ticket in Jira", short: "open the ticket"},
+	{actions: []string{"prototype"}, long: "open the ticket's HTML prototype", short: "open the prototype"},
 	{actions: []string{"send-failure"}, long: "send the failing check, with the end of its log, to that space's agent", short: "send the failure"},
 	{actions: []string{"left", "right"}, long: "kanban: move between columns · list: collapse / expand", short: "fold · unfold"},
 	{actions: []string{"grab"}, long: "grab a row, then move it — leaving its group changes its status", short: "grab and move"},

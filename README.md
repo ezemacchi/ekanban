@@ -273,13 +273,54 @@ never writes to Jira.
   it up: the ticket and its status, the spec and prototype the run names, the
   worktree and branch, the pull request and its build, the run's current step
   and open questions, the linked tests, and the latest comment in full.
-- `p` opens the card's pull request in the browser, from `pipeline.pr_url`;
-  `gp` does the same.
+- `t` opens the card's Jira ticket in the browser, from `issue_url`, on a card
+  with no worktree too. `p` opens the ticket's HTML prototype (the one its
+  spec names; a card with no worktree has none). Both work in the card's
+  detail (`d`) as well, and the footer and the detail name them.
+- `P` opens the card's pull request in the browser, from `pipeline.pr_url`;
+  `gp` does the same. It used to be `p`, which is now the prototype.
 
 The account is two environment variables, named by `email_env` and `token_env`
 (an Atlassian API token); the token is never in a file, and a repository's
 `.ekanban.toml` cannot change the site, the variables or the handoff command.
 Without them the board says so on its status line and works as before.
+
+### Bitbucket
+
+A green build is not a pull request that may merge. Bitbucket also holds the
+reports other tools post on the commit (SonarQube's quality gate is one), the
+reviewers' verdicts and its own merge checks, and any of them can stop it. With
+`[bitbucket]` set, a card's pull request gets one more line saying which it is:
+
+- `ready to merge`: no report failed, nobody asked for changes, and Bitbucket
+  would merge it.
+- `waiting: ...`: a report is not finished, or the build server says a build is
+  still running (Bitbucket refuses while required builds are unfinished, which
+  is a wait and not a block).
+- `blocked: SonarQube failed`, `blocked: has merge conflicts`,
+  `blocked: changes requested by <name>`, or Bitbucket's own reason for
+  refusing. A second reason shows as `+1`.
+
+The detail (`d`) lists every reason and each report in full: SonarQube's own
+words ("2 New Critical Issues (required ≤ 0)"), its figures such as coverage and
+new issues, and the reviewers. The report's line opens its page, SonarQube's
+dashboard for that pull request, on click. `y` copies the verdict and the
+reports with the rest of the card's context. Merged pull requests get no verdict
+and are not asked about; each open one is read at most once a minute (`r` reads
+now), and a server that cannot be reached is said on the card instead of
+showing nothing, which would read as "no problem".
+
+```toml
+[bitbucket]
+url = "https://bitbucket.example.com"
+token_env = "BITBUCKET_TOKEN"   # the default
+```
+
+The token is a personal access token that can read the repository, read from the
+environment variable and never from a file. The project and repository come from
+`pipeline.pr_url`. The token is sent only to `url`, so `url` and `token_env` are
+read from `config.toml` only: a repository's `.ekanban.toml` cannot change them.
+Read only; it never writes to Bitbucket.
 
 ## Install
 
@@ -492,8 +533,8 @@ linked worktrees look for it there.
 
 In a repository the board adds its own: `a` accepts a ticket in the last column
 and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
-orchestrator (so sorting the table moves to `ctrl+o`), `p` opens its pull
-request, and `H` hands off a Jira ticket that has no worktree. `y` copies a
+orchestrator (so sorting the table moves to `ctrl+o`), `t` opens its Jira
+ticket, `p` its prototype, `P` its pull request, and `H` hands off a Jira ticket that has no worktree. `y` copies a
 card's context on both boards. `ekanban keys` lists every
 screen's keys, and `[keys]` in the settings rebinds any of them:
 

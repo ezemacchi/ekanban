@@ -31,7 +31,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spacesChanged(), m.loadPipeline(false))
 
 	case pipelineMsg:
-		return m, tea.Batch(m.applyPipeline(msg), m.loadJira(false), m.ensureDetail())
+		return m, tea.Batch(m.applyPipeline(msg), m.loadJira(false), m.loadBitbucket(false), m.ensureDetail())
+
+	case bitbucketMsg:
+		m.applyBitbucket(msg)
+		return m, nil
 
 	case jiraMsg:
 		m.applyJira(msg)
@@ -70,7 +74,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The board's own clock: PR entries age out of the cache, and branches
 		// go stale silently because a checkout raises no Herdr event. Both
 		// calls are no-ops until something is genuinely due.
-		return m, tea.Batch(m.loadPRs(), m.loadBranches(), m.loadPipeline(false), m.loadJira(false), tick())
+		//
+		// The workspace list is asked for again too. It normally follows
+		// Herdr's events, but a dropped subscription loses whatever happened
+		// while it was down, and a workspace opened in that gap would stay
+		// off the board until it was restarted.
+		return m, tea.Batch(m.refresh(), m.loadPRs(), m.loadBranches(), m.loadPipeline(false), m.loadJira(false), m.loadBitbucket(false), tick())
 
 	case prLoadedMsg:
 		return m, m.applyPRs(msg)
@@ -85,6 +94,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentSentMsg:
 		m.status = "sent to " + msg.label
 		return m, m.focusAgentAndQuit(msg.pane)
+
+	case prototypeMsg:
+		return m, m.applyPrototype(msg)
 
 	case orchestratorMsg:
 		if msg.err != nil {
@@ -703,6 +715,16 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "open-pull-request":
 		if sp := m.selected(); sp != nil && m.pipelineOn() {
 			return m, m.openPipelinePR(sp)
+		}
+
+	case "open-issue":
+		if m.pipelineOn() {
+			return m, m.openIssue()
+		}
+
+	case "prototype":
+		if m.pipelineOn() {
+			return m, m.openPrototype()
 		}
 
 	case "handoff":

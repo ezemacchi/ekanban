@@ -213,15 +213,15 @@ func TestPullRequestKeyOpensTheCardsPullRequest(t *testing.T) {
 	t.Cleanup(func() { links.Configure("", "") })
 	m := pipelineBoard(t)
 	selectSpace(t, m, tmp+"api")
-	if _, cmd := m.Update(key("p")); cmd == nil || !strings.Contains(m.status, "opening PR #5") {
-		t.Fatalf("p did not open the pull request: %q", m.status)
+	if _, cmd := m.Update(key("P")); cmd == nil || !strings.Contains(m.status, "opening PR #5") {
+		t.Fatalf("P did not open the pull request: %q", m.status)
 	}
-	if m.hintKey("open-pull-request") != "p" {
+	if m.hintKey("open-pull-request") != "P" {
 		t.Fatal("the footer does not name the key")
 	}
 	m.layout = layoutKanban
 	m.width = 200
-	if out := ansi.Strip(m.View()); !strings.Contains(out, "p pull request") {
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "P pull request") {
 		t.Fatalf("no button for it:\n%s", out)
 	}
 
@@ -233,7 +233,7 @@ func TestPullRequestKeyOpensTheCardsPullRequest(t *testing.T) {
 	}
 
 	links.Configure("", "")
-	send(t, m, key("p"))
+	send(t, m, key("P"))
 	if !strings.Contains(m.status, "pipeline.pr_url is missing") {
 		t.Fatalf("no pr_url: %q", m.status)
 	}
@@ -242,7 +242,7 @@ func TestPullRequestKeyOpensTheCardsPullRequest(t *testing.T) {
 func TestPullRequestKeyWithoutOneSaysSo(t *testing.T) {
 	m := jiraBoard(t)
 	selectJiraCard(t, m, "ABC-2")
-	send(t, m, key("p"))
+	send(t, m, key("P"))
 	if got := m.status; !strings.Contains(got, "no pull request for ABC-2 yet") {
 		t.Fatalf("status %q", got)
 	}
@@ -328,6 +328,121 @@ func run(cmd tea.Cmd) {
 	if batch, ok := cmd().(tea.BatchMsg); ok {
 		for _, c := range batch {
 			run(c)
+		}
+	}
+}
+
+// t opens the card's ticket in Jira, on a card with a worktree and on one
+// without: the ticket is all a Jira-only card has.
+func TestTicketKeyOpensTheCardsJiraTicket(t *testing.T) {
+	links.Configure("https://site.example/browse/{key}", "")
+	t.Cleanup(func() { links.Configure("", "") })
+	var opened []string
+	original := openURL
+	openURL = func(url string) error { opened = append(opened, url); return nil }
+	t.Cleanup(func() { openURL = original })
+
+	m := jiraBoard(t)
+	for ticket, want := range map[string]string{"ABC-1": "https://site.example/browse/ABC-1", "ABC-2": "https://site.example/browse/ABC-2"} {
+		if ticket == "ABC-1" {
+			selectSpace(t, m, tmp+"api") // the card a worktree holds
+		} else {
+			selectJiraCard(t, m, ticket)
+		}
+		_, cmd := m.Update(key("t"))
+		if cmd == nil || !strings.Contains(m.status, "opening "+ticket) {
+			t.Fatalf("t on %s: status %q", ticket, m.status)
+		}
+		run(cmd)
+		if got := opened[len(opened)-1]; got != want {
+			t.Fatalf("t on %s opened %q, want %q", ticket, got, want)
+		}
+	}
+
+	links.Configure("", "")
+	send(t, m, key("t"))
+	if !strings.Contains(m.status, "issue_url is missing") {
+		t.Fatalf("no issue_url: %q", m.status)
+	}
+}
+
+// The detail modal answers t and p as the board does.
+func TestTicketAndPrototypeKeysWorkInTheDetail(t *testing.T) {
+	links.Configure("https://site.example/browse/{key}", "")
+	t.Cleanup(func() { links.Configure("", "") })
+	m := jiraBoard(t)
+	selectJiraCard(t, m, "ABC-2")
+	send(t, m, key("d"))
+	if m.mode != modeDetail {
+		t.Fatalf("d opened mode %v", m.mode)
+	}
+	if _, cmd := m.Update(key("t")); cmd == nil || !strings.Contains(m.status, "opening ABC-2") {
+		t.Fatalf("t in the detail: %q", m.status)
+	}
+	m.width = 200
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"t ticket", "p prototype"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("detail is missing the hint %q:\n%s", want, out)
+		}
+	}
+	send(t, m, key("p"))
+	if !strings.Contains(m.status, "ABC-2 has no worktree yet") {
+		t.Fatalf("p in the detail on a card with no worktree: %q", m.status)
+	}
+}
+
+// p opens the prototype the run names; with none, it says which spec has none.
+func TestPrototypeKeyOpensThePrototypeOrSaysThereIsNone(t *testing.T) {
+	var opened []string
+	original := openURL
+	openURL = func(url string) error { opened = append(opened, url); return nil }
+	t.Cleanup(func() { openURL = original })
+
+	m := jiraBoard(t)
+	selectJiraCard(t, m, "ABC-2")
+	if _, cmd := m.Update(key("p")); cmd != nil || !strings.Contains(m.status, "ABC-2 has no worktree yet") {
+		t.Fatalf("p on a card with no worktree: %q", m.status)
+	}
+
+	_, cmd := m.Update(prototypeMsg{page: `C:\spec\E7_US_42\index.html`, spec: "E7_US_42"})
+	if cmd == nil || m.status != "opening the prototype" {
+		t.Fatalf("a found prototype: %q", m.status)
+	}
+	run(cmd)
+	if len(opened) != 1 || opened[0] != `C:\spec\E7_US_42\index.html` {
+		t.Fatalf("opened %v", opened)
+	}
+
+	if _, cmd := m.Update(prototypeMsg{spec: "E7_US_42"}); cmd != nil || m.status != "no prototype found for E7_US_42" {
+		t.Fatalf("no prototype: %q", m.status)
+	}
+	if _, cmd := m.Update(prototypeMsg{err: errors.New("no run found in x")}); cmd != nil || m.status != "no run found in x" {
+		t.Fatalf("no run: %q", m.status)
+	}
+}
+
+// The footer and the help name t and p, and they rebind like any action.
+func TestTicketAndPrototypeAreOnTheFooterAndHelp(t *testing.T) {
+	m := pipelineBoard(t)
+	m.SetKeys(map[string][]string{"prototype": {"X"}})
+	selectSpace(t, m, tmp+"api")
+	m.layout = layoutKanban
+	m.width = 240
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"t ticket", "X prototype", "P pull request"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("footer is missing %q:\n%s", want, out)
+		}
+	}
+	if k := m.keyMap().Resolve("p"); k != "" {
+		t.Fatalf("p still answers after being rebound: %q", k)
+	}
+	send(t, m, key("?"))
+	help := ansi.Strip(m.View())
+	for _, want := range []string{"open the ticket in Jira", "open the ticket's HTML prototype"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help is missing %q:\n%s", want, help)
 		}
 	}
 }

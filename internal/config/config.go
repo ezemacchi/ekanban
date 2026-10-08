@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/ezemacchi/ekanban/internal/bitbucket"
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/jira"
 	"github.com/ezemacchi/ekanban/internal/team"
@@ -58,6 +59,9 @@ type Config struct {
 	Run ticket.LayoutConfig `toml:"run"`
 	// Jira is the site the global board reads tickets from.
 	Jira jira.Config `toml:"jira"`
+	// Bitbucket is the server whose pull requests the board judges: whether
+	// each one may merge, SonarQube's quality gate included.
+	Bitbucket bitbucket.Config `toml:"bitbucket"`
 }
 
 // TicketConfig is the [ticket] table.
@@ -124,6 +128,7 @@ type Settings struct {
 	Orchestrator  team.Orchestrator              // [orchestrator], over each team's
 	Layout        ticket.Layout                  // [run]
 	Jira          jira.Config                    // [jira], defaults filled
+	Bitbucket     bitbucket.Config               // [bitbucket], defaults filled
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
 	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
@@ -175,7 +180,7 @@ func LoadFor(dir string) Settings {
 		// Snapshots of what only config.toml may set. The lists are cloned:
 		// decoding over a slice rewrites its elements in place, which would
 		// rewrite the snapshot and let the repository file through.
-		orchestrator, account := c.Orchestrator, c.Jira
+		orchestrator, account, server := c.Orchestrator, c.Jira, c.Bitbucket
 		orchestrator.Args = slices.Clone(orchestrator.Args)
 		account.Handoff.Command = slices.Clone(account.Handoff.Command)
 		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
@@ -188,6 +193,11 @@ func LoadFor(dir string) Settings {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [jira] url, email_env, token_env and handoff.command are only read from config.toml — ignored", s.RepoPath))
 			c.Jira.URL, c.Jira.EmailEnv, c.Jira.TokenEnv = account.URL, account.EmailEnv, account.TokenEnv
 			c.Jira.Handoff.Command = account.Handoff.Command
+		}
+		// The token goes to this address, so a repository cannot pick it.
+		if c.Bitbucket != server {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [bitbucket] url and token_env are only read from config.toml — ignored", s.RepoPath))
+			c.Bitbucket = server
 		}
 	}
 	return resolve(c, s)
@@ -268,6 +278,7 @@ func resolve(c Config, s Settings) Settings {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
 	s.Jira = c.Jira.WithDefaults()
+	s.Bitbucket = c.Bitbucket.WithDefaults()
 	var layoutProblems []string
 	s.Layout, layoutProblems = ticket.NewLayout(c.Run)
 	s.Problems = append(s.Problems, layoutProblems...)
@@ -482,6 +493,17 @@ icons = false
 # command = ["pwsh", "-NoProfile", "-File", "handoff.ps1", "-Key", "{key}", "-Summary", "{summary}", "-Target", "{target}", "-Team", "{team}", "-Type", "{type}"]
 # teams = ["standalone", "small-team", "full-team"]
 # fix_types = ["Bug", "Defect", "Defect Candidate"]
+
+# Bitbucket, read only: Jenkins turning green does not mean a pull request may
+# merge, because Bitbucket also holds the reports other tools post on the
+# commit (SonarQube's quality gate), the reviewers' verdicts and its own merge
+# checks. With this on, each card's pull request says whether it is fit to
+# merge, or what is in the way. The project and repository are taken from
+# pipeline.pr_url. The token is read from an environment variable, never from
+# a file, and is sent only to url; both are read from this file only.
+# [bitbucket]
+# url = "https://bitbucket.example.com"
+# token_env = "BITBUCKET_TOKEN"   # a personal access token that can read the repository
 
 # Keys, by action name: one key or a list. A rebound action stops answering
 # its old key, and an empty list turns it off. The help screen (?) shows the

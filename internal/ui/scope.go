@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The board can be scoped to one git repository: the checkout it was opened in
@@ -13,7 +14,7 @@ import (
 // outside any repository leaves the board showing every space.
 func (m *Model) SetScope(dir string) {
 	m.scope = gitCommonDir(dir)
-	m.scopeOf = map[string]string{}
+	m.scopeOf = map[string]scopeAnswer{}
 }
 
 // Scoped reports whether the board is limited to one repository.
@@ -26,13 +27,28 @@ func (m *Model) inScope(key string) bool {
 	if _, ok := jiraCardKey(key); ok {
 		return true // a ticket, not a folder
 	}
-	common, ok := m.scopeOf[key]
-	if !ok {
-		common = gitCommonDir(key)
-		m.scopeOf[key] = common
+	ans, ok := m.scopeOf[key]
+	// A "yes" is kept: a worktree does not move to another repository. A "no"
+	// is only kept for a while, because it may be a read made while git was
+	// still writing the worktree's files, or before the folder existed, and a
+	// permanent "no" hides that worktree until the board is restarted.
+	if !ok || (ans.common != m.scope && time.Since(ans.at) > scopeRecheck) {
+		ans = scopeAnswer{common: gitCommonDir(key), at: time.Now()}
+		m.scopeOf[key] = ans
 	}
-	return common == m.scope
+	return ans.common == m.scope
 }
+
+// scopeAnswer is what the board last read from a folder's git files.
+type scopeAnswer struct {
+	common string
+	at     time.Time
+}
+
+// scopeRecheck is how long a folder that is not in the repository stays
+// dismissed before its git files are read again. Reading two small files is
+// cheap; this only keeps a rebuild from doing it for every foreign space.
+const scopeRecheck = 10 * time.Second
 
 // gitCommonDir returns the repository's shared .git directory for dir, which
 // is the same for the main checkout and all its worktrees. It reads the files

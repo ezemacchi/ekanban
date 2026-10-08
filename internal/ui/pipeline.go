@@ -273,6 +273,10 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 			pr += " · in " + info.MergedTo
 		}
 		lines = append(lines, style.Render(truncate(m.glyph(look.PullReq, pr), width)))
+		// Whether Bitbucket would let it in, which a green build does not say.
+		if l := m.bitbucketLine(info, width); l != "" {
+			lines = append(lines, l)
+		}
 	}
 	if info.Deployed != "" {
 		lines = append(lines, prPassStyle.Render(truncate(m.glyph(look.Rocket, "shipped to "+info.Deployed), width)))
@@ -317,9 +321,13 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 			return true, m, m.openPipelinePR(sp)
 		}
 		return true, m, nil
+	case "open-issue":
+		return true, m, m.openIssue()
+	case "prototype":
+		return true, m, m.openPrototype()
 	case "r":
 		m.branchesAt = time.Time{}
-		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true))
+		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true))
 	}
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
 		m.status = m.computedColumns()
@@ -343,6 +351,78 @@ func (m *Model) openPipelinePR(sp *space) tea.Cmd {
 	}
 	m.status = fmt.Sprintf("opening PR #%d", info.PR)
 	return openURLCmd(url)
+}
+
+// openIssue opens the selected card's Jira ticket, from issue_url. It works on a
+// card with no worktree too: the ticket is all such a card has.
+func (m *Model) openIssue() tea.Cmd {
+	sp := m.selected()
+	if sp == nil {
+		m.status = "no space selected"
+		return nil
+	}
+	key := m.ticketOf(sp)
+	if key == "" {
+		m.status = m.spaceName(sp) + " has no ticket run"
+		return nil
+	}
+	url := links.Issue(key)
+	if url == "" {
+		m.status = "issue_url is missing from config.toml"
+		return nil
+	}
+	m.status = "opening " + key
+	return openURLCmd(url)
+}
+
+type prototypeMsg struct {
+	page string
+	spec string
+	err  error
+}
+
+// openPrototype opens the selected ticket's HTML prototype, the one the run's
+// spec names. The board holds no run, so it is read the way the orchestrator
+// key reads it: from the worktree, off the UI thread.
+func (m *Model) openPrototype() tea.Cmd {
+	sp := m.selected()
+	if sp == nil || !m.requireWorktree() {
+		if sp == nil {
+			m.status = "no space selected"
+		}
+		return nil
+	}
+	if m.pipeInfo[sp.Key].Key == "" {
+		m.status = m.spaceName(sp) + " has no ticket run"
+		return nil
+	}
+	m.status = "looking for the prototype of " + m.spaceName(sp) + "…"
+	src, client, worktree := m.pipe, m.client, sp.Key
+	return func() tea.Msg {
+		live, err := ticket.ReadLive(client)
+		if err != nil {
+			return prototypeMsg{err: err}
+		}
+		run, err := src.Run(worktree, live)
+		if err != nil {
+			return prototypeMsg{err: fmt.Errorf("no run found in %s", worktree)}
+		}
+		return prototypeMsg{page: run.Prototype, spec: run.Spec}
+	}
+}
+
+// applyPrototype opens what openPrototype found, or says why there is none.
+func (m *Model) applyPrototype(msg prototypeMsg) tea.Cmd {
+	switch {
+	case msg.err != nil:
+		m.status = msg.err.Error()
+	case msg.page == "":
+		m.status = "no prototype found for " + firstNonEmpty(msg.spec, "this ticket")
+	default:
+		m.status = "opening the prototype"
+		return openURLCmd(msg.page)
+	}
+	return nil
 }
 
 type orchestratorMsg struct {

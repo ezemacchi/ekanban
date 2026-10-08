@@ -16,6 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/ezemacchi/ekanban/internal/bitbucket"
 	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
@@ -186,6 +187,15 @@ func run(args []string) error {
 			targets = append(targets, t.Branch)
 		}
 		model.SetJira(jc, settings.Jira, targets, cwd, why, gh.HideWindow)
+		// Bitbucket says whether each pull request may merge: the reports
+		// posted on it, the reviewers and its own checks. The repository comes
+		// from pipeline.pr_url; the server and token only from config.toml.
+		bc, bwhy := bitbucket.New(settings.Bitbucket)
+		loc, found := bitbucket.LocationOf(settings.Pipeline.PRURL)
+		if bc != nil && !found {
+			bc, bwhy = nil, "Bitbucket is off: pipeline.pr_url is not a Bitbucket pull request address (.../projects/P/repos/R/pull-requests/{pr})"
+		}
+		model.SetBitbucket(bc, loc, bwhy)
 	} else {
 		// A watcher keeps polling GitHub after the board closes, which is the
 		// only way a notification can reach you while you are elsewhere. The

@@ -344,6 +344,7 @@ type yankFacts struct {
 	Worktree string
 	Branch   string
 	CI       string
+	Merge    []string // Bitbucket's verdict, then each report; see bitbucketYank
 	Note     string
 }
 
@@ -370,6 +371,7 @@ func (m *Model) yankSelected() tea.Cmd {
 		f.Info = m.pipeInfo[sp.Key]
 		if f.Info.PR > 0 {
 			f.PRURL = links.PullRequest(f.Info.PR)
+			f.Merge = m.bitbucketYank(f.Info)
 		}
 	}
 	if m.pipelineOn() {
@@ -458,6 +460,12 @@ func yankText(f yankFacts) string {
 			pr += " · merged into " + f.Info.MergedTo
 		}
 		line("Pull request", pr)
+		if len(f.Merge) > 0 {
+			line("Merge check", f.Merge[0])
+			for _, extra := range f.Merge[1:] {
+				line("Report", extra)
+			}
+		}
 	}
 	line("Shipped to", f.Info.Deployed)
 	line("Note", f.Note)
@@ -708,7 +716,7 @@ func (m *Model) applyHandoff(msg handoffMsg) tea.Cmd {
 		m.status = msg.key + " was not handed off: " + msg.text
 	}
 	m.branchesAt = time.Time{}
-	return tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true))
+	return tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true))
 }
 
 // viewHandoff is the handoff box over the board.

@@ -226,7 +226,7 @@ type Model struct {
 	// scope is the shared .git directory the board is limited to, or empty
 	// for every space; scopeOf caches each space's answer. See scope.go.
 	scope   string
-	scopeOf map[string]string
+	scopeOf map[string]scopeAnswer
 
 	// Pipeline mode (pipeline.go): computed columns, the archive of accepted
 	// tickets. pipe is nil when off.
@@ -254,6 +254,8 @@ type Model struct {
 
 	// jr is the Jira side of the pipeline board (jira.go).
 	jr jiraState
+	// bb is Bitbucket's verdict on each pull request; see bitbucket.go.
+	bb bitbucketState
 }
 
 // New builds the initial model.

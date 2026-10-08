@@ -5,11 +5,27 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 // boardTabLabel is the label of a tab holding a board, global or per ticket.
 const boardTabLabel = "board"
+
+// ticketPaneLabel is the title of the ticket board's pane, the one the
+// manifest gives the `ticket` entrypoint; the space kanban's is "Board".
+const ticketPaneLabel = "Ticket"
+
+// holdsPane reports whether tab has a pane titled label.
+func holdsPane(panes []herdr.Pane, tab, label string) bool {
+	for _, p := range panes {
+		if p.TabID == tab && strings.EqualFold(p.Label, label) {
+			return true
+		}
+	}
+	return false
+}
 
 // opening is where `open` puts the board.
 type opening int
@@ -24,11 +40,19 @@ const (
 // the pane the key was pressed in. An agent's pane is worth keeping in view,
 // so the board gets a tab of its own beside it; anywhere else it covers the
 // pane for a moment and gives it back.
-func chooseOpening(tabs []herdr.Tab, current herdr.Pane) (opening, string) {
+//
+// Both kinds of board are labelled "board", so in a ticket's workspace the
+// label alone cannot say which one a tab holds: the space kanban there is the
+// wrong answer. panes say what each tab holds, by the pane's title.
+func chooseOpening(tabs []herdr.Tab, panes []herdr.Pane, current herdr.Pane, ticketWorkspace bool) (opening, string) {
 	for _, t := range tabs {
-		if strings.EqualFold(t.Label, boardTabLabel) {
-			return toBoardTab, t.ID
+		if !strings.EqualFold(t.Label, boardTabLabel) {
+			continue
 		}
+		if ticketWorkspace && !holdsPane(panes, t.ID, ticketPaneLabel) {
+			continue
+		}
+		return toBoardTab, t.ID
 	}
 	if current.Agent != nil && *current.Agent != "" {
 		return inNewTab, ""
@@ -57,16 +81,27 @@ func showBoard(client *herdr.Client) error {
 	}
 	plugin := envOr("HERDR_PLUGIN_ID", "ekanban")
 
-	where, tab := chooseOpening(tabs, current)
+	panes, err := client.Panes()
+	if err != nil {
+		return err
+	}
+	// In a ticket's workspace the board that belongs there is the ticket's,
+	// not the space kanban, and it reads the worktree's root.
+	dir, isTicket := ticketWorkspace(client, current)
+	where, tab := chooseOpening(tabs, panes, current, isTicket)
+	tabEntry, overEntry, cwd := "tab", "board", current.Cwd
+	if isTicket {
+		tabEntry, overEntry, cwd = "ticket", "ticket", dir
+	}
 	switch where {
 	case toBoardTab:
 		return client.FocusTab(tab)
 	case inNewTab:
 		params := map[string]any{"placement": "tab", "workspace_id": current.WorkspaceID, "focus": true}
-		if current.Cwd != "" {
-			params["cwd"] = current.Cwd
+		if cwd != "" {
+			params["cwd"] = cwd
 		}
-		if err := client.OpenPluginPane(plugin, "tab", params); err != nil {
+		if err := client.OpenPluginPane(plugin, tabEntry, params); err != nil {
 			return err
 		}
 		after, err := client.Tabs(current.WorkspaceID)
@@ -86,11 +121,29 @@ func showBoard(client *herdr.Client) error {
 		return client.FocusTab(added[0])
 	default:
 		params := map[string]any{"placement": "overlay", "target_pane_id": current.PaneID, "focus": true}
-		if current.Cwd != "" {
-			params["cwd"] = current.Cwd
+		if cwd != "" {
+			params["cwd"] = cwd
 		}
-		return client.OpenPluginPane(plugin, "board", params)
+		return client.OpenPluginPane(plugin, overEntry, params)
 	}
+}
+
+// ticketWorkspace reports whether the pane's workspace is a ticket's: its
+// worktree was made for a run. dir is the worktree's root, which is where the
+// ticket board reads the run; a pane's own folder may be a subfolder.
+func ticketWorkspace(client *herdr.Client, current herdr.Pane) (dir string, ok bool) {
+	dir = current.Cwd
+	if all, err := client.Workspaces(); err == nil {
+		for _, ws := range all {
+			if ws.ID == current.WorkspaceID && ws.Checkout() != "" {
+				dir = ws.Checkout()
+			}
+		}
+	}
+	if dir == "" {
+		return "", false
+	}
+	return dir, ticket.Owns(dir, config.LoadFor(dir).Layout)
 }
 
 // currentPane is the pane the action was invoked from: Herdr names it for a

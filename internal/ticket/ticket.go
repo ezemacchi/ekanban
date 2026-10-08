@@ -315,6 +315,24 @@ func Find(worktree string, l Layout) (dir, key string, ok bool) {
 	return filepath.Dir(matches[0]), filepath.Base(filepath.Dir(matches[0])), true
 }
 
+// Owns reports whether worktree was made for a run: its branch names one of
+// the runs it holds. Find answers yes for any folder with runs in it, the main
+// checkout included, which is the wrong question for "is this a ticket's
+// workspace?".
+func Owns(worktree string, l Layout) bool {
+	branch := strings.ToUpper(ReadBranch(worktree))
+	if branch == "" {
+		return false
+	}
+	matches, _ := filepath.Glob(filepath.Join(worktree, l.Dir, "*", l.State))
+	for _, m := range matches {
+		if strings.Contains(branch, strings.ToUpper(filepath.Base(filepath.Dir(m)))) {
+			return true
+		}
+	}
+	return false
+}
+
 // Load reads the run and places each role of its team on the board.
 func Load(worktree string, opts Options, live Live) (*Run, error) {
 	l := opts.RunLayout()
