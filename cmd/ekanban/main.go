@@ -115,7 +115,7 @@ func run(args []string) error {
 		return err
 	}
 
-	sidebar := false
+	sidebar, inTab := false, false
 	if len(args) > 0 {
 		switch args[0] {
 		case "sync":
@@ -138,8 +138,12 @@ func run(args []string) error {
 			// because the two runtimes reach it through different manifest
 			// entries and neither tells the process which one opened it.
 			sidebar = true
+		case "tab":
+			// The board as a tab of its own, which stays open when a card
+			// sends you elsewhere. Same reason as sidebar for being a command.
+			inTab = true
 		default:
-			return fmt.Errorf("unknown command %q (want: sync, sidebar, watch, startup, config, keys, version, prune)", args[0])
+			return fmt.Errorf("unknown command %q (want: sync, sidebar, tab, watch, startup, config, keys, version, prune)", args[0])
 		}
 	}
 
@@ -148,8 +152,11 @@ func run(args []string) error {
 	// where the pointer is already on the screen. It also takes over
 	// drag-to-select; most terminals still allow it with shift held.
 	model := ui.New(client, board)
-	if sidebar {
+	switch {
+	case sidebar:
 		model = ui.NewSidebar(client, board)
+	case inTab:
+		model = ui.NewTab(client, board)
 	}
 	cwd, _ := os.Getwd()
 	settings := config.LoadFor(cwd)

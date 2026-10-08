@@ -842,9 +842,13 @@ func (m *Model) openSelected() (tea.Model, tea.Cmd) {
 		return nil
 	}
 
-	// Every board closes on the way out, docked or not: you opened it to get
-	// somewhere, and once you are there it is a strip of screen showing you a
-	// board you are no longer reading. A key brings it straight back.
+	// A popup or a dock closes on the way out: you opened it to get somewhere,
+	// and once you are there it is a strip of screen showing you a board you
+	// are no longer reading. A key brings it straight back. A board in its own
+	// tab is out of the way already, and closing it would lose the tab.
+	if m.stays {
+		return m, focus
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}

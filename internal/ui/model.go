@@ -216,6 +216,10 @@ type Model struct {
 	// sidebar renders for a narrow docked region: grouped list, no detail
 	// pane, and no layout switching. Set by the `sidebar` entrypoint.
 	sidebar bool
+	// stays keeps the board open after it sends you somewhere: a board in a
+	// tab of its own is still there when you come back. Set by the `tab`
+	// entrypoint.
+	stays bool
 	// icons draws Nerd Font glyphs; see the icons setting.
 	icons bool
 	// scope is the shared .git directory the board is limited to, or empty
@@ -258,6 +262,14 @@ func NewSidebar(client *herdr.Client, board *store.Board) *Model {
 	// The saved layout is whatever the user last chose in the popup; a dock
 	// is too narrow for the table or kanban arrangements.
 	m.layout = layoutList
+	return m
+}
+
+// NewTab builds the board for a tab of its own, which stays open when a
+// card sends you to its workspace or agent.
+func NewTab(client *herdr.Client, board *store.Board) *Model {
+	m := New(client, board)
+	m.stays = true
 	return m
 }
 

@@ -102,12 +102,13 @@ Mark the usual one with `default = true`.
 ### 6. Check it works
 
 ```powershell
-herdr plugin pane open --plugin ekanban --entrypoint board --cwd <repository>
+herdr plugin pane open --plugin ekanban --entrypoint tab --cwd <repository>
 herdr plugin pane open --plugin ekanban --entrypoint ticket --placement tab --cwd <worktree>
 ```
 
 The first is the global board for a repository: one card per ticket worktree,
-in delivery columns. The second is one run's roles; it needs a run folder in
+in delivery columns. It is the `tab` entrypoint, which stays open when a card
+sends you elsewhere; `board` (a popup) and `side` (a dock) close then. The second is one run's roles; it needs a run folder in
 the worktree (by default `.runs/<KEY>/STATE.md`; `[run]` changes that). Read
 the pane back with `herdr pane read <pane_id> --source visible` and confirm the
 cards are there.

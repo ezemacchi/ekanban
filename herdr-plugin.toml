@@ -37,6 +37,15 @@ title = "Board"
 placement = "split"
 command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "sidebar"]
 
+# The board as a tab of its own, which stays open when a card sends you to its
+# workspace or agent (a popup or a dock closes then). Open it with --cwd set to
+# a repository to get that repository's tickets.
+[[panes]]
+id = "tab"
+title = "Board"
+placement = "tab"
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "tab"]
+
 # One team run as a kanban of its roles. Open it as a tab with --cwd set to
 # the run's worktree; it reads the run there ([run] in config.toml says where).
 [[panes]]

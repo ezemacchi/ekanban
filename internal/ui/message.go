@@ -91,19 +91,21 @@ func (m *Model) sendToAgent(text string) tea.Cmd {
 }
 
 // focusAgentAndQuit hands over to the agent pane: the text is waiting in its
-// input, unsent, for the user to finish and submit.
+// input, unsent, for the user to finish and submit. A board in its own tab
+// stays open.
 func (m *Model) focusAgentAndQuit(pane string) tea.Cmd {
 	client := m.client
+	focus := func() tea.Msg {
+		_ = client.FocusAgent(pane)
+		return nil
+	}
+	if m.stays {
+		return focus
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
 	m.quitting = true
 
-	return tea.Sequence(
-		func() tea.Msg {
-			_ = client.FocusAgent(pane)
-			return nil
-		},
-		tea.Quit,
-	)
+	return tea.Sequence(focus, tea.Quit)
 }
