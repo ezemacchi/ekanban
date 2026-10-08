@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
@@ -59,10 +60,31 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 			t.Fatalf("a line is %d cells wide on a %d-cell board: %q", w, m.width, line)
 		}
 	}
-	for _, want := range []string{"PR #5", "shipped to predev", "Ready for QA"} {
+	for _, want := range []string{"PR #5", "shipped to predev", "To QA"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("board is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// A column renamed in config.toml shows its new name, and the messages that
+// name the ready_qa column follow it.
+func TestConfiguredColumnNamesShow(t *testing.T) {
+	m := newTestModel(t)
+	cols, _ := columns.Merge(pipeline.DefaultColumns, []columns.Column{{ID: pipeline.ReadyQA, Label: "QA ready"}}, true)
+	m.SetPipeline(pipeline.New("", pipeline.Settings{Columns: cols}, nil))
+	send(t, m, liveWorkspaces())
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{
+		store.Key("/tmp/api"): {Stage: pipeline.InProgress, Key: "ABC-1"},
+	}})
+	m.width = 200
+	if out := m.View(); !strings.Contains(out, "QA ready") || strings.Contains(out, "To QA") {
+		t.Fatalf("the renamed column is not shown:\n%s", out)
+	}
+	selectSpace(t, m, "/tmp/api")
+	send(t, m, key("a"))
+	if !strings.Contains(m.status, "QA ready") {
+		t.Fatalf("status %q should name the configured column", m.status)
 	}
 }
 

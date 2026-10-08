@@ -1,11 +1,13 @@
 // Package pipeline places each ticket worktree in a delivery column, computed
 // from what already exists rather than set by hand:
 //
-//	To Do           no run yet, or nothing dispatched
-//	In Progress     the team is working; the landing check has not passed
-//	On Review       landed, pull request open, waiting on reviewers and CI
-//	To ship         merged into a target branch, not in its last publish yet
-//	Ready for QA    the target's last publish includes it
+//	todo         To Do      no run yet, or nothing dispatched
+//	in_progress  Working    the team is working; the landing check has not passed
+//	on_review    Reviewing  landed, pull request open, waiting on reviewers and CI
+//	to_deploy    Shipping   merged into a target branch, not in its last publish yet
+//	ready_qa     To QA      the target's last publish includes it
+//
+// The ids are fixed; the names are defaults that config.toml can change.
 //
 // Classify gathers Facts; the rules in rules.go decide the column. Sources
 // are read only: the run's files (package ticket), Jenkins, which answers
@@ -27,8 +29,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
-	"github.com/ezemacchi/ekanban/internal/store"
+	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/team"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
@@ -42,13 +45,14 @@ const (
 	ReadyQA    = "ready_qa"
 )
 
-// Statuses are the columns in order.
-var Statuses = []store.Status{
-	{ID: ToDo, Label: "To Do", Color: "244"},
-	{ID: InProgress, Label: "In Progress", Color: "39"},
-	{ID: OnReview, Label: "On Review", Color: "141"},
-	{ID: ToDeploy, Label: "To ship", Color: "214"},
-	{ID: ReadyQA, Label: "Ready for QA", Color: "78"},
+// DefaultColumns are the columns in order. [[pipeline.column]] in config.toml
+// renames, recolours or reorders them; the ids are what rules return.
+var DefaultColumns = columns.Set{
+	{ID: ToDo, Label: "To Do", Color: "244", Icon: look.Circle},
+	{ID: InProgress, Label: "Working", Color: "39", Icon: look.Cog},
+	{ID: OnReview, Label: "Reviewing", Color: "141", Icon: look.PullReq},
+	{ID: ToDeploy, Label: "Shipping", Color: "214", Icon: look.Rocket},
+	{ID: ReadyQA, Label: "To QA", Color: "78", Icon: look.Check},
 }
 
 // Info is what the board shows about one ticket worktree.
@@ -86,6 +90,15 @@ type Settings struct {
 	Targets []Target
 	Rules   []Rule      // nil: DefaultRules
 	Teams   []team.Team // nil: the built-in teams
+	Columns columns.Set // nil: DefaultColumns
+}
+
+// Columns are the board's columns in order.
+func (s *Source) Columns() columns.Set {
+	if s == nil || len(s.set.Columns) == 0 {
+		return DefaultColumns
+	}
+	return s.set.Columns
 }
 
 type prJob struct {

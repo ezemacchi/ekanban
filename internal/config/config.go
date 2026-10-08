@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/ezemacchi/ekanban/internal/columns"
 )
 
 // PluginID must match herdr-plugin.toml, since Herdr keys the config directory
@@ -38,6 +40,14 @@ type Config struct {
 	IssueURL string `toml:"issue_url"`
 	// Pipeline drives the global board's computed columns.
 	Pipeline PipelineConfig `toml:"pipeline"`
+	// Ticket is how the ticket board shows a run.
+	Ticket TicketConfig `toml:"ticket"`
+}
+
+// TicketConfig is the [ticket] table.
+type TicketConfig struct {
+	// Columns rename, reorder or re-icon the ticket board's four columns.
+	Columns []columns.Column `toml:"column"`
 }
 
 // PipelineConfig is the [pipeline] table.
@@ -51,6 +61,9 @@ type PipelineConfig struct {
 	// Targets are the branches pull requests merge into, most downstream
 	// first, each with the publish job that deploys it.
 	Targets []TargetConfig `toml:"target"`
+	// Columns rename, recolour, reorder or re-icon the computed columns, and
+	// add one for a custom rule to return.
+	Columns []columns.Column `toml:"column"`
 }
 
 // TargetConfig is one [[pipeline.target]].
@@ -76,6 +89,7 @@ type Settings struct {
 	SpecClone     string
 	IssueURL      string
 	Pipeline      PipelineConfig
+	Ticket        TicketConfig
 	// Path is where the file was read from, whether or not it existed.
 	Path string
 	// Problems are complaints about the file's contents. A bad value falls back
@@ -151,6 +165,7 @@ func Load() Settings {
 	s.SpecClone = c.SpecClone
 	s.IssueURL = c.IssueURL
 	s.Pipeline = c.Pipeline
+	s.Ticket = c.Ticket
 	if len(s.Pipeline.Targets) == 0 {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
@@ -198,6 +213,22 @@ icons = false
 # branch = "main"
 # env = "dev"
 # publish = "https://jenkins.example.com/job/Folder/job/Repo%20Publish"
+
+# The global board's columns. The id is what the rules return; label, color
+# (ANSI index or hex) and icon (a Nerd Font glyph) are how it looks. Listed
+# columns come first, in this order; any left out follow with their defaults.
+# Ids: todo, in_progress, on_review, to_deploy, ready_qa. A new id adds a
+# column for a custom rule to return.
+# [[pipeline.column]]
+# id = "in_progress"
+# label = "Working"
+# color = "39"
+
+# The ticket board's columns, same fields. Ids: pending, working, waiting,
+# done; these four are fixed, so a new id is ignored.
+# [[ticket.column]]
+# id = "waiting"
+# label = "Waiting on you"
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

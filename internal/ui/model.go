@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ezemacchi/ekanban/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/look"
@@ -218,6 +219,7 @@ type Model struct {
 	// tickets. pipe is nil when off.
 	pipe           *pipeline.Source
 	pipeInfo       map[string]pipeline.Info
+	columns        columns.Set // the computed columns, with their icons
 	pipeAt         time.Time
 	pipeLoading    bool
 	manualStatuses []store.Status

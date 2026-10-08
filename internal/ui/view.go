@@ -2,13 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
 	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
 )
 
 var (
@@ -200,7 +201,7 @@ func (m *Model) viewFooter() string {
 	}
 
 	if m.pipelineOn() {
-		hint := "a accept (Ready for QA) · A archive · d detail · n note · enter go · r refresh · ? help"
+		hint := "a accept (" + m.columns.Label(pipeline.ReadyQA) + ") · A archive · d detail · n note · enter go · r refresh · ? help"
 		if m.status != "" {
 			hint = m.status
 		}
@@ -605,7 +606,7 @@ func (m *Model) viewHelp() string {
 	if m.pipelineOn() {
 		lines = append(lines,
 			dimStyle.Render(indent+truncate("Columns come from the run, Jenkins and git; they are not moved by hand.", room+keyCol)),
-			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("accept a Ready for QA ticket: it moves to the Archive", room)),
+			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
 			indent+keyStyle.Render(pad("A", keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
 			"")
 	}

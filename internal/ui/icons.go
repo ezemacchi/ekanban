@@ -5,16 +5,14 @@ import (
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
-// statusGlyph is the global board's own icon set; the glyphs are in look.
+// statusGlyph is the manual board's icon set; computed columns carry their
+// own icon. The glyphs are in look.
 var statusGlyph = map[string]string{
 	"triage":      look.Funnel,
 	"todo":        look.Circle,
 	"in_progress": look.Cog,
 	"waiting":     look.Question,
 	"done":        look.Check,
-	"on_review":   look.PullReq,
-	"to_deploy":   look.Rocket,
-	"ready_qa":    look.Check,
 }
 
 // glyph prefixes text with a Nerd Font glyph when icons are on.
@@ -24,6 +22,9 @@ func (m *Model) glyph(g, text string) string { return look.Icons{On: m.icons}.Wi
 func (m *Model) SetIcons(on bool) { m.icons = on }
 
 func (m *Model) statusLabel(st store.Status) string {
+	if c, ok := m.columns.Find(st.ID); ok && c.Icon != "" {
+		return m.glyph(c.Icon, st.Label)
+	}
 	g, ok := statusGlyph[st.ID]
 	if !ok {
 		g = look.Tag

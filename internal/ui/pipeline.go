@@ -38,7 +38,11 @@ func (m *Model) SetPipeline(src *pipeline.Source) {
 	m.spinner = look.NewSpinner()
 	m.manualStatuses = m.board.Statuses
 	m.manualDefault = m.board.Default
-	m.board.Statuses = append([]store.Status(nil), pipeline.Statuses...)
+	m.columns = src.Columns()
+	m.board.Statuses = nil
+	for _, c := range m.columns {
+		m.board.Statuses = append(m.board.Statuses, store.Status{ID: c.ID, Label: c.Label, Color: c.Color})
+	}
 	m.board.Default = pipeline.ToDo
 	// Pull requests come from Jenkins here; the GitHub client stays off.
 	m.gh = nil
@@ -211,7 +215,7 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 	return false, m, nil
 }
 
-// acceptSelected archives a Ready for QA ticket.
+// acceptSelected archives a ticket in the ready_qa column.
 func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 	sp := m.selected()
 	if sp == nil {
@@ -219,7 +223,7 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 	}
 	info := m.pipeInfo[sp.Key]
 	if info.Stage != pipeline.ReadyQA {
-		m.status = "only Ready for QA tickets can be accepted"
+		m.status = "only tickets in " + m.columns.Label(pipeline.ReadyQA) + " can be accepted"
 		return m, nil
 	}
 	m.board.Accept(sp.Key, store.Accepted{
@@ -343,7 +347,7 @@ func (m *Model) viewArchive() string {
 	b.WriteString(head + "\n\n")
 
 	if len(items) == 0 {
-		b.WriteString(dimStyle.Render("  No accepted tickets yet. On the board, press a on a Ready for QA card.") + "\n")
+		b.WriteString(dimStyle.Render("  No accepted tickets yet. On the board, press a on a card in "+m.columns.Label(pipeline.ReadyQA)+".") + "\n")
 	}
 	width := max(m.width-4, 40)
 	for i, a := range items {

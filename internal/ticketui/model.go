@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
@@ -36,6 +37,7 @@ type Model struct {
 	worktree string
 	opts     ticket.Options
 	icons    look.Icons
+	cols     columns.Set
 
 	run    *ticket.Run
 	err    error
@@ -48,12 +50,31 @@ type Model struct {
 	spinner  look.Spinner
 }
 
-// New builds the board for the run in worktree. opts says where prototypes
-// are and which teams exist; icons turns on Nerd Font glyphs. problems are
-// configuration complaints, shown until the first key.
-func New(client *herdr.Client, worktree string, opts ticket.Options, icons bool, problems []string) *Model {
-	return &Model{client: client, worktree: worktree, opts: opts, icons: look.Icons{On: icons},
-		spinner: look.NewSpinner(), status: strings.Join(problems, " · ")}
+// Settings is what config.toml says about the ticket board.
+type Settings struct {
+	Options  ticket.Options // where prototypes are, which teams exist
+	Columns  columns.Set    // nil: ticket.DefaultColumns
+	Icons    bool           // Nerd Font glyphs
+	Problems []string       // configuration complaints, shown until the first key
+}
+
+// New builds the board for the run in worktree.
+func New(client *herdr.Client, worktree string, s Settings) *Model {
+	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns,
+		icons: look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(s.Problems, " · ")}
+}
+
+func (m *Model) columns() columns.Set {
+	if len(m.cols) == 0 {
+		return ticket.DefaultColumns
+	}
+	return m.cols
+}
+
+// columnAt is the run column shown in display position i.
+func (m *Model) columnAt(i int) ticket.Column {
+	c, _ := ticket.ColumnByID(m.columns()[i].ID)
+	return c
 }
 
 type loadedMsg struct {
@@ -173,16 +194,16 @@ func (m *Model) cardsIn(col ticket.Column) []ticket.Card {
 	return out
 }
 
-func (m *Model) cardCount(col int) int { return len(m.cardsIn(ticket.Columns[col].Col)) }
+func (m *Model) cardCount(col int) int { return len(m.cardsIn(m.columnAt(col))) }
 
 func (m *Model) stepColumn(dir int) {
-	m.col = nav.Step(m.col, dir, len(ticket.Columns), m.cardCount)
+	m.col = nav.Step(m.col, dir, len(m.columns()), m.cardCount)
 	m.row = 0
 }
 
 func (m *Model) clamp() {
 	// A refresh can empty the column under the cursor.
-	if col := nav.Settle(m.col, len(ticket.Columns), m.cardCount); col != m.col {
+	if col := nav.Settle(m.col, len(m.columns()), m.cardCount); col != m.col {
 		m.col, m.row = col, 0
 	}
 	n := m.cardCount(m.col)
@@ -195,7 +216,7 @@ func (m *Model) clamp() {
 }
 
 func (m *Model) focusSelected() tea.Cmd {
-	cards := m.cardsIn(ticket.Columns[m.col].Col)
+	cards := m.cardsIn(m.columnAt(m.col))
 	if m.row >= len(cards) {
 		return nil
 	}
@@ -247,15 +268,21 @@ func (m *Model) View() string {
 	}
 	fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(ic.With(look.Sitemap, orch)))
 
-	colWidth := (width - 3) / len(ticket.Columns)
+	shown := m.columns()
+	colWidth := (width - 3) / len(shown)
 	if colWidth < 14 {
 		colWidth = 14
 	}
-	cols := make([]string, len(ticket.Columns))
-	for i, c := range ticket.Columns {
+	cols := make([]string, len(shown))
+	for i, def := range shown {
 		var cb strings.Builder
-		cards := m.cardsIn(c.Col)
-		cb.WriteString(headStyle.Render(ic.With(columnGlyph[c.Col], fmt.Sprintf("%s (%d)", c.Label, len(cards)))) + "\n")
+		col := m.columnAt(i)
+		cards := m.cardsIn(col)
+		head := headStyle
+		if def.Color != "" {
+			head = head.Foreground(lipgloss.Color(def.Color))
+		}
+		cb.WriteString(head.Render(ic.With(def.Icon, fmt.Sprintf("%s (%d)", def.Label, len(cards)))) + "\n")
 		cardWidth := colWidth - 1
 		text := look.CardInner(cardWidth)
 		for j, card := range cards {
@@ -264,9 +291,9 @@ func (m *Model) View() string {
 			switch {
 			case selected:
 				style = cursorStyle
-			case c.Col == ticket.Waiting:
+			case col == ticket.Waiting:
 				style = waitStyle
-			case c.Col == ticket.Done:
+			case col == ticket.Done:
 				style = doneStyle
 			}
 			lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}

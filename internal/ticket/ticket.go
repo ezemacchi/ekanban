@@ -16,8 +16,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/team"
 )
 
@@ -31,15 +33,29 @@ const (
 	Done
 )
 
-// Columns in display order, with the label shown above each.
-var Columns = []struct {
-	Col   Column
-	Label string
-}{
-	{Pending, "Pending"},
-	{Working, "Working"},
-	{Waiting, "Waiting on you"},
-	{Done, "Done"},
+var columnIDs = map[Column]string{Pending: "pending", Working: "working", Waiting: "waiting", Done: "done"}
+
+// ID is the column's id in config.toml's [[ticket.column]].
+func (c Column) ID() string { return columnIDs[c] }
+
+// ColumnByID is the column with id, false when there is none.
+func ColumnByID(id string) (Column, bool) {
+	for c, cid := range columnIDs {
+		if cid == id {
+			return c, true
+		}
+	}
+	return 0, false
+}
+
+// DefaultColumns are the ticket board's columns in display order.
+// [[ticket.column]] renames, reorders or changes their icons; a role can only
+// be in one of these four, so no column can be added.
+var DefaultColumns = columns.Set{
+	{ID: "pending", Label: "Pending", Icon: look.Circle},
+	{ID: "working", Label: "Working", Icon: look.Cog},
+	{ID: "waiting", Label: "Waiting on you", Icon: look.Question},
+	{ID: "done", Label: "Done", Icon: look.Check},
 }
 
 // done reports whether role left its result: the team definition says how.

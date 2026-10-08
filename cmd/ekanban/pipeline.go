@@ -10,12 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/team"
+	"github.com/ezemacchi/ekanban/internal/ticket"
+	"github.com/ezemacchi/ekanban/internal/ticketui"
 )
 
 func dumpPipeline(client *herdr.Client, repo string) error {
@@ -59,11 +62,25 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	links.Configure(cfg.IssueURL, cfg.Pipeline.PRURL)
 	rules, problems := pipeline.Chain(cfg.Pipeline.Rules)
 	teams, teamProblems := loadTeams()
-	set := pipeline.Settings{PRJobs: cfg.Pipeline.JenkinsPRJobs, Rules: rules, Teams: teams}
+	cols, colProblems := columns.Merge(pipeline.DefaultColumns, cfg.Pipeline.Columns, true)
+	set := pipeline.Settings{PRJobs: cfg.Pipeline.JenkinsPRJobs, Rules: rules, Teams: teams, Columns: cols}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
-	return set, append(problems, teamProblems...)
+	problems = append(problems, teamProblems...)
+	return set, append(problems, colProblems...)
+}
+
+// ticketSettings is the ticket board's share of config.toml.
+func ticketSettings(cfg config.Settings) ticketui.Settings {
+	teams, problems := loadTeams()
+	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
+	return ticketui.Settings{
+		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams},
+		Columns:  cols,
+		Icons:    cfg.Icons,
+		Problems: append(problems, colProblems...),
+	}
 }
 
 // loadTeams reads the built-in team definitions plus the user's, from the

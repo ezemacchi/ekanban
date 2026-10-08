@@ -22,7 +22,6 @@ import (
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/store"
-	"github.com/ezemacchi/ekanban/internal/ticket"
 	"github.com/ezemacchi/ekanban/internal/ticketui"
 	"github.com/ezemacchi/ekanban/internal/ui"
 	"github.com/ezemacchi/ekanban/internal/version"
@@ -104,9 +103,7 @@ func run(args []string) error {
 		}
 		settings := config.Load()
 		links.Configure(settings.IssueURL, settings.Pipeline.PRURL)
-		teams, problems := loadTeams()
-		opts := ticket.Options{SpecRoot: settings.SpecClone, Teams: teams}
-		_, err := tea.NewProgram(ticketui.New(client, worktree, opts, settings.Icons, problems), tea.WithAltScreen()).Run()
+		_, err := tea.NewProgram(ticketui.New(client, worktree, ticketSettings(settings)), tea.WithAltScreen()).Run()
 		return err
 	}
 	board, err := store.Load()

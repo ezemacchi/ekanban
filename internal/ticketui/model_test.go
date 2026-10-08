@@ -1,8 +1,10 @@
 package ticketui
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
@@ -36,6 +38,20 @@ func TestColumnStepsSkipEmptyColumns(t *testing.T) {
 	m.key("h")
 	if m.col != 0 {
 		t.Fatalf("h with nothing further left must stay, got %d", m.col)
+	}
+}
+
+// Reordered columns move the cards with them: Done shown first holds the
+// finished role, whatever position it had by default.
+func TestConfiguredColumnOrderCarriesTheCards(t *testing.T) {
+	cols, _ := columns.Merge(ticket.DefaultColumns, []columns.Column{{ID: "done", Label: "Finished"}}, false)
+	m := &Model{run: &ticket.Run{Cards: []ticket.Card{{Column: ticket.Done}}}, cols: cols, width: 100}
+	m.clamp()
+	if m.col != 0 || m.columnAt(0) != ticket.Done {
+		t.Fatalf("cursor col %d, first column %v", m.col, m.columnAt(0))
+	}
+	if out := m.View(); !strings.Contains(out, "Finished (1)") {
+		t.Fatalf("renamed column missing:\n%s", out)
 	}
 }
 
