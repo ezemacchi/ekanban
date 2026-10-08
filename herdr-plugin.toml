@@ -17,6 +17,19 @@ title = "Open eKanban"
 contexts = ["global", "workspace"]
 command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "board"]
 
+# The kanban for wherever you are: the workspace's board tab if it has one,
+# else a new board tab when you are in an agent's pane, else over the current
+# pane. Bind it in Herdr's config.toml:
+#   [[keys.command]]
+#   key = "prefix+shift+k"
+#   type = "plugin_action"
+#   command = "ekanban.show"
+[[actions]]
+id = "show"
+title = "Show the kanban here"
+contexts = ["global", "workspace"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "open"]
+
 [[panes]]
 id = "board"
 title = "Board"

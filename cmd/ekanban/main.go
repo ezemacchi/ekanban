@@ -88,6 +88,10 @@ func run(args []string) error {
 		return err
 	}
 
+	if len(args) > 0 && args[0] == "open" {
+		return openBoard(client)
+	}
+
 	if len(args) > 0 && args[0] == "pipeline" {
 		// Diagnostic: where each worktree of a repository lands, as JSON lines.
 		repo := "."
@@ -143,7 +147,7 @@ func run(args []string) error {
 			// sends you elsewhere. Same reason as sidebar for being a command.
 			inTab = true
 		default:
-			return fmt.Errorf("unknown command %q (want: sync, sidebar, tab, watch, startup, config, keys, version, prune)", args[0])
+			return fmt.Errorf("unknown command %q (want: sync, sidebar, tab, open, watch, startup, config, keys, version, prune)", args[0])
 		}
 	}
 

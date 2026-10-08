@@ -38,19 +38,53 @@ func (w Workspace) Checkout() string {
 	return strings.TrimPrefix(w.Worktree.CheckoutPath, `\\?\`)
 }
 
-type pane struct {
+// Pane is one pane from a session snapshot.
+type Pane struct {
 	PaneID      string `json:"pane_id"`
 	WorkspaceID string `json:"workspace_id"`
 	TabID       string `json:"tab_id"`
 	Cwd         string `json:"cwd"`
+	Focused     bool   `json:"focused"`
+	// Agent names the agent running in the pane; absent on a shell or a
+	// plugin pane.
+	Agent *string `json:"agent"`
 }
 
 type snapshotResult struct {
 	Snapshot struct {
 		Workspaces []Workspace `json:"workspaces"`
-		Panes      []pane      `json:"panes"`
+		Panes      []Pane      `json:"panes"`
 		Version    string      `json:"version"`
 	} `json:"snapshot"`
+}
+
+// Panes returns every live pane.
+func (c *Client) Panes() ([]Pane, error) {
+	var res snapshotResult
+	if err := c.Request("session.snapshot", map[string]any{}, &res); err != nil {
+		return nil, err
+	}
+	return res.Snapshot.Panes, nil
+}
+
+// FocusTab brings a tab, and its workspace, to the foreground.
+func (c *Client) FocusTab(id string) error {
+	return c.Request("tab.focus", map[string]any{"tab_id": id}, nil)
+}
+
+// RenameTab sets a tab's label.
+func (c *Client) RenameTab(id, label string) error {
+	return c.Request("tab.rename", map[string]any{"tab_id": id, "label": label}, nil)
+}
+
+// OpenPluginPane launches one of a plugin's [[panes]] entrypoints; params are
+// plugin.pane.open's (placement, workspace_id, target_pane_id, cwd, focus).
+func (c *Client) OpenPluginPane(pluginID, entrypoint string, params map[string]any) error {
+	req := map[string]any{"plugin_id": pluginID, "entrypoint": entrypoint}
+	for k, v := range params {
+		req[k] = v
+	}
+	return c.Request("plugin.pane.open", req, nil)
 }
 
 // Workspaces returns every live workspace with its directory resolved.
@@ -63,7 +97,7 @@ func (c *Client) Workspaces() ([]Workspace, error) {
 
 	// Prefer a pane on the workspace's active tab; fall back to any pane. Pane
 	// IDs sort lexically within a workspace, so the first match is stable.
-	byWorkspace := map[string][]pane{}
+	byWorkspace := map[string][]Pane{}
 	for _, p := range snap.Panes {
 		byWorkspace[p.WorkspaceID] = append(byWorkspace[p.WorkspaceID], p)
 	}
