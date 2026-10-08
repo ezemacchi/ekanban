@@ -62,6 +62,21 @@ type Config struct {
 	// Bitbucket is the server whose pull requests the board judges: whether
 	// each one may merge, SonarQube's quality gate included.
 	Bitbucket bitbucket.Config `toml:"bitbucket"`
+	// Broadcast is what the global board offers to say to every orchestrator.
+	Broadcast BroadcastConfig `toml:"broadcast"`
+}
+
+// BroadcastConfig is the [broadcast] table.
+type BroadcastConfig struct {
+	// Presets are ready-made messages; {target} is each ticket's target
+	// branch and {key} its key.
+	Presets []string `toml:"presets"`
+}
+
+// DefaultPresets are the broadcast's messages when [broadcast] names none.
+var DefaultPresets = []string{
+	"Fetch and rebase your branch onto origin/{target}, run the checks, and push.",
+	"Stop where you are and tell me in two lines what is done and what is left.",
 }
 
 // TicketConfig is the [ticket] table.
@@ -91,6 +106,10 @@ type PipelineConfig struct {
 	// Columns rename, recolour, reorder or re-icon the computed columns, and
 	// add one for a custom rule to return.
 	Columns []columns.Column `toml:"column"`
+	// FastForward brings the local target branches up to their remote after
+	// each fetch, never over changes or commits of their own. It moves your
+	// checkouts, so it is read from config.toml only.
+	FastForward bool `toml:"fast_forward"`
 }
 
 // CIConfig is the [pipeline.ci] table.
@@ -129,6 +148,7 @@ type Settings struct {
 	Layout        ticket.Layout                  // [run]
 	Jira          jira.Config                    // [jira], defaults filled
 	Bitbucket     bitbucket.Config               // [bitbucket], defaults filled
+	Broadcast     []string                       // [broadcast] presets, defaults filled
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
 	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
@@ -180,7 +200,7 @@ func LoadFor(dir string) Settings {
 		// Snapshots of what only config.toml may set. The lists are cloned:
 		// decoding over a slice rewrites its elements in place, which would
 		// rewrite the snapshot and let the repository file through.
-		orchestrator, account, server := c.Orchestrator, c.Jira, c.Bitbucket
+		orchestrator, account, server, ff := c.Orchestrator, c.Jira, c.Bitbucket, c.Pipeline.FastForward
 		orchestrator.Args = slices.Clone(orchestrator.Args)
 		account.Handoff.Command = slices.Clone(account.Handoff.Command)
 		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
@@ -193,6 +213,11 @@ func LoadFor(dir string) Settings {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [jira] url, email_env, token_env and handoff.command are only read from config.toml — ignored", s.RepoPath))
 			c.Jira.URL, c.Jira.EmailEnv, c.Jira.TokenEnv = account.URL, account.EmailEnv, account.TokenEnv
 			c.Jira.Handoff.Command = account.Handoff.Command
+		}
+		// It moves the reader's own checkouts, so it is theirs to turn on.
+		if c.Pipeline.FastForward != ff {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [pipeline] fast_forward is only read from config.toml — ignored", s.RepoPath))
+			c.Pipeline.FastForward = ff
 		}
 		// The token goes to this address, so a repository cannot pick it.
 		if c.Bitbucket != server {
@@ -279,6 +304,10 @@ func resolve(c Config, s Settings) Settings {
 	}
 	s.Jira = c.Jira.WithDefaults()
 	s.Bitbucket = c.Bitbucket.WithDefaults()
+	s.Broadcast = c.Broadcast.Presets
+	if len(s.Broadcast) == 0 {
+		s.Broadcast = DefaultPresets
+	}
 	var layoutProblems []string
 	s.Layout, layoutProblems = ticket.NewLayout(c.Run)
 	s.Problems = append(s.Problems, layoutProblems...)
@@ -409,6 +438,12 @@ icons = false
 # Known: deployed, merged, not-started, working, landed.
 # rules = ["deployed", "merged", "not-started", "working", "landed"]
 
+# Keep the target branches up to date in your checkouts: after each fetch the
+# board fast-forwards them to their remote. Only ever a fast-forward: a branch
+# with commits of its own, or checked out where there are changes, is left
+# alone and the board says so. U does it at once. Read from this file only.
+# fast_forward = true
+
 # Branches pull requests merge into, most downstream first. publish is the
 # build server job that deploys the branch; env is how the card names it.
 # [[pipeline.target]]
@@ -501,6 +536,16 @@ icons = false
 # merge, or what is in the way. The project and repository are taken from
 # pipeline.pr_url. The token is read from an environment variable, never from
 # a file, and is sent only to url; both are read from this file only.
+# The global board's broadcast (B) says one message to every orchestrator
+# open, each getting it as a message of its own. presets are ready-made ones;
+# {target} is each ticket's target branch and {key} its key. A repository's
+# .ekanban.toml may set them for its team.
+# [broadcast]
+# presets = [
+#   "Fetch and rebase your branch onto origin/{target}, run the checks, and push.",
+#   "Stop where you are and tell me in two lines what is done and what is left.",
+# ]
+
 # [bitbucket]
 # url = "https://bitbucket.example.com"
 # token_env = "BITBUCKET_TOKEN"   # a personal access token that can read the repository

@@ -61,6 +61,8 @@ var (
 		keys.Action{Name: "open-issue", Keys: []string{"t"}, Canon: "open-issue", Help: "open the ticket in Jira (the tracker)", Short: "ticket"},
 		keys.Action{Name: "prototype", Keys: []string{"p"}, Canon: "prototype", Help: "open the ticket's HTML prototype", Short: "prototype"},
 		keys.Action{Name: "open-pull-request", Keys: []string{"P"}, Canon: "open-pull-request", Help: "open the selected ticket's pull request in the browser", Short: "pull request"},
+		keys.Action{Name: "broadcast", Keys: []string{"B"}, Help: "say one message to every open orchestrator, or the ones you tick: each gets it as a message of its own", Short: "broadcast"},
+		keys.Action{Name: "sync", Keys: []string{"U"}, Help: "bring the local target branches up to their remote now: only by fast-forward, never over changes or commits of their own", Short: "update branches"},
 		keys.Action{Name: "handoff", Keys: []string{"H"}, Canon: "handoff", Help: "a Jira ticket with no worktree: choose the target branch and team, then start the work (needs [jira])", Short: "hand off"})
 
 	// ArchiveActions are the archive list's.

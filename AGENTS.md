@@ -78,8 +78,8 @@ There are two settings files, both optional:
 
 | File | Holds | Shared? |
 |---|---|---|
-| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agent a board starts (`[orchestrator] kind`, `args`), keys, the specifications clone | never |
-| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[orchestrator]` prompt | the team decides |
+| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agent a board starts (`[orchestrator] kind`, `args`), keys, the specifications clone, `[pipeline] fast_forward` | never |
+| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[orchestrator]` prompt, `[broadcast]` presets | the team decides |
 
 `ekanban.exe config --init` writes a commented `config.toml` with every setting.
 `ekanban.exe config`, run inside a repository, prints which files are in force.
@@ -87,7 +87,8 @@ There are two settings files, both optional:
 The repository file is read over `config.toml` when a board opens in that
 repository or any of its worktrees. A value replaces the personal one; a list
 replaces the whole list. `[orchestrator] kind` and `args` are ignored there,
-because they choose a program to start. `[lead]` is the old name of
+because they choose a program to start, and so is `[pipeline] fast_forward`,
+which moves the reader's own checkouts. `[lead]` is the old name of
 `[orchestrator]`; it still works, but write `[orchestrator]`.
 
 Ask the user whether `.ekanban.toml` should be committed. When it holds internal

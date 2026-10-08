@@ -302,6 +302,26 @@ The account is two environment variables, named by `email_env` and `token_env`
 `.ekanban.toml` cannot change the site, the variables or the handoff command.
 Without them the board says so on its status line and works as before.
 
+### Talking to every orchestrator, and keeping the target branches current
+
+`B` (or the Broadcast button) says one message to the orchestrators of the
+tickets on the board -- "rebase onto master", say. The box lists the open
+orchestrators, all ticked, with what each is doing; untick any with a click or
+`space`, write the message or pick a ready-made one, and `enter` asks
+(Y)es/(N)o, naming who gets it, before each orchestrator gets it as a message
+of its own. A busy one reads it when it is done. `{target}` and `{key}` in the
+message become each ticket's target branch and key. A search or a column
+filter narrows who is listed. The ready-made messages are `[broadcast]
+presets`, which a repository's `.ekanban.toml` may set for its team.
+
+The board fetches the target branches to know what is merged; that does not
+move your local `master`. `U` (or Update branches) does: it fetches them and
+fast-forwards each local one that is behind. Only ever a fast-forward: a
+branch with commits of its own, or checked out where there are changes, is
+left alone, and the footer says so (`master ↓4 · local changes`). With
+`[pipeline] fast_forward = true` in config.toml it happens after every fetch.
+It moves your checkouts, so a repository file cannot turn it on.
+
 ### Bitbucket
 
 A green build is not a pull request that may merge. Bitbucket also holds the
@@ -553,7 +573,8 @@ linked worktrees look for it there.
 In a repository the board adds its own: `a` accepts a ticket in the last column
 and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
 orchestrator (so sorting the table moves to `ctrl+o`), `t` opens its Jira
-ticket, `p` its prototype, `P` its pull request, and `H` hands off a Jira ticket that has no worktree. `y` copies a
+ticket, `p` its prototype, `P` its pull request, and `H` hands off a Jira ticket that has no worktree. `B` broadcasts
+a message to the orchestrators and `U` brings the target branches up to date (see below). `y` copies a
 card's context on both boards. `ekanban keys` lists every
 screen's keys, and `[keys]` in the settings rebinds any of them:
 

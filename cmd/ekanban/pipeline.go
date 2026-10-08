@@ -70,7 +70,7 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
 	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Orchestrator: cfg.Orchestrator, Columns: cols, Layout: &cfg.Layout,
-		SpecRoot: cfg.SpecClone}
+		SpecRoot: cfg.SpecClone, FastForward: cfg.Pipeline.FastForward}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}

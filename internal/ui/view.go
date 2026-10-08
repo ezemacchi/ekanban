@@ -50,6 +50,15 @@ func (m *Model) viewFrame() string {
 		return m.viewHandoff(base)
 	}
 
+	if m.mode == modeBroadcast {
+		// The broadcast sits over the board it was opened from.
+		m.mode = modeNormal
+		base := m.viewFrame()
+		m.mode = modeBroadcast
+		m.resetZones()
+		return m.viewBroadcast(base)
+	}
+
 	if m.mode == modeConfirm {
 		// The question sits over the board it was asked from.
 		m.mode = modeNormal
@@ -222,6 +231,7 @@ func (m *Model) viewFooter() string {
 		hints := []hint{
 			{Key: k("filter"), Label: "Search"}, {Key: k("detail"), Label: "Detail"},
 			{Key: k("orchestrator"), Label: "Orchestrator"}, {Key: k("yank"), Label: "Copy"},
+			{Key: k("broadcast"), Label: "Broadcast"}, {Key: k("sync"), Label: "Update branches"},
 			{Key: k("refresh"), Label: "Refresh"},
 		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
@@ -230,6 +240,10 @@ func (m *Model) viewFooter() string {
 			if m.pipeLoading {
 				state = m.spinner.Frame() + " " + state + ", reading again"
 			}
+		}
+		// What a fast-forward had to leave alone stays said until it is fixed.
+		if left := m.pipe.LastSync().Left; len(left) > 0 {
+			state += " · " + strings.Join(left, " · ")
 		}
 		if s := m.statusText(); s != "" {
 			state += " · " + s
@@ -592,7 +606,7 @@ func (m *Model) viewManage() string {
 var helpLayout = []screen.HelpSection{
 	{Title: "Move", Rows: [][]string{{"down", "up"}, {"left", "right"}, {"top", "bottom"}, {"page-down", "page-up"}, {"attention"}}},
 	{Title: "The board", Rows: [][]string{
-		{"filter"}, {"status-only"}, {"fold"}, {"layout"}, {"sort"}, {"archive"}, {"archived"},
+		{"filter"}, {"status-only"}, {"fold"}, {"layout"}, {"sort"}, {"broadcast"}, {"sync"}, {"archive"}, {"archived"},
 		{"statuses"}, {"reorder-spaces"}, {"refresh"}, {"help"}, {"quit"},
 	}},
 	{Title: "The selected card", Rows: [][]string{

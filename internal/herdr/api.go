@@ -253,6 +253,16 @@ func (c *Client) SendToAgent(paneID, text string) error {
 	}, nil)
 }
 
+// SubmitToAgent types text into an agent's input and presses enter, so the
+// agent gets it as a message: what a broadcast does to each orchestrator.
+func (c *Client) SubmitToAgent(paneID, text string) error {
+	return c.Request("pane.send_input", map[string]any{
+		"pane_id": paneID,
+		"text":    text,
+		"keys":    []string{"enter"},
+	}, nil)
+}
+
 // FocusAgent brings an agent's pane to the foreground.
 func (c *Client) FocusAgent(paneID string) error {
 	return c.Request("agent.focus", map[string]any{"target": paneID}, nil)

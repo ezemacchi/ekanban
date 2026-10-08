@@ -265,3 +265,50 @@ func TestForgetAsksYesOrNo(t *testing.T) {
 		t.Fatal("Y did not forget it")
 	}
 }
+
+// The broadcast lists the orchestrators, all ticked; a click unticks one, a
+// ready-made message fills the message, and enter asks (Y)es/(N)o before
+// anything is sent, with {target} as each ticket gets it.
+func TestTheBroadcastAsksBeforeItSends(t *testing.T) {
+	m := pipelineBoard(t)
+	m.width, m.height = 140, 40
+	m.SetBroadcast([]string{"Rebase onto origin/{target} and push."})
+	send(t, m, key("B"))
+	if m.mode != modeBroadcast {
+		t.Fatalf("B left mode %v", m.mode)
+	}
+	send(t, m, recipientsMsg{to: []recipient{
+		{key: "ABC-1", pane: "p1", status: "idle", target: "main", on: true},
+		{key: "ABC-2", pane: "p2", status: "working", target: "next", on: true},
+	}})
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"Broadcast to the orchestrators", "[x] ABC-1", "[x] ABC-2", "Send to 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("box is missing %q:\n%s", want, out)
+		}
+	}
+	clickZoneOf(t, m, isChoice(1))
+	if m.bc.to[1].on {
+		t.Fatal("a click did not untick ABC-2")
+	}
+	clickZoneOf(t, m, isControl("preset:0"))
+	if m.input.Value() != "Rebase onto origin/{target} and push." {
+		t.Fatalf("the preset did not fill the message: %q", m.input.Value())
+	}
+	send(t, m, key("enter"))
+	if m.mode != modeConfirm {
+		t.Fatalf("enter sent without asking; mode %v", m.mode)
+	}
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "Send to 1 orchestrator?") || !strings.Contains(out, "Rebase onto origin/main and push.") {
+		t.Fatalf("the question does not say what goes where:\n%s", out)
+	}
+	send(t, m, key("n"))
+	if m.mode != modeBroadcast || m.input.Value() == "" {
+		t.Fatal("no did not go back to the box with the message")
+	}
+	send(t, m, key("enter"))
+	_, cmd := m.Update(key("y"))
+	if m.mode != modeNormal || cmd == nil {
+		t.Fatalf("yes did not send; mode %v", m.mode)
+	}
+}

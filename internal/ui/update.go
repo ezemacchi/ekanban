@@ -56,6 +56,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case handoffMsg:
 		return m, m.applyHandoff(msg)
 
+	case recipientsMsg:
+		m.applyRecipients(msg)
+		return m, nil
+
+	case broadcastMsg:
+		m.applyBroadcast(msg)
+		return m, nil
+
+	case syncedMsg:
+		return m, m.applySynced(msg)
+
 	case look.SpinMsg:
 		return m, m.spinner.Update(msg, m.pipelineBusy() || m.isBusy())
 
@@ -177,6 +188,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if m.mode == modeHandoff {
 		return m.clickHandoff(msg.X, msg.Y)
+	}
+	if m.mode == modeBroadcast {
+		return m.clickBroadcast(msg.X, msg.Y)
 	}
 	if m.mode == modeConfirm {
 		// Only its answers and its ✕ act: a stray click must not answer.
@@ -318,6 +332,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHandoffKey(msg)
 	case modeConfirm:
 		return m.answer(msg.String())
+	case modeBroadcast:
+		return m.handleBroadcastKey(msg)
 	case modeNote, modeRename, modeMessage, modeFilter, modeManageAdd, modeManageRename:
 		return m.handleInputKey(msg)
 	case modeHelp:

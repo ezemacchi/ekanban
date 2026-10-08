@@ -196,6 +196,7 @@ func run(args []string) error {
 			bc, bwhy = nil, "Bitbucket is off: pipeline.pr_url is not a Bitbucket pull request address (.../projects/P/repos/R/pull-requests/{pr})"
 		}
 		model.SetBitbucket(bc, loc, bwhy)
+		model.SetBroadcast(settings.Broadcast)
 	} else {
 		// A watcher keeps polling GitHub after the board closes, which is the
 		// only way a notification can reach you while you are elsewhere. The

@@ -39,6 +39,7 @@ const (
 	modeHelp
 	modeHandoff
 	modeConfirm
+	modeBroadcast
 )
 
 // space is one row of the board: a directory, whatever the user recorded about
@@ -201,6 +202,8 @@ type Model struct {
 	menu *popup
 	// ask is the yes-or-no question open over the board (confirm.go).
 	ask *question
+	// bc is the broadcast to the orchestrators (broadcast.go).
+	bc broadcastState
 
 	landed bool   // the cursor has been placed on a space at least once
 	status string // transient message shown in the footer

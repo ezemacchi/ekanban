@@ -96,6 +96,9 @@ type Settings struct {
 	// SpecRoot is spec_clone, the specifications clone a run's prototype is
 	// looked up in; without it a run has no prototype.
 	SpecRoot string
+	// FastForward brings the local target branches up to their remote after
+	// each fetch; see Sync.
+	FastForward bool
 }
 
 // CIName names the build server on the board, "CI" when there is none.
@@ -129,6 +132,8 @@ type Source struct {
 	// deployed remembers publishes already seen to include a merge; a merge
 	// never leaves a publish once in it.
 	deployed map[int]string
+	// synced is what the last fast-forward of the target branches did.
+	synced Synced
 }
 
 // New reads the build server and git for repo, any checkout of the worktrees.
@@ -159,6 +164,9 @@ func New(repo string, set Settings, hide func(*exec.Cmd)) *Source {
 func (s *Source) Refresh(ctx context.Context) {
 	if branches := s.targetBranches(); len(branches) > 0 {
 		s.git(ctx, append([]string{"fetch", "--quiet", "origin"}, branches...)...)
+		if s.set.FastForward {
+			s.setSynced(s.fastForward(ctx, branches))
+		}
 	}
 	ci := s.set.CI
 	if ci == nil {
@@ -187,6 +195,19 @@ func (s *Source) Refresh(ctx context.Context) {
 	s.offline = ""
 	s.jobs = jobs
 	s.published = pubs
+}
+
+// LastSync is what the last fast-forward of the target branches did.
+func (s *Source) LastSync() Synced {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.synced
+}
+
+func (s *Source) setSynced(r Synced) {
+	s.mu.Lock()
+	s.synced = r
+	s.mu.Unlock()
 }
 
 // Run reads worktree's run with the board's teams and orchestrator.
@@ -261,6 +282,14 @@ func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live
 		}
 	}
 	return info
+}
+
+// Targets are the branches pull requests merge into, most downstream first.
+func (s *Source) Targets() []string {
+	if s == nil {
+		return nil
+	}
+	return s.targetBranches()
 }
 
 func (s *Source) targetBranches() []string {

@@ -246,6 +246,10 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, m.goOrchestrator()
 	case "handoff":
 		return true, m, m.startHandoff()
+	case "B":
+		return true, m, m.startBroadcast()
+	case "U":
+		return true, m, m.syncNow()
 	case "open-pull-request":
 		if sp := m.selected(); sp != nil {
 			return true, m, m.openPipelinePR(sp)
