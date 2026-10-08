@@ -69,7 +69,8 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	ci, ciProblems := pipeline.NewCI(pipeline.CIConfig{Kind: cfg.Pipeline.CI.Kind, URL: cfg.Pipeline.CI.URL})
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
-	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Orchestrator: cfg.Orchestrator, Columns: cols, Layout: &cfg.Layout}
+	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Orchestrator: cfg.Orchestrator, Columns: cols, Layout: &cfg.Layout,
+		SpecRoot: cfg.SpecClone}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}

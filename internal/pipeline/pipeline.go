@@ -93,6 +93,9 @@ type Settings struct {
 	Orchestrator team.Orchestrator // config.toml's [orchestrator], over each team's
 	Columns      columns.Set       // nil: DefaultColumns
 	Layout       *ticket.Layout    // nil: ticket.DefaultLayout
+	// SpecRoot is spec_clone, the specifications clone a run's prototype is
+	// looked up in; without it a run has no prototype.
+	SpecRoot string
 }
 
 // CIName names the build server on the board, "CI" when there is none.
@@ -188,7 +191,7 @@ func (s *Source) Refresh(ctx context.Context) {
 
 // Run reads worktree's run with the board's teams and orchestrator.
 func (s *Source) Run(worktree string, live ticket.Live) (*ticket.Run, error) {
-	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Orchestrator: s.set.Orchestrator, Layout: s.set.Layout}, live)
+	return ticket.Load(worktree, ticket.Options{SpecRoot: s.set.SpecRoot, Teams: s.set.Teams, Orchestrator: s.set.Orchestrator, Layout: s.set.Layout}, live)
 }
 
 // Classify places one worktree. knownPR is a pull request number remembered
