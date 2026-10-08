@@ -49,6 +49,46 @@ const (
 	PillRight = "\ue0b4"
 )
 
+// AgentLook is how a Herdr agent status is drawn.
+type AgentLook struct {
+	Glyph string
+	Word  string
+	Style lipgloss.Style
+}
+
+// Agent is the look of a Herdr agent status, in the words of Herdr's sidebar:
+// done is work finished that nobody has looked at yet. An unknown status has
+// no word.
+func Agent(status string) AgentLook {
+	switch status {
+	case "working":
+		return AgentLook{Cog, "working", lipgloss.NewStyle().Foreground(lipgloss.Color("214"))}
+	case "blocked":
+		return AgentLook{Question, "needs you", lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)}
+	case "done":
+		return AgentLook{Check, "finished", lipgloss.NewStyle().Foreground(lipgloss.Color("78")).Bold(true)}
+	case "idle":
+		return AgentLook{Circle, "idle", Dim}
+	}
+	return AgentLook{Style: Dim}
+}
+
+// AgentRank orders statuses by how much they ask of the user, highest first:
+// blocked, done, working, idle.
+func AgentRank(status string) int {
+	switch status {
+	case "blocked":
+		return 4
+	case "done":
+		return 3
+	case "working":
+		return 2
+	case "idle":
+		return 1
+	}
+	return 0
+}
+
 // PillColor is the background of title pills and the modal border.
 var PillColor = lipgloss.Color("62")
 

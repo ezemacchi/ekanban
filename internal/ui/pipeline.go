@@ -152,8 +152,17 @@ func (m *Model) applyPipeline(msg pipelineMsg) tea.Cmd {
 		m.pipeAt = msg.at
 	}
 	changed := false
+	if m.agentSeen == nil {
+		m.agentSeen = map[string]map[string]string{}
+	}
+	var news []string
 	for key, info := range msg.infos {
 		m.pipeInfo[key] = info
+		seen, moved := ticket.Changes(m.agentSeen[key], info.Agents)
+		m.agentSeen[key] = seen
+		for _, c := range moved {
+			news = append(news, orKey(info.Key, key)+" · "+c.Says())
+		}
 		if info.PR > 0 && m.board.Entries[key].PR != info.PR {
 			m.board.SetPR(key, info.PR)
 			changed = true
@@ -161,6 +170,10 @@ func (m *Model) applyPipeline(msg pipelineMsg) tea.Cmd {
 	}
 	if changed {
 		m.save()
+	}
+	if len(news) > 0 {
+		sort.Strings(news)
+		m.status = time.Now().Format("15:04") + "  " + strings.Join(news, "; ")
 	}
 	m.rebuild()
 	cmds := []tea.Cmd{m.subscribe(msg.panes)}
@@ -170,6 +183,14 @@ func (m *Model) applyPipeline(msg pipelineMsg) tea.Cmd {
 		cmds = append(cmds, m.loadPipeline(force))
 	}
 	return tea.Batch(cmds...)
+}
+
+// orKey is the ticket key, or the worktree's folder when it has none.
+func orKey(ticketKey, space string) string {
+	if ticketKey != "" {
+		return ticketKey
+	}
+	return baseName(space)
 }
 
 // pipelineStage is a space's column, and whether it belongs on the board.
@@ -202,7 +223,18 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 	if !sp.Live {
 		// No workspace, so no agents: waiting and lost do not apply.
 		info.Waiting, info.Lost = false, false
-		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Pause, "workspace closed Â· "+m.hintKey("jump")+" reopens"), width)))
+		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Pause, "workspace closed · "+m.hintKey("jump")+" reopens"), width)))
+	}
+	if a, ok := ticket.Loudest(info.Agents); ok && sp.Live {
+		al := look.Agent(a.Status)
+		text := a.Who + " " + al.Word
+		if a.Title != "" {
+			text += " · " + a.Title
+		}
+		lines = append(lines, al.Style.Render(truncate(m.glyph(al.Glyph, text), width)))
+		if a.Status == "blocked" {
+			info.Waiting = false
+		}
 	}
 	if info.Waiting {
 		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "asking you something"), width)))

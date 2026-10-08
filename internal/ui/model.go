@@ -224,13 +224,16 @@ type Model struct {
 
 	// Pipeline mode (pipeline.go): computed columns, the archive of accepted
 	// tickets. pipe is nil when off.
-	pipe           *pipeline.Source
-	pipeInfo       map[string]pipeline.Info
-	columns        columns.Set // the computed columns, with their icons
-	pipeAt         time.Time
-	pipeLoading    bool
-	pipeAgain      bool // something changed during a load: load once more
-	pipeForce      bool // ... and refresh the build server and git too
+	pipe        *pipeline.Source
+	pipeInfo    map[string]pipeline.Info
+	columns     columns.Set // the computed columns, with their icons
+	pipeAt      time.Time
+	pipeLoading bool
+	pipeAgain   bool // something changed during a load: load once more
+	pipeForce   bool // ... and refresh the build server and git too
+	// agentSeen is each space's agent statuses at the last load, by pane,
+	// so a change can be announced.
+	agentSeen      map[string]map[string]string
 	manualStatuses []store.Status
 	manualDefault  string
 	archiveView    bool

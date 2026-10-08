@@ -159,6 +159,9 @@ type Agent struct {
 	// Name is set only for agents started with `herdr agent start <name>`.
 	Name string `json:"name"`
 	Cwd  string `json:"cwd"`
+	// Title is what the agent last set as its terminal title, usually a few
+	// words on what it is doing; Herdr's sidebar shows it.
+	Title string `json:"terminal_title_stripped"`
 }
 
 // Tab is one entry from tab.list.

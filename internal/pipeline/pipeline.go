@@ -61,6 +61,8 @@ type Info struct {
 	Phase   string
 	Waiting bool // an agent of the run is asking something
 	Lost    bool // a role was dispatched but has neither agent nor result
+	// Agents are the run's live agents with their Herdr status and title.
+	Agents []ticket.Agent
 
 	PR       int
 	PROpen   bool
@@ -294,6 +296,7 @@ func notStarted(run *ticket.Run) bool {
 }
 
 func describeRun(info *Info, run *ticket.Run) {
+	info.Agents = run.Agents()
 	if run.LeadStatus == "blocked" {
 		info.Waiting = true
 	}

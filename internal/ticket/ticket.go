@@ -154,8 +154,84 @@ type Card struct {
 	// Stuck marks a role that was dispatched but has neither an agent nor a
 	// result, usually because the agent was lost.
 	Stuck bool
-	// PaneID is the role's live agent, when there is one.
+	// PaneID is the role's live agent, when there is one; Status and Title
+	// are its Herdr status and terminal title.
 	PaneID string
+	Status string
+	Title  string
+}
+
+// Agent is one live agent of the run, the lead or a role's.
+type Agent struct {
+	Who    string // the role's or the lead's label
+	Pane   string
+	Status string
+	Title  string
+}
+
+// Change is an agent whose status moved since the last reading; From is ""
+// for an agent that was not there.
+type Change struct {
+	Agent
+	From string
+}
+
+// Changes compares now with the statuses seen before, by pane, and records
+// now in seen. A nil seen is the first reading: it is filled and reports
+// nothing, so opening a board does not announce every agent.
+func Changes(seen map[string]string, now []Agent) (map[string]string, []Change) {
+	first := seen == nil
+	next := make(map[string]string, len(now))
+	var out []Change
+	for _, a := range now {
+		next[a.Pane] = a.Status
+		from, ok := seen[a.Pane]
+		// done to idle is only the user looking at the finished work.
+		if from == "done" && a.Status == "idle" {
+			continue
+		}
+		if !first && (!ok || from != a.Status) {
+			out = append(out, Change{a, from})
+		}
+	}
+	return next, out
+}
+
+// Says is the change in a few words: "Reviewer finished".
+func (c Change) Says() string {
+	if c.From == "" {
+		return c.Who + " started"
+	}
+	if w := look.Agent(c.Status).Word; w != "" {
+		return c.Who + " " + w
+	}
+	return c.Who + " " + c.Status
+}
+
+// Loudest is the agent asking most of the user (look.AgentRank), the first
+// one on a tie; false when none is working, blocked or done.
+func Loudest(agents []Agent) (Agent, bool) {
+	var top Agent
+	for _, a := range agents {
+		if look.AgentRank(a.Status) > look.AgentRank(top.Status) {
+			top = a
+		}
+	}
+	return top, look.AgentRank(top.Status) > look.AgentRank("idle")
+}
+
+// Agents are the run's live agents: the lead first, then the roles in order.
+func (r *Run) Agents() []Agent {
+	var out []Agent
+	if r.LeadPane != "" {
+		out = append(out, Agent{r.Lead.Label, r.LeadPane, r.LeadStatus, r.LeadTitle})
+	}
+	for _, c := range r.Cards {
+		if c.PaneID != "" {
+			out = append(out, Agent{c.Role.Label, c.PaneID, c.Status, c.Title})
+		}
+	}
+	return out
 }
 
 // Run is everything the ticket board shows.
@@ -183,6 +259,7 @@ type Run struct {
 	Lead       team.Lead
 	LeadStatus string
 	LeadPane   string
+	LeadTitle  string
 	// Workspace is the Herdr workspace open on the worktree, or "".
 	Workspace string
 
@@ -352,6 +429,16 @@ func within(path, root string) bool {
 	return p == r || strings.HasPrefix(p, r+string(filepath.Separator))
 }
 
+// titleOf is the agent's terminal title, or "" when it only names the agent
+// program ("Cursor Agent") and so says nothing about the work.
+func titleOf(a herdr.Agent) string {
+	t := strings.TrimSpace(a.Title)
+	if a.Agent != nil && (strings.EqualFold(t, *a.Agent) || strings.EqualFold(t, *a.Agent+" agent")) {
+		return ""
+	}
+	return t
+}
+
 func describe(a herdr.Agent, tabLabels map[string]string) string {
 	return strings.ToLower(a.Name + " " + tabLabels[a.TabID])
 }
@@ -378,7 +465,7 @@ func (r *Run) placeLead(roles []team.Role, agents []herdr.Agent, tabLabels map[s
 	for _, test := range tests {
 		for _, a := range agents {
 			if test(a) {
-				r.LeadStatus, r.LeadPane = a.AgentStatus, a.PaneID
+				r.LeadStatus, r.LeadPane, r.LeadTitle = a.AgentStatus, a.PaneID, titleOf(a)
 				return
 			}
 		}
@@ -400,14 +487,14 @@ func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[
 			if !role.Matches(describe(agents[i], tabLabels)) {
 				continue
 			}
-			// A working or blocked copy says more than an idle leftover.
-			if live == nil || agents[i].AgentStatus == "working" || agents[i].AgentStatus == "blocked" {
+			// A copy that asks more of the user says more than an idle leftover.
+			if live == nil || look.AgentRank(agents[i].AgentStatus) > look.AgentRank(live.AgentStatus) {
 				live = &agents[i]
 			}
 		}
 		done := r.done(role)
 		if live != nil {
-			c.PaneID = live.PaneID
+			c.PaneID, c.Status, c.Title = live.PaneID, live.AgentStatus, titleOf(*live)
 		}
 		switch {
 		case live != nil && live.AgentStatus == "blocked":
@@ -425,7 +512,7 @@ func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[
 			}
 		case live != nil:
 			c.Column = Working
-			c.Note = "idle, no result yet"
+			c.Note = "no result yet"
 		case c.Rounds > 0:
 			c.Column = Pending
 			c.Stuck = true

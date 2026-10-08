@@ -72,7 +72,13 @@ type Model struct {
 	events    chan herdr.Event
 	subCancel context.CancelFunc
 	subPanes  string // the agent panes the subscription covers
+
+	seen     map[string]string // agent statuses at the last load, by pane
+	activity []string          // the latest status changes, newest first
 }
+
+// activityKept is how many status changes the Activity list shows.
+const activityKept = 5
 
 // Actions are the ticket board's keys. The first key of each is what key()
 // switches on; config.toml's [keys] binds others by name.
@@ -231,6 +237,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.run, m.err = msg.run, msg.err
 		m.loading, m.loadedAt, m.stamp = false, time.Now(), msg.stamp
 		m.clamp()
+		if msg.run != nil {
+			m.note(msg.run.Agents(), time.Now())
+		}
 		var cmds []tea.Cmd
 		if m.client != nil && msg.err == nil {
 			cmds = append(cmds, m.subscribe(msg.panes))
@@ -279,6 +288,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.key(msg.String())
 	}
 	return m, nil
+}
+
+// note adds the agents' status changes since the last load to the Activity
+// list.
+func (m *Model) note(agents []ticket.Agent, at time.Time) {
+	var moved []ticket.Change
+	m.seen, moved = ticket.Changes(m.seen, agents)
+	for _, c := range moved {
+		line := at.Format("15:04") + "  " + c.Says()
+		if c.Title != "" {
+			line += " · " + c.Title
+		}
+		m.activity = append([]string{line}, m.activity...)
+	}
+	if len(m.activity) > activityKept {
+		m.activity = m.activity[:activityKept]
+	}
 }
 
 func (m *Model) key(k string) tea.Cmd {
@@ -443,10 +469,19 @@ func (m *Model) View() string {
 	}
 	leadName := strings.ToLower(r.Lead.Label)
 	orch := fmt.Sprintf("no %s open · %s opens one", leadName, m.keyMap().Key("lead"))
-	if r.LeadStatus != "" {
-		orch = leadName + ": " + statusWord(r.LeadStatus) + " · " + m.keyMap().Key("lead") + " goes there"
+	orchStyle := dimStyle
+	if r.LeadPane != "" {
+		al := look.Agent(r.LeadStatus)
+		orch = leadName + ": " + orDash(al.Word)
+		if r.LeadTitle != "" {
+			orch += " · " + r.LeadTitle
+		}
+		orch += " · " + m.keyMap().Key("lead") + " goes there"
+		if r.LeadStatus != "idle" {
+			orchStyle = al.Style
+		}
 	}
-	fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(ic.With(look.Sitemap, orch)))
+	fmt.Fprintf(&b, "%s\n\n", orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), width)))
 
 	shown := m.columns()
 	colWidth := (width - 3) / len(shown)
@@ -477,6 +512,14 @@ func (m *Model) View() string {
 				style = doneStyle
 			}
 			lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}
+			if card.PaneID != "" {
+				al := look.Agent(card.Status)
+				state := orDash(al.Word)
+				if card.Title != "" {
+					state += " · " + card.Title
+				}
+				lines = append(lines, al.Style.Render(look.Truncate(ic.With(al.Glyph, state), text)))
+			}
 			if card.Note != "" {
 				note, noteStyle := card.Note, dimStyle
 				if card.Stuck {
@@ -499,6 +542,17 @@ func (m *Model) View() string {
 		b.WriteString(headStyle.Render(ic.With(look.Play, "Now")) + "\n")
 		for _, l := range r.CurrentStep {
 			b.WriteString(look.Truncate(l, width) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(m.activity) > 0 {
+		b.WriteString(headStyle.Render(ic.With(look.Clock, "Activity")) + "\n")
+		for i, l := range m.activity {
+			style := lipgloss.NewStyle()
+			if i > 0 {
+				style = dimStyle
+			}
+			b.WriteString(style.Render(look.Truncate(l, width)) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -529,18 +583,6 @@ func (m *Model) View() string {
 	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  " + k("jump") + " go to its tab  " +
 		k("lead") + " " + leadName + "  " + k("open-issue") + " tracker  " + k("prototype") + " prototype  " + k("refresh") + " refresh  " + k("quit") + " quit")
 	return b.String()
-}
-
-func statusWord(s string) string {
-	switch s {
-	case "working":
-		return "working"
-	case "blocked":
-		return "waiting for your answer"
-	case "idle", "done":
-		return "idle"
-	}
-	return s
 }
 
 func orDash(s string) string {
