@@ -16,6 +16,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/alert"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
@@ -895,7 +896,7 @@ func TestKanbanScrollsToSelectedColumn(t *testing.T) {
 	m.col = len(m.board.Statuses) - 1
 
 	out := m.View()
-	end := m.scrollColumns(m.columnWidths())
+	_, end := screen.ScrollColumns(screen.Widths(m.kanbanColumns(), m.width), m.colOffset, m.col, m.width)
 	if m.col < m.colOffset || m.col >= end {
 		t.Fatalf("selected column %d is off screen (columns %d..%d)", m.col, m.colOffset, end-1)
 	}
@@ -905,7 +906,7 @@ func TestKanbanScrollsToSelectedColumn(t *testing.T) {
 }
 
 func TestWrapSplitsLongWords(t *testing.T) {
-	lines := wrap("supercalifragilistic short", 8)
+	lines := screen.Wrap("supercalifragilistic short", 8)
 	for _, l := range lines {
 		if len(l) > 8 {
 			t.Fatalf("line %q exceeds the width", l)

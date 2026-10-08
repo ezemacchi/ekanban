@@ -57,8 +57,8 @@ func TestClickingAChoiceSetsIt(t *testing.T) {
 	selectSpace(t, m, tmp+target)
 	send(t, m, key("s"))
 
-	z := findZone(t, m, func(z zone) bool { return z.kind == zoneStatus && z.status == 2 })
-	send(t, m, click(z.x0+1, z.y))
+	z := findZone(t, m, func(z zone) bool { return z.Kind == zoneStatus && z.Choice == 2 })
+	send(t, m, click(z.X0+1, z.Y))
 	if got := m.board.Entries[store.Key(tmp+target)].Status; got != "waiting" {
 		t.Fatalf("status is %q, want waiting", got)
 	}
@@ -70,8 +70,8 @@ func TestClickingACardSelectsIt(t *testing.T) {
 	names := labelsIn(m, "todo")
 	selectSpace(t, m, tmp+names[0])
 
-	z := findZone(t, m, func(z zone) bool { return z.kind == zoneCard && z.row == 2 })
-	send(t, m, click(z.x0+1, z.y))
+	z := findZone(t, m, func(z zone) bool { return z.Kind == zoneCard && z.Row == 2 })
+	send(t, m, click(z.X0+1, z.Y))
 	if sp := m.selected(); sp == nil || sp.Label != names[2] {
 		t.Fatalf("selected %+v, want %s", sp, names[2])
 	}
@@ -83,11 +83,11 @@ func TestFooterButtonsAndModalClose(t *testing.T) {
 	m := kanbanBoard(t)
 	selectSpace(t, m, tmp+labelsIn(m, "todo")[0])
 
-	z := findZone(t, m, func(z zone) bool { return z.kind == zoneButton && z.key == "d" })
-	if z.y != linesIn(m.View()) {
-		t.Fatalf("the d button is on row %d, want the last row %d", z.y, linesIn(m.View()))
+	z := findZone(t, m, func(z zone) bool { return z.Kind == zoneButton && z.Key == "d" })
+	if z.Y != linesIn(m.View()) {
+		t.Fatalf("the d button is on row %d, want the last row %d", z.Y, linesIn(m.View()))
 	}
-	send(t, m, click(z.x0, z.y))
+	send(t, m, click(z.X0, z.Y))
 	if m.mode != modeDetail {
 		t.Fatalf("mode %v, want the detail modal", m.mode)
 	}
@@ -109,8 +109,8 @@ func TestPickerInsideTheDetailModal(t *testing.T) {
 	if out := m.View(); m.mode != modeStatusPick || !strings.Contains(out, "set status:") {
 		t.Fatalf("picker not in the modal:\n%s", out)
 	}
-	z := findZone(t, m, func(z zone) bool { return z.kind == zoneStatus && z.status == 3 })
-	send(t, m, click(z.x0+1, z.y))
+	z := findZone(t, m, func(z zone) bool { return z.Kind == zoneStatus && z.Choice == 3 })
+	send(t, m, click(z.X0+1, z.Y))
 	if got := m.board.Entries[store.Key(tmp+target)].Status; got != "done" {
 		t.Fatalf("status is %q, want done", got)
 	}

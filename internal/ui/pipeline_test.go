@@ -9,6 +9,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
@@ -176,9 +177,10 @@ func TestCursorStartsOnTheFirstCard(t *testing.T) {
 func TestEmptyColumnsTakeOnlyTheirHeader(t *testing.T) {
 	m := pipelineBoard(t)
 	m.width = 160
-	widths := m.columnWidths()
+	cols := m.kanbanColumns()
+	widths := screen.Widths(cols, m.width)
 	for col, st := range m.board.Statuses {
-		header := lipgloss.Width(m.columnHeader(col)) + columnGutter
+		header := lipgloss.Width(cols[col].Header()) + screen.Gutter
 		switch {
 		case st.ID == pipeline.ReadyQA:
 			if widths[col] <= header {

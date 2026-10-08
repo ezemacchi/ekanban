@@ -19,6 +19,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/lead"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
@@ -37,7 +38,6 @@ var (
 	dimStyle    = look.Dim
 	cursorStyle = look.Cursor
 	errStyle    = look.Err
-	keyStyle    = look.Key
 	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
 	waitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	doneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
@@ -78,48 +78,40 @@ type Model struct {
 	seen     map[string]string // agent statuses at the last load, by pane
 	activity []string          // the latest status changes, newest first
 
-	busyText string // the status naming work still running; see working
-	zones    []zone // what the last frame drew that a click can act on
-}
+	busyText string       // the status naming work still running; see working
+	zones    screen.Zones // what the last frame drew that a click can act on
 
-// zone is a clickable part of the last frame: a role card, or a line or
-// button that stands for a key.
-type zone struct {
-	y, x0, x1 int // x1 exclusive
-	col, row  int // a card; col < 0 for a key
-	key       string
-}
-
-func (m *Model) zoneAt(x, y int) (zone, bool) {
-	for i := len(m.zones) - 1; i >= 0; i-- {
-		z := m.zones[i]
-		if y == z.y && x >= z.x0 && x < z.x1 {
-			return z, true
-		}
-	}
-	return zone{}, false
-}
-
-// keyZone records a line or button that stands for the key bound to action.
-func (m *Model) keyZone(y, x0, x1 int, action string) {
-	m.zones = append(m.zones, zone{y: y, x0: x0, x1: x1, col: -1, key: m.keyMap().Key(action)})
+	// The body between the header and the footer scrolls: scroll is its
+	// first line on screen. follow keeps the selected card in view; the
+	// wheel turns it off until the next key or click.
+	scroll    int
+	follow    bool
+	colOffset int // the first column drawn when they do not all fit
 }
 
 // click selects the card under the pointer; a second click on it goes to its
-// tab, like enter. A click on a key's line or button presses that key.
+// tab, like enter. A click on a column's header selects the column, and one on
+// a key's line or button presses that key.
 func (m *Model) click(x, y int) tea.Cmd {
-	z, ok := m.zoneAt(x, y)
+	z, ok := m.zones.At(x, y)
 	if !ok {
 		return nil
 	}
-	if z.col < 0 {
-		return m.key(z.key)
-	}
-	already := m.col == z.col && m.row == z.row
-	m.col, m.row = z.col, z.row
-	m.status = ""
-	if already {
-		return m.focusSelected()
+	m.follow = true
+	switch z.Kind {
+	case screen.OnButton:
+		return m.key(z.Key)
+	case screen.OnColumn:
+		if m.cardCount(z.Col) > 0 {
+			m.col, m.row = z.Col, 0
+		}
+	case screen.OnCard:
+		already := m.col == z.Col && m.row == z.Row
+		m.col, m.row = z.Col, z.Row
+		m.status = ""
+		if already {
+			return m.focusSelected()
+		}
 	}
 	return nil
 }
@@ -156,7 +148,7 @@ type Settings struct {
 // New builds the board for the run in worktree.
 func New(client *herdr.Client, worktree string, s Settings) *Model {
 	km, problems := keys.New(Actions, s.Keys)
-	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns, keys: km,
+	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns, keys: km, follow: true,
 		icons: look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(append(s.Problems, problems...), " · ")}
 }
 
@@ -339,11 +331,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		switch {
 		case msg.Button == tea.MouseButtonWheelUp:
-			m.row--
-			m.clamp()
+			m.scroll -= wheelStep
+			m.follow = false
 		case msg.Button == tea.MouseButtonWheelDown:
-			m.row++
-			m.clamp()
+			m.scroll += wheelStep
+			m.follow = false
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			return m, m.click(msg.X, msg.Y)
 		}
@@ -369,6 +361,7 @@ func (m *Model) note(agents []ticket.Agent, at time.Time) {
 }
 
 func (m *Model) key(k string) tea.Cmd {
+	m.follow = true
 	if m.chord == "g" {
 		m.chord = ""
 		if k == "g" {
@@ -530,36 +523,106 @@ func (m *Model) View() string {
 		width = 100
 	}
 	if m.err != nil && m.run == nil {
-		return errStyle.Render("No run found in "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render("Looking for "+m.lookingFor()+" · q quit")
+		return errStyle.Render(" No run found in "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render(" Looking for "+m.lookingFor()+" · q quit")
 	}
 	if m.run == nil {
-		return dimStyle.Render(m.spinner.Frame() + " loading")
+		return dimStyle.Render(" " + m.spinner.Frame() + " loading")
 	}
 	r := m.run
-	ic := m.icons
-	var b strings.Builder
-	m.zones = m.zones[:0]
-	// line writes one line that a click turns into the key of action.
-	line := func(text, action string) {
-		m.keyZone(linesIn(b.String()), 0, lipgloss.Width(text), action)
-		b.WriteString(text + "\n")
-	}
+	m.zones.Reset()
 
 	team := r.Team
 	if team == "" {
 		team = "unknown team"
 	}
-	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(r.Key), dimStyle.Render(fmt.Sprintf("%s · %s · %s",
-		team, ic.With(look.Target, orDash(r.Target)), ic.With(look.Branch, orDash(r.Branch)))))
-	line(linkStyle.Render(ic.With(look.Jira, r.JiraURL)), "open-issue")
+	right := fmt.Sprintf("%s · %s · %s ", team, m.icons.With(look.Target, orDash(r.Target)), m.icons.With(look.Branch, orDash(r.Branch)))
+	header := screen.JoinEnds(" "+titleStyle.Render(r.Key), dimStyle.Render(right), width)
+
+	lines := strings.Split(strings.TrimSuffix(m.body(width, headerLines), "\n"), "\n")
+	height := len(lines)
+	if m.height > 0 {
+		height = max(m.height-headerLines-footerLines, 1)
+	}
+	m.scrollTo(len(lines), height)
+	end := min(m.scroll+height, len(lines))
+	m.zones.Scroll(0, m.scroll, headerLines, headerLines+height)
+
+	var b strings.Builder
+	b.WriteString(header + "\n\n")
+	for _, l := range lines[m.scroll:end] {
+		b.WriteString(l + "\n")
+	}
+	for i := end - m.scroll; i < height; i++ {
+		b.WriteString("\n")
+	}
+	footer := m.footer(width, len(lines)-end)
+	m.zones.PlaceFooter(screen.LinesIn(b.String()))
+	b.WriteString(footer)
+	return b.String()
+}
+
+// The header is the title line and a blank one; the footer is the state line
+// and the buttons. The body between them scrolls.
+const (
+	headerLines = 2
+	footerLines = 2
+	wheelStep   = 3
+)
+
+// scrollTo keeps the body's scroll within its total lines, and the selected
+// card (with its column's header, for the first card) in view while
+// following. Zones are still unscrolled here.
+func (m *Model) scrollTo(total, height int) {
+	if m.follow {
+		first, last := -1, -1
+		for _, z := range m.zones {
+			if z.Kind == screen.OnCard && z.Col == m.col && z.Row == m.row {
+				if first < 0 {
+					first = z.Y - headerLines
+				}
+				last = z.Y - headerLines
+			}
+		}
+		if first >= 0 {
+			if m.row == 0 {
+				first = max(first-2, 0) // the header and its rule
+			}
+			if last >= m.scroll+height {
+				m.scroll = last - height + 1
+			}
+			if first < m.scroll {
+				m.scroll = first
+			}
+		}
+	}
+	m.scroll = min(max(m.scroll, 0), max(total-height, 0))
+}
+
+// body is everything between the header and the footer, recording its zones
+// as if it started at screen row top unscrolled.
+func (m *Model) body(width, top int) string {
+	r := m.run
+	ic := m.icons
+	text := width - 2
+	var b strings.Builder
+	// line writes one line; a click on it presses the key of action, if any.
+	line := func(s, action string) {
+		if action != "" {
+			y := top + screen.LinesIn(b.String())
+			m.zones.Add(screen.Zone{Kind: screen.OnButton, Y: y, X0: 1, X1: 1 + lipgloss.Width(s), Key: m.keyMap().Key(action)})
+		}
+		b.WriteString(" " + s + "\n")
+	}
+
+	line(linkStyle.Render(look.Truncate(ic.With(look.Jira, r.JiraURL), text)), "open-issue")
 	switch {
 	case r.Prototype != "":
-		line(linkStyle.Render(ic.With(look.Brush, "Prototype "+r.Spec+": "+filepath.Base(r.Prototype))), "prototype")
+		line(linkStyle.Render(look.Truncate(ic.With(look.Brush, "Prototype "+r.Spec+": "+filepath.Base(r.Prototype)), text)), "prototype")
 	case r.Spec != "":
-		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Brush, "No prototype for "+r.Spec)))
+		line(dimStyle.Render(look.Truncate(ic.With(look.Brush, "No prototype for "+r.Spec), text)), "")
 	}
 	for _, l := range r.Objective {
-		fmt.Fprintf(&b, "%s\n", look.Truncate(l, width))
+		line(look.Truncate(l, text), "")
 	}
 	leadName := strings.ToLower(r.Lead.Label)
 	orch := fmt.Sprintf("no %s open · %s opens one", leadName, m.keyMap().Key("lead"))
@@ -575,130 +638,144 @@ func (m *Model) View() string {
 			orchStyle = al.Style
 		}
 	}
-	line(orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), width)), "lead")
+	line(orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), text)), "lead")
 	b.WriteString("\n")
 
-	top := linesIn(b.String())
-	shown := m.columns()
-	colWidth := (width - 3) / len(shown)
-	if colWidth < 14 {
-		colWidth = 14
-	}
-	cols := make([]string, len(shown))
-	for i, def := range shown {
-		var cb strings.Builder
+	cols := m.kanbanColumns()
+	widths := screen.Widths(cols, width)
+	from, end := screen.ScrollColumns(widths, m.colOffset, m.col, width)
+	m.colOffset = from
+	for i := from; i < end; i++ {
+		if widths[i] == 0 {
+			continue
+		}
 		col := m.columnAt(i)
-		cards := m.cardsIn(col)
-		head := headStyle
-		if def.Color != "" {
-			head = head.Foreground(lipgloss.Color(def.Color))
+		for j, card := range m.cardsIn(col) {
+			lines := m.renderCard(card, col, i == m.col && j == m.row, widths[i]-screen.Gutter)
+			cols[i].Cards = append(cols[i].Cards, screen.Card{Lines: lines, Choices: -1})
 		}
-		cb.WriteString(head.Render(ic.With(def.Icon, fmt.Sprintf("%s (%d)", def.Label, len(cards)))) + "\n")
-		cardWidth := colWidth - 1
-		text := look.CardInner(cardWidth)
-		y := top + 1
-		for j, card := range cards {
-			selected := i == m.col && j == m.row
-			style := lipgloss.NewStyle()
-			switch {
-			case selected:
-				style = cursorStyle
-			case col == ticket.Waiting:
-				style = waitStyle
-			case col == ticket.Done:
-				style = doneStyle
-			}
-			lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}
-			if card.PaneID != "" {
-				al := look.Agent(card.Status)
-				state := orDash(al.Word)
-				if card.Title != "" {
-					state += " · " + card.Title
-				}
-				lines = append(lines, al.Style.Render(look.Truncate(ic.With(al.Glyph, state), text)))
-			}
-			if card.Note != "" {
-				note, noteStyle := card.Note, dimStyle
-				if card.Stuck {
-					note, noteStyle = ic.With(look.Warning, note), waitStyle
-				}
-				lines = append(lines, noteStyle.Render(look.Truncate(note, text)))
-			}
-			border := look.CardBorder
-			if selected {
-				border = look.CardSelected
-			}
-			boxed := look.Card(lines, cardWidth, border)
-			for range boxed {
-				m.zones = append(m.zones, zone{y: y, x0: i * colWidth, x1: i*colWidth + cardWidth, col: i, row: j})
-				y++
-			}
-			cb.WriteString(strings.Join(boxed, "\n") + "\n")
-		}
-		cols[i] = lipgloss.NewStyle().Width(colWidth).Render(cb.String())
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cols...))
-	b.WriteString("\n")
+	b.WriteString(screen.Draw(&m.zones, cols, widths, from, end, top+screen.LinesIn(b.String()), screen.Tallest(cols)))
 
+	heading := func(glyph, s string) { b.WriteString("\n"); line(headStyle.Render(ic.With(glyph, s)), "") }
 	if len(r.CurrentStep) > 0 {
-		b.WriteString(headStyle.Render(ic.With(look.Play, "Now")) + "\n")
+		heading(look.Play, "Now")
 		for _, l := range r.CurrentStep {
-			b.WriteString(look.Truncate(l, width) + "\n")
+			line(look.Truncate(l, text), "")
 		}
-		b.WriteString("\n")
 	}
 	if len(m.activity) > 0 {
-		b.WriteString(headStyle.Render(ic.With(look.Clock, "Activity")) + "\n")
+		heading(look.Clock, "Activity")
 		for i, l := range m.activity {
 			style := lipgloss.NewStyle()
 			if i > 0 {
 				style = dimStyle
 			}
-			b.WriteString(style.Render(look.Truncate(l, width)) + "\n")
+			line(style.Render(look.Truncate(l, text)), "")
 		}
-		b.WriteString("\n")
 	}
-	b.WriteString(headStyle.Render(ic.With(look.Question, fmt.Sprintf("Open questions (%d)", len(r.Questions)))) + "\n")
+	heading(look.Question, fmt.Sprintf("Open questions %d", len(r.Questions)))
 	if len(r.Questions) == 0 {
-		b.WriteString(dimStyle.Render("none in "+r.Layout().State) + "\n")
+		line(dimStyle.Render("none in "+r.Layout().State), "")
 	}
 	limit := 8
 	for i, q := range r.Questions {
 		if i == limit {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-limit, r.Layout().State)) + "\n")
+			line(dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-limit, r.Layout().State)), "")
 			break
 		}
-		b.WriteString("- " + look.Truncate(q, width-2) + "\n")
+		line("- "+look.Truncate(q, text-2), "")
 	}
 	if r.Landed {
-		b.WriteString("\n" + doneStyle.Render(ic.With(look.Rocket, "Landed: the pull request is ready for review")) + "\n")
-	}
-
-	b.WriteString("\n")
-	if s := m.statusText(); s != "" {
-		b.WriteString(dimStyle.Render(s) + "\n")
-	}
-	if m.err != nil {
-		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
-	}
-	k := func(name string) string { return keyStyle.Render(m.keyMap().Key(name)) }
-	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  ")
-	// The actions are buttons as well as hints.
-	y, x := linesIn(b.String()), lipgloss.Width(k("left")+"/"+k("right")+" column  "+k("up")+"/"+k("down")+" role  ")
-	for _, a := range []struct{ action, label string }{
-		{"jump", "go to its tab"}, {"lead", leadName}, {"open-issue", "tracker"},
-		{"prototype", "prototype"}, {"refresh", "refresh"}, {"quit", "quit"},
-	} {
-		text := k(a.action) + " " + a.label
-		m.keyZone(y, x, x+lipgloss.Width(text), a.action)
-		b.WriteString(text + "  ")
-		x += lipgloss.Width(text) + 2
+		b.WriteString("\n")
+		line(doneStyle.Render(ic.With(look.Rocket, "Landed: the pull request is ready for review")), "")
 	}
 	return b.String()
 }
 
-// linesIn is how many rows s takes before its last line.
-func linesIn(s string) int { return strings.Count(s, "\n") }
+// kanbanColumns are the run's columns, without their cards yet.
+func (m *Model) kanbanColumns() []screen.Column {
+	shown := m.columns()
+	cols := make([]screen.Column, len(shown))
+	for i, def := range shown {
+		color := def.Color
+		if color == "" {
+			color = defaultColumnColor
+		}
+		cols[i] = screen.Column{Label: m.icons.With(def.Icon, def.Label), Color: color, Count: m.cardCount(i), Selected: -1}
+		if i == m.col {
+			cols[i].Selected = m.row
+		}
+	}
+	return cols
+}
+
+// defaultColumnColor is a column header's colour when the column sets none.
+const defaultColumnColor = "111"
+
+// renderCard draws a role as a boxed card width cells wide; the border shows
+// the cursor.
+func (m *Model) renderCard(card ticket.Card, col ticket.Column, selected bool, width int) []string {
+	ic := m.icons
+	text := look.CardInner(width)
+	style := lipgloss.NewStyle()
+	switch {
+	case selected:
+		style = cursorStyle
+	case col == ticket.Waiting:
+		style = waitStyle
+	case col == ticket.Done:
+		style = doneStyle
+	}
+	lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}
+	if card.PaneID != "" {
+		al := look.Agent(card.Status)
+		state := orDash(al.Word)
+		if card.Title != "" {
+			state += " · " + card.Title
+		}
+		lines = append(lines, al.Style.Render(look.Truncate(ic.With(al.Glyph, state), text)))
+	}
+	if card.Note != "" {
+		note, noteStyle := card.Note, dimStyle
+		if card.Stuck {
+			note, noteStyle = ic.With(look.Warning, note), waitStyle
+		}
+		lines = append(lines, noteStyle.Render(look.Truncate(note, text)))
+	}
+	border := look.CardBorder
+	if selected {
+		border = look.CardSelected
+	}
+	return look.Card(lines, width, border)
+}
+
+// footer is the state line (when the run was read, what scrolled out of view,
+// the status) and the buttons; below is how many body lines are under the
+// screen.
+func (m *Model) footer(width, below int) string {
+	state := "run read at " + m.loadedAt.Format("15:04")
+	if m.scroll > 0 {
+		state += fmt.Sprintf(" · ↑ %d more", m.scroll)
+	}
+	if below > 0 {
+		state += fmt.Sprintf(" · ↓ %d more", below)
+	}
+	if s := m.statusText(); s != "" {
+		state += " · " + s
+	}
+	first := dimStyle.Render(" " + look.Truncate(state, width-2))
+	if m.err != nil {
+		first = errStyle.Render(" " + look.Truncate(m.err.Error(), width-2))
+	}
+	k := m.keyMap().Key
+	hints := []screen.Hint{
+		{Key: k("jump"), Label: "go"}, {Key: k("lead"), Label: "lead"},
+		{Key: k("open-issue"), Label: "tracker"}, {Key: k("prototype"), Label: "prototype"},
+		{Key: k("refresh"), Label: "refresh"}, {Key: k("quit"), Label: "quit"},
+	}
+	return first + "\n " + screen.Buttons(&m.zones, 1, 1, hints, width-2)
+}
 
 func orDash(s string) string {
 	if s == "" {

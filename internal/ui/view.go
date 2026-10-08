@@ -7,11 +7,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
 var (
@@ -115,7 +115,7 @@ func (m *Model) viewFrame() string {
 		if i < len(right) {
 			cell = right[i].text
 		}
-		b.WriteString(padCell(truncateStyled(left[i], body-1), body-1))
+		b.WriteString(screen.Pad(screen.TruncateStyled(left[i], body-1), body-1))
 		b.WriteString(dimStyle.Render("│ "))
 		b.WriteString(strings.TrimRight(cell, " "))
 		b.WriteString("\n")
@@ -162,7 +162,7 @@ func (m *Model) viewHeader() string {
 	}
 	right += " "
 
-	return joinEnds(left, dimStyle.Render(right), m.width)
+	return screen.JoinEnds(left, dimStyle.Render(right), m.width)
 }
 
 func (m *Model) viewFooter() string {
@@ -284,7 +284,7 @@ func (m *Model) statusLegend() string {
 		numbered := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color))
 		b.WriteString(numbered.Render(text))
 		w := lipgloss.Width(text)
-		m.addZone(zone{kind: zoneButton, y: 0, x0: x, x1: x + w, key: fmt.Sprintf("%d", i+1), footer: true})
+		m.addZone(zone{Kind: zoneButton, Y: 0, X0: x, X1: x + w, Key: fmt.Sprintf("%d", i+1), Footer: true})
 		x += w
 	}
 	return b.String()
@@ -379,7 +379,7 @@ func (m *Model) renderRow(i int) string {
 	}
 
 	line := prefix + nameStyled + " " + detailStyle.Render(truncate(detail, room))
-	return joinEnds(line, dimStyle.Render(hint+" "), body)
+	return screen.JoinEnds(line, dimStyle.Render(hint+" "), body)
 }
 
 // Narrow rows keep a name readable before anything else earns room, and hold a
@@ -426,7 +426,7 @@ func (m *Model) renderNarrowRow(i int) string {
 		}
 		head := " " + marker.Render(arrow) + " " + style.Render(m.statusLabel(r.status))
 		count := dimStyle.Render(fmt.Sprintf("%d", r.count)) + narrowMargin
-		return truncateStyled(joinEnds(head, count, width), width)
+		return screen.TruncateStyled(screen.JoinEnds(head, count, width), width)
 	}
 
 	sp := r.space
@@ -497,7 +497,7 @@ func (m *Model) renderNarrowRow(i int) string {
 		}
 	}
 
-	return truncateStyled(joinEnds(left, right+narrowMargin, width), width)
+	return screen.TruncateStyled(screen.JoinEnds(left, right+narrowMargin, width), width)
 }
 
 // joinMarks spaces out the right-hand markers, skipping the ones that are not
@@ -734,24 +734,6 @@ func pad(s string, n int) string {
 }
 
 var truncate = look.Truncate
-
-// truncateStyled clips an already-styled string without cutting through an
-// escape sequence, which plain slicing would do.
-func truncateStyled(s string, width int) string {
-	if width <= 0 || lipgloss.Width(s) <= width {
-		return s
-	}
-	return ansi.Truncate(s, width, "")
-}
-
-// joinEnds puts left and right on one line, right-aligned to width.
-func joinEnds(left, right string, width int) string {
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		return left
-	}
-	return left + strings.Repeat(" ", gap) + right
-}
 
 // abbreviate shortens a home-relative path for display.
 func abbreviate(path string) string {

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
 // PR state is context, never control: it is rendered beside a space and pushed
@@ -321,7 +322,7 @@ func prDetailLines(pr gh.PR, width int) []detailLine {
 	case gh.MergeBehind:
 		lines = append(lines, detailLine{text: prPendingStyle.Render(truncate("behind base", width))})
 	}
-	for _, line := range wrap(pr.Title, width) {
+	for _, line := range screen.Wrap(pr.Title, width) {
 		lines = append(lines, detailLine{text: prDimStyle.Render(line), url: pr.URL})
 	}
 	return lines

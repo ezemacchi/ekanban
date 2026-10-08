@@ -51,7 +51,7 @@ func TestConfiguredColumnOrderCarriesTheCards(t *testing.T) {
 	if m.col != 0 || m.columnAt(0) != ticket.Done {
 		t.Fatalf("cursor col %d, first column %v", m.col, m.columnAt(0))
 	}
-	if out := m.View(); !strings.Contains(out, "Finished (1)") {
+	if out := m.View(); !strings.Contains(out, "Finished 1") {
 		t.Fatalf("renamed column missing:\n%s", out)
 	}
 }

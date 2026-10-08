@@ -10,6 +10,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
 // The detail view exists because a row can only show a truncated note. In the
@@ -112,7 +113,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 	// The note is the reason this view exists, so it gets the room it needs.
 	if sp.Note != "" {
 		noteWidth := width - lipgloss.Width(m.glyph(look.Pencil, ""))
-		for i, line := range wrap(sp.Note, noteWidth) {
+		for i, line := range screen.Wrap(sp.Note, noteWidth) {
 			lead := m.glyph(look.Pencil, "")
 			if i > 0 {
 				lead = strings.Repeat(" ", lipgloss.Width(lead))
@@ -135,7 +136,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 	// work, but unlike the note it is not something you wrote.
 	if m.pipelineOn() {
 		if info, ok := m.pipeInfo[sp.Key]; ok && info.Title != "" {
-			for _, line := range wrap(info.Title, width) {
+			for _, line := range screen.Wrap(info.Title, width) {
 				lines = append(lines, plain(line)...)
 			}
 			lines = append(lines, plain("")...)
@@ -158,7 +159,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 		lines = append(lines, plain("")...)
 	}
 
-	for _, line := range wrap(m.glyph(look.Folder, abbreviate(sp.Key)), width) {
+	for _, line := range screen.Wrap(m.glyph(look.Folder, abbreviate(sp.Key)), width) {
 		lines = append(lines, plain(dimStyle.Render(line))...)
 	}
 	if branch := m.branchFor(sp.Key); branch != "" {
@@ -240,13 +241,13 @@ func (m *Model) viewDetailModal(base string) string {
 	if picking {
 		bottom = m.pickerLines(inner)
 		for i := range m.board.Statuses {
-			m.addZone(zone{kind: zoneStatus, y: i + 1, x0: 0, x1: inner, status: i})
+			m.addZone(zone{Kind: zoneStatus, Y: i + 1, X0: 0, X1: inner, Choice: i})
 		}
 		bottom = append(bottom, dimStyle.Render(truncate("s/arrows move · enter set · esc cancel", inner)))
 	} else {
 		bottom = []string{m.buttons(0, 0, hints, inner)}
 		for i := mark; i < len(m.zones); i++ {
-			m.zones[i].footer = false
+			m.zones[i].Footer = false
 		}
 	}
 
@@ -270,13 +271,13 @@ func (m *Model) viewDetailModal(base string) string {
 	// Past the border, the title, the blank line, the content and the blank.
 	bottomY := originY + 1 + 2 + len(content) + 1
 	for i := mark; i < len(m.zones); i++ {
-		m.zones[i].y += bottomY
-		m.zones[i].x0 += originX + 2
-		m.zones[i].x1 += originX + 2
+		m.zones[i].Y += bottomY
+		m.zones[i].X0 += originX + 2
+		m.zones[i].X1 += originX + 2
 	}
 	// The box goes under its own zones: a click inside it on nothing does not
 	// close it.
-	m.zones = append(m.zones[:mark], append([]zone{{kind: zoneModal, y: originY, h: boxH, x0: originX, x1: originX + boxW}}, m.zones[mark:]...)...)
+	m.zones = append(m.zones[:mark], append([]zone{{Kind: zoneModal, Y: originY, H: boxH, X0: originX, X1: originX + boxW}}, m.zones[mark:]...)...)
 
 	return overlay(base, box, originX, originY, m.width, m.height)
 }

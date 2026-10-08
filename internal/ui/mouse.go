@@ -5,109 +5,44 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
-// Clickable zones. Every frame records where it drew what a click can act on
-// -- a card, a column header, a status choice, a button -- so a click is
-// tested against what is on screen now. Later zones sit on top: a modal's
-// zones win over the board under it.
+// Clickable zones are screen.Zones: every frame records where it drew what a
+// click can act on -- a card, a column header, a status choice, a button --
+// so a click is tested against what is on screen now.
 
-type zoneKind int
+type zone = screen.Zone
 
 const (
-	zoneCard   zoneKind = iota // a kanban card: col, row
-	zoneColumn                 // a kanban column header: col
-	zoneStatus                 // a status choice of the picker: status index
-	zoneButton                 // a key hint: key
-	zoneModal                  // the detail modal's box; a click outside closes it
+	zoneCard   = screen.OnCard   // a kanban card: Col, Row
+	zoneColumn = screen.OnColumn // a kanban column header: Col
+	zoneStatus = screen.OnChoice // a status choice of the picker: Choice
+	zoneButton = screen.OnButton // a key hint: Key
+	zoneModal  = screen.OnBox    // the detail modal's box; a click outside closes it
 )
 
-type zone struct {
-	kind     zoneKind
-	y        int
-	x0, x1   int // x1 exclusive
-	h        int // rows covered, 1 when 0
-	col, row int
-	status   int
-	key      string
-	footer   bool // y counts from the footer's first line until placeFooter
-}
+func (m *Model) resetZones() { m.zones.Reset() }
 
-func (m *Model) resetZones() { m.zones = m.zones[:0] }
+func (m *Model) addZone(z zone) { m.zones.Add(z) }
 
-func (m *Model) addZone(z zone) { m.zones = append(m.zones, z) }
+func (m *Model) placeFooter(top int) { m.zones.PlaceFooter(top) }
 
-// placeFooter turns the footer's zones into screen rows once the rows above
-// the footer are known.
-func (m *Model) placeFooter(top int) {
-	for i := range m.zones {
-		if m.zones[i].footer {
-			m.zones[i].y += top
-			m.zones[i].footer = false
-		}
-	}
-}
+func (m *Model) zoneAt(x, y int) (zone, bool) { return m.zones.At(x, y) }
 
-// linesIn is how many rows s takes.
-func linesIn(s string) int { return strings.Count(s, "\n") }
-
-// zoneAt is the topmost zone under a point.
-func (m *Model) zoneAt(x, y int) (zone, bool) {
-	for i := len(m.zones) - 1; i >= 0; i-- {
-		z := m.zones[i]
-		h := max(z.h, 1)
-		if y >= z.y && y < z.y+h && x >= z.x0 && x < z.x1 {
-			return z, true
-		}
-	}
-	return zone{}, false
-}
+var linesIn = screen.LinesIn
 
 // hint is one clickable key hint: what to press and what it does.
 type hint struct{ key, label string }
 
-// buttons draws hints as "key label · key label", recording each as a
-// button on footer row line, starting at column x.
+// buttons draws hints as footer buttons on footer row line, from column x.
 func (m *Model) buttons(line, x int, hints []hint, width int) string {
-	var b strings.Builder
-	used := 0
-	sep := dimStyle.Render(" · ")
+	out := make([]screen.Hint, len(hints))
 	for i, h := range hints {
-		if h.key == "" {
-			continue
-		}
-		text := keyStyle.Render(h.key) + dimStyle.Render(" "+h.label)
-		w := lipgloss.Width(text)
-		gap := 0
-		if i > 0 && used > 0 {
-			gap = 3
-		}
-		if used+gap+w > width {
-			break
-		}
-		if gap > 0 {
-			b.WriteString(sep)
-		}
-		m.addZone(zone{kind: zoneButton, y: line, x0: x + used + gap, x1: x + used + gap + w, key: h.key, footer: true})
-		b.WriteString(text)
-		used += gap + w
+		out[i] = screen.Hint{Key: h.key, Label: h.label}
 	}
-	return b.String()
-}
-
-// keyMsg is the key event a button press stands for.
-func keyMsg(k string) tea.KeyMsg {
-	switch k {
-	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
-	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
-	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
-	case "space", " ":
-		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
-	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+	return screen.Buttons(&m.zones, line, x, out, width)
 }
 
 // clickZone acts on a click that landed on a zone; false when there was none.
@@ -125,21 +60,21 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 		}
 		return false, m, nil
 	}
-	switch z.kind {
+	switch z.Kind {
 	case zoneButton:
-		model, cmd := m.handleKey(keyMsg(z.key))
+		model, cmd := m.handleKey(screen.KeyMsg(z.Key))
 		return true, model, cmd
 	case zoneStatus:
-		if z.status >= 0 && z.status < len(m.board.Statuses) {
+		if z.Choice >= 0 && z.Choice < len(m.board.Statuses) {
 			m.mode = m.inputParentMode()
-			model, cmd := m.applyStatus(m.board.Statuses[z.status])
+			model, cmd := m.applyStatus(m.board.Statuses[z.Choice])
 			return true, model, cmd
 		}
 	case zoneColumn:
 		if m.mode != modeNormal {
 			return true, m, nil
 		}
-		m.col, m.rowInCol = z.col, 0
+		m.col, m.rowInCol = z.Col, 0
 		m.clampColumnCursor()
 		return true, m, nil
 	case zoneCard:
@@ -150,8 +85,8 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 		if m.mode != modeNormal {
 			return true, m, nil
 		}
-		already := m.col == z.col && m.rowInCol == z.row
-		m.col, m.rowInCol = z.col, z.row
+		already := m.col == z.Col && m.rowInCol == z.Row
+		m.col, m.rowInCol = z.Col, z.Row
 		m.clampColumnCursor()
 		model, cmd := m.spaceClick(already)
 		return true, model, cmd
@@ -209,7 +144,7 @@ func (m *Model) pickerBar(line int, width int) string {
 			break
 		}
 		b.WriteString(" " + style.Render(text))
-		m.addZone(zone{kind: zoneStatus, y: line, x0: x + 1, x1: x + 1 + w, status: i, footer: true})
+		m.addZone(zone{Kind: zoneStatus, Y: line, X0: x + 1, X1: x + 1 + w, Choice: i, Footer: true})
 		x += 1 + w
 	}
 	return b.String()

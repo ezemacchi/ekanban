@@ -19,6 +19,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
@@ -232,7 +233,7 @@ type Model struct {
 	pipeAgain   bool // something changed during a load: load once more
 	pipeForce   bool // ... and refresh the build server and git too
 	// zones are what the last frame drew that a click can act on (mouse.go).
-	zones []zone
+	zones screen.Zones
 	// busyText is the status naming work still running; see working.
 	busyText string
 	// agentSeen is each space's agent statuses at the last load, by pane,
