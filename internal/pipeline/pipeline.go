@@ -4,7 +4,7 @@
 //	To Do           no run yet, or nothing dispatched
 //	In Progress     the team is working; the landing check has not passed
 //	On Review       landed, pull request open, waiting on reviewers and CI
-//	To be deployed  merged into a target branch, not in its last publish yet
+//	To ship         merged into a target branch, not in its last publish yet
 //	Ready for QA    the target's last publish includes it
 //
 // Classify gathers Facts; the rules in rules.go decide the column. Sources
@@ -46,7 +46,7 @@ var Statuses = []store.Status{
 	{ID: ToDo, Label: "To Do", Color: "244"},
 	{ID: InProgress, Label: "In Progress", Color: "39"},
 	{ID: OnReview, Label: "On Review", Color: "141"},
-	{ID: ToDeploy, Label: "To be deployed", Color: "214"},
+	{ID: ToDeploy, Label: "To ship", Color: "214"},
 	{ID: ReadyQA, Label: "Ready for QA", Color: "78"},
 }
 

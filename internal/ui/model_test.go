@@ -889,10 +889,9 @@ func TestKanbanScrollsToSelectedColumn(t *testing.T) {
 	m.col = len(m.board.Statuses) - 1
 
 	out := m.View()
-	width := m.columnWidth()
-	visible := m.visibleColumns(width)
-	if m.col < m.colOffset || m.col >= m.colOffset+visible {
-		t.Fatalf("selected column %d is off screen (offset %d, visible %d)", m.col, m.colOffset, visible)
+	end := m.scrollColumns(m.columnWidths())
+	if m.col < m.colOffset || m.col >= end {
+		t.Fatalf("selected column %d is off screen (columns %d..%d)", m.col, m.colOffset, end-1)
 	}
 	if !strings.Contains(out, m.board.Statuses[m.col].Label) {
 		t.Fatalf("selected column not rendered:\n%s", out)

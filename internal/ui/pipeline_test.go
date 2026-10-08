@@ -66,6 +66,30 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 	}
 }
 
+// Empty columns shrink to their header; the column with cards takes the room.
+func TestEmptyColumnsTakeOnlyTheirHeader(t *testing.T) {
+	m := pipelineBoard(t)
+	m.width = 160
+	widths := m.columnWidths()
+	for col, st := range m.board.Statuses {
+		header := lipgloss.Width(m.columnHeader(col)) + columnGutter
+		switch {
+		case st.ID == pipeline.ReadyQA:
+			if widths[col] <= header {
+				t.Fatalf("the column with a card is only %d wide", widths[col])
+			}
+		case widths[col] != header:
+			t.Fatalf("empty %s is %d wide, want its header's %d", st.Label, widths[col], header)
+		}
+	}
+	out := m.View()
+	for _, st := range m.board.Statuses {
+		if !strings.Contains(out, st.Label) {
+			t.Fatalf("header %q is cut:\n%s", st.Label, out)
+		}
+	}
+}
+
 // The computed columns must never be written over the user's own statuses.
 func TestPipelineSaveKeepsManualStatuses(t *testing.T) {
 	m := pipelineBoard(t)

@@ -24,29 +24,30 @@ func (m *Model) viewKanbanBoard() string {
 	b.WriteString(m.viewHeader())
 	b.WriteString("\n\n")
 
-	width := m.columnWidth()
-	visible := m.visibleColumns(width)
-	m.scrollColumns(visible)
-
+	widths := m.columnWidths()
+	end := m.scrollColumns(widths)
 	height := m.listHeight()
-	end := min(m.colOffset+visible, len(m.board.Statuses))
 
-	rendered := make([][]string, 0, visible)
+	type column struct {
+		lines []string
+		width int
+	}
+	var rendered []column
 	for col := m.colOffset; col < end; col++ {
-		if m.statusFilter != "" && m.board.Statuses[col].ID != m.statusFilter {
+		if widths[col] == 0 {
 			continue
 		}
-		rendered = append(rendered, m.renderColumn(col, width, height))
+		rendered = append(rendered, column{m.renderColumn(col, widths[col], height), widths[col]})
 	}
 
 	for line := 0; line < height; line++ {
 		var row strings.Builder
-		for _, column := range rendered {
+		for _, c := range rendered {
 			cell := ""
-			if line < len(column) {
-				cell = column[line]
+			if line < len(c.lines) {
+				cell = c.lines[line]
 			}
-			row.WriteString(padCell(cell, width))
+			row.WriteString(padCell(cell, c.width))
 		}
 		b.WriteString(" " + strings.TrimRight(row.String(), " "))
 		b.WriteString("\n")
@@ -56,47 +57,70 @@ func (m *Model) viewKanbanBoard() string {
 	return b.String()
 }
 
-// columnWidth divides the terminal between the statuses, within sane bounds.
-func (m *Model) columnWidth() int {
+// columnWidths gives each status its width; 0 hides it (the status filter).
+// An empty column takes only what its header needs, so the columns holding
+// cards get the room; those share what is left, within sane bounds.
+func (m *Model) columnWidths() []int {
 	usable := m.width - 1
-	if usable < minColumnWidth {
-		return minColumnWidth
-	}
-	if n := len(m.board.Statuses); n > 0 {
-		if w := usable / n; w >= minColumnWidth {
-			return min(w, maxColumnWidth)
+	widths := make([]int, len(m.board.Statuses))
+	full, used := 0, 0
+	for col, st := range m.board.Statuses {
+		switch {
+		case m.statusFilter != "" && st.ID != m.statusFilter:
+		case m.columnCount(col) == 0:
+			widths[col] = lipgloss.Width(m.columnHeader(col)) + columnGutter
+			used += widths[col]
+		default:
+			full++
 		}
 	}
-	return minColumnWidth
+	if full == 0 {
+		return widths
+	}
+	share := minColumnWidth
+	if room := usable - used; room/full > minColumnWidth {
+		share = min(room/full, maxColumnWidth)
+	}
+	for col, st := range m.board.Statuses {
+		if widths[col] == 0 && (m.statusFilter == "" || st.ID == m.statusFilter) {
+			widths[col] = share
+		}
+	}
+	return widths
 }
 
-func (m *Model) visibleColumns(width int) int {
-	if width <= 0 {
-		return 1
+// scrollColumns keeps the selected column on screen when the columns do not
+// all fit, and returns the end of the visible range.
+func (m *Model) scrollColumns(widths []int) int {
+	usable := m.width - 1
+	span := func(from, to int) int {
+		total := 0
+		for _, w := range widths[from:to] {
+			total += w
+		}
+		return total
 	}
-	n := (m.width - 1) / width
-	if n < 1 {
-		n = 1
-	}
-	return min(n, len(m.board.Statuses))
-}
-
-// scrollColumns keeps the selected column on screen when the statuses do not
-// all fit at once.
-func (m *Model) scrollColumns(visible int) {
+	m.colOffset = min(max(m.colOffset, 0), max(len(widths)-1, 0))
 	if m.col < m.colOffset {
 		m.colOffset = m.col
 	}
-	if m.col >= m.colOffset+visible {
-		m.colOffset = m.col - visible + 1
+	for m.colOffset < m.col && span(m.colOffset, m.col+1) > usable {
+		m.colOffset++
 	}
-	maxOffset := len(m.board.Statuses) - visible
-	if m.colOffset > maxOffset {
-		m.colOffset = maxOffset
+	// Pull earlier columns back in while they fit.
+	for m.colOffset > 0 && span(m.colOffset-1, len(widths)) <= usable {
+		m.colOffset--
 	}
-	if m.colOffset < 0 {
-		m.colOffset = 0
+	end := m.colOffset
+	for end < len(widths) && (end == m.colOffset || span(m.colOffset, end+1) <= usable) {
+		end++
 	}
+	return max(end, min(m.col+1, len(widths)))
+}
+
+// columnHeader is a column's title with its card count.
+func (m *Model) columnHeader(col int) string {
+	return m.statusLabel(m.board.Statuses[col]) + fmt.Sprintf(" %d", m.columnCount(col))
 }
 
 func (m *Model) renderColumn(col, width, height int) []string {
@@ -105,8 +129,9 @@ func (m *Model) renderColumn(col, width, height int) []string {
 	inner := width - columnGutter
 
 	headStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Bold(true)
+	count := fmt.Sprintf(" %d", len(group))
 	lines := []string{
-		headStyle.Render(truncate(m.statusLabel(st), inner-4)) + dimStyle.Render(fmt.Sprintf(" %d", len(group))),
+		headStyle.Render(truncate(m.statusLabel(st), inner-len(count))) + dimStyle.Render(count),
 		dimStyle.Render(strings.Repeat("─", inner)),
 	}
 
