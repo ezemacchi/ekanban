@@ -34,7 +34,7 @@ var (
 type Model struct {
 	client   *herdr.Client
 	worktree string
-	specRoot string
+	opts     ticket.Options
 	icons    look.Icons
 
 	run    *ticket.Run
@@ -48,11 +48,12 @@ type Model struct {
 	spinner  look.Spinner
 }
 
-// New builds the board for the run in worktree. specRoot is the
-// specifications clone prototypes are found in; icons turns on Nerd Font
-// glyphs.
-func New(client *herdr.Client, worktree, specRoot string, icons bool) *Model {
-	return &Model{client: client, worktree: worktree, specRoot: specRoot, icons: look.Icons{On: icons}, spinner: look.NewSpinner()}
+// New builds the board for the run in worktree. opts says where prototypes
+// are and which teams exist; icons turns on Nerd Font glyphs. problems are
+// configuration complaints, shown until the first key.
+func New(client *herdr.Client, worktree string, opts ticket.Options, icons bool, problems []string) *Model {
+	return &Model{client: client, worktree: worktree, opts: opts, icons: look.Icons{On: icons},
+		spinner: look.NewSpinner(), status: strings.Join(problems, " · ")}
 }
 
 type loadedMsg struct {
@@ -79,7 +80,7 @@ func (m *Model) load() tea.Msg {
 			}
 		}
 	}
-	run, err := ticket.Load(m.worktree, m.specRoot, agents, labels)
+	run, err := ticket.Load(m.worktree, m.opts, agents, labels)
 	return loadedMsg{run: run, err: err}
 }
 
@@ -268,7 +269,7 @@ func (m *Model) View() string {
 			case c.Col == ticket.Done:
 				style = doneStyle
 			}
-			lines := []string{style.Render(look.Truncate(ic.With(roleGlyph[card.Role.ID], card.Role.Label), text))}
+			lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}
 			if card.Note != "" {
 				note, noteStyle := card.Note, dimStyle
 				if card.Stuck {

@@ -29,7 +29,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	wt := t.TempDir()
 	run := filepath.Join(wt, ".runs", "ABC-1")
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\nSpec: e7-us-42\n")
-	r, err := Load(wt, specsDir, nil, nil)
+	r, err := Load(wt, Options{SpecRoot: specsDir}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	// No Spec field: the story the run's files mention most wins.
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\n")
 	write(t, filepath.Join(run, "ENVELOPE.md"), "E7_US_42 E7_US_42 related: E7_US_05")
-	if r, _ = Load(wt, specsDir, nil, nil); r.Spec != "E7_US_42" {
+	if r, _ = Load(wt, Options{SpecRoot: specsDir}, nil, nil); r.Spec != "E7_US_42" {
 		t.Fatalf("most mentioned: %q", r.Spec)
 	}
 }
@@ -59,7 +59,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 		{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", Cwd: filepath.Join(wt, "src")},
 		{Agent: &agent, AgentStatus: "blocked", PaneID: "w:p9", TabID: "w:t9", Cwd: filepath.Join(t.TempDir())},
 	}
-	r, err := Load(wt, "", agents, map[string]string{"w:t3": "implementer", "w:t9": "qa"})
+	r, err := Load(wt, Options{}, agents, map[string]string{"w:t3": "implementer", "w:t9": "qa"})
 	if err != nil {
 		t.Fatal(err)
 	}

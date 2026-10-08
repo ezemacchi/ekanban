@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
 	"github.com/ezemacchi/herdr-phin-board/internal/links"
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
+	"github.com/ezemacchi/herdr-phin-board/internal/team"
 )
 
 func dumpPipeline(client *herdr.Client, repo string) error {
@@ -56,9 +58,20 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	links.Configure(cfg.IssueURL, cfg.Pipeline.PRURL)
 	rules, problems := pipeline.Chain(cfg.Pipeline.Rules)
-	set := pipeline.Settings{PRJobs: cfg.Pipeline.JenkinsPRJobs, Rules: rules}
+	teams, teamProblems := loadTeams()
+	set := pipeline.Settings{PRJobs: cfg.Pipeline.JenkinsPRJobs, Rules: rules, Teams: teams}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
-	return set, problems
+	return set, append(problems, teamProblems...)
+}
+
+// loadTeams reads the built-in team definitions plus the user's, from the
+// teams folder beside config.toml.
+func loadTeams() ([]team.Team, []string) {
+	dir, err := config.Dir()
+	if err != nil {
+		return team.Load("")
+	}
+	return team.Load(filepath.Join(dir, "teams"))
 }

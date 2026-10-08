@@ -29,6 +29,7 @@ import (
 
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/team"
 	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
 )
 
@@ -83,7 +84,8 @@ type Target struct {
 type Settings struct {
 	PRJobs  string // Jenkins multibranch job whose children are PR-<n>
 	Targets []Target
-	Rules   []Rule // nil: DefaultRules
+	Rules   []Rule      // nil: DefaultRules
+	Teams   []team.Team // nil: the built-in teams
 }
 
 type prJob struct {
@@ -173,7 +175,7 @@ func (s *Source) Refresh(ctx context.Context) {
 func (s *Source) Classify(ctx context.Context, worktree string, agents []herdr.Agent, knownPR int) (info Info) {
 	branch := ticket.ReadBranch(worktree)
 	branchKey := keyIn(branch)
-	run, err := ticket.Load(worktree, "", agents, nil)
+	run, err := ticket.Load(worktree, ticket.Options{Teams: s.set.Teams}, agents, nil)
 	// Only a run named by a Jira key, and the branch's key when it has one,
 	// is this ticket's run; checkouts also hold older runs of other work.
 	if err == nil && (!jiraKey.MatchString(run.Key) || jiraKey.FindString(run.Key) != run.Key || branchKey != "" && run.Key != branchKey) {

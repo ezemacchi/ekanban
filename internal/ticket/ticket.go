@@ -1,5 +1,5 @@
-// Package ticket reads one Big Team or Full Team run from
-// its worktree, so the board can show which role is doing what.
+// Package ticket reads one team run from its worktree, so the board can show
+// which role is doing what. The team and its roles come from package team.
 //
 // Runs started by different versions of the local skills write STATE.md
 // differently, so nothing here depends on one layout. A role's state comes
@@ -18,6 +18,7 @@ import (
 
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
 	"github.com/ezemacchi/herdr-phin-board/internal/links"
+	"github.com/ezemacchi/herdr-phin-board/internal/team"
 )
 
 // Column is a kanban column.
@@ -41,39 +42,31 @@ var Columns = []struct {
 	{Done, "Terminado"},
 }
 
-// Role is one role of a team and how to recognise it on disk and in Herdr.
-type Role struct {
-	ID    string
-	Label string
-	match *regexp.Regexp
-	// done reports whether the role left its result in the run directory.
-	done func(r *Run) bool
-}
-
-func fileDone(name string) func(*Run) bool {
-	return func(r *Run) bool {
-		_, err := os.Stat(filepath.Join(r.Dir, name))
-		return err == nil
+// done reports whether role left its result: the team definition says how.
+func (r *Run) done(role team.Role) bool {
+	if role.DoneFile != "" {
+		if _, err := os.Stat(filepath.Join(r.Dir, role.DoneFile)); err == nil {
+			return true
+		}
 	}
+	if role.DoneField != "" && r.Field(role.DoneField) != "" {
+		return true
+	}
+	return role.DoneWhenLanded && r.Landed
 }
 
-var missionControl = []Role{
-	{"technical-lead", "Technical Lead", regexp.MustCompile(`tech(nical)?-?lead`), fileDone("ENVELOPE.md")},
-	{"evidence", "Evidence Researcher", regexp.MustCompile(`evidence|researcher`), fileDone("EVIDENCE.md")},
-	{"implementer", "Implementer", regexp.MustCompile(`implementer`), fileDone("IMPL.md")},
-	{"reviewer", "Reviewer", regexp.MustCompile(`reviewer|parity`), fileDone("PARITY.md")},
-	{"qa", "Adversarial QA", regexp.MustCompile(`(^|[^a-z])qa([^a-z]|$)|adversarial`), fileDone("QA.md")},
-	{"curator", "Context Curator", regexp.MustCompile(`curator`), func(r *Run) bool { return r.Landed }},
-}
-
-var pitCrew = []Role{
-	{"mechanic", "Mechanic", regexp.MustCompile(`mechanic`), func(r *Run) bool { return r.Field("Pushed") != "" }},
-	{"inspector", "Inspector", regexp.MustCompile(`inspector`), fileDone("REVIEW.md")},
+// Options are what Load needs besides the worktree.
+type Options struct {
+	// SpecRoot is the specifications clone prototypes are looked up in;
+	// empty skips them.
+	SpecRoot string
+	// Teams are the team definitions; nil means the built-in ones.
+	Teams []team.Team
 }
 
 // Card is one role on the board.
 type Card struct {
-	Role   Role
+	Role   team.Role
 	Column Column
 	Rounds int
 	Note   string
@@ -91,7 +84,8 @@ type Run struct {
 	Worktree string
 	Branch   string
 	JiraURL  string
-	Team     string
+	Team     string // the run's "Team:" field
+	TeamName string // the team definition it picked
 	Target   string
 	// Spec is the story code (E7_US_42) that names the spec in the specifications clone;
 	// Prototype is its HTML prototype there, when one exists.
@@ -133,9 +127,8 @@ func Find(worktree string) (dir, key string, ok bool) {
 	return filepath.Dir(matches[0]), filepath.Base(filepath.Dir(matches[0])), true
 }
 
-// Load reads the run and places each role of its team on the board. specRoot is
-// the specifications clone the prototype is looked up in; empty skips it.
-func Load(worktree, specRoot string, agents []herdr.Agent, tabLabels map[string]string) (*Run, error) {
+// Load reads the run and places each role of its team on the board.
+func Load(worktree string, opts Options, agents []herdr.Agent, tabLabels map[string]string) (*Run, error) {
 	dir, key, ok := Find(worktree)
 	if !ok {
 		return nil, os.ErrNotExist
@@ -158,7 +151,7 @@ func Load(worktree, specRoot string, agents []herdr.Agent, tabLabels map[string]
 	if r.Spec == "" {
 		r.Spec = mostMentionedSpec(dir)
 	}
-	r.Prototype = findPrototype(specRoot, r.Spec)
+	r.Prototype = findPrototype(opts.SpecRoot, r.Spec)
 	r.Objective = firstLines(r.section(`(?i)^(objective|objetivo)`), 3)
 	r.CurrentStep = firstLines(r.section(`(?i)^(current step|paso actual|pipeline)`), 4)
 	r.Questions = r.openQuestions()
@@ -166,9 +159,16 @@ func Load(worktree, specRoot string, agents []herdr.Agent, tabLabels map[string]
 	// The landing check writes its report here whether it passed or not.
 	r.Landed = strings.TrimSpace(landed) != "" && !regexp.MustCompile(`(?i)not landed|exit 1|blocked|bloquead`).MatchString(landed)
 
+	teams := opts.Teams
+	if teams == nil {
+		teams, _ = team.Load("")
+	}
+	t, _ := team.Pick(teams, r.Team)
+	r.TeamName = t.Name
+
 	mine := agentsIn(worktree, agents)
 	r.placeOrchestrator(mine, tabLabels)
-	r.placeRoles(mine, tabLabels)
+	r.placeRoles(t.Roles, mine, tabLabels)
 	return r, nil
 }
 
@@ -269,23 +269,19 @@ func (r *Run) placeOrchestrator(agents []herdr.Agent, tabLabels map[string]strin
 	}
 }
 
-func (r *Run) placeRoles(agents []herdr.Agent, tabLabels map[string]string) {
-	roles := missionControl
-	if regexp.MustCompile(`(?i)full`).MatchString(r.Team) {
-		roles = pitCrew
-	}
+func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[string]string) {
 	dispatches := r.dispatchNames()
 
 	for _, role := range roles {
 		c := Card{Role: role}
 		for _, d := range dispatches {
-			if role.match.MatchString(d) {
+			if role.Matches(d) {
 				c.Rounds++
 			}
 		}
 		var live *herdr.Agent
 		for i := range agents {
-			if !role.match.MatchString(describe(agents[i], tabLabels)) {
+			if !role.Matches(describe(agents[i], tabLabels)) {
 				continue
 			}
 			// A working or blocked copy says more than an idle leftover.
@@ -293,7 +289,7 @@ func (r *Run) placeRoles(agents []herdr.Agent, tabLabels map[string]string) {
 				live = &agents[i]
 			}
 		}
-		done := role.done(r)
+		done := r.done(role)
 		if live != nil {
 			c.PaneID = live.PaneID
 		}

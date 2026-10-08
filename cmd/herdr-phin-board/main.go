@@ -22,6 +22,7 @@ import (
 	"github.com/ezemacchi/herdr-phin-board/internal/links"
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
 	"github.com/ezemacchi/herdr-phin-board/internal/ticketui"
 	"github.com/ezemacchi/herdr-phin-board/internal/ui"
 	"github.com/ezemacchi/herdr-phin-board/internal/version"
@@ -103,7 +104,9 @@ func run(args []string) error {
 		}
 		settings := config.Load()
 		links.Configure(settings.IssueURL, settings.Pipeline.PRURL)
-		_, err := tea.NewProgram(ticketui.New(client, worktree, settings.SpecClone, settings.Icons), tea.WithAltScreen()).Run()
+		teams, problems := loadTeams()
+		opts := ticket.Options{SpecRoot: settings.SpecClone, Teams: teams}
+		_, err := tea.NewProgram(ticketui.New(client, worktree, opts, settings.Icons, problems), tea.WithAltScreen()).Run()
 		return err
 	}
 	board, err := store.Load()
