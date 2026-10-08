@@ -88,6 +88,11 @@ func (c *Client) Workspaces() ([]Workspace, error) {
 				break
 			}
 		}
+		// A workspace opened on a checkout is that checkout, wherever its
+		// active pane happens to stand (an agent started in the main clone).
+		if c := ws.Checkout(); c != "" {
+			ws.Cwd = c
+		}
 		out = append(out, ws)
 	}
 	return out, nil

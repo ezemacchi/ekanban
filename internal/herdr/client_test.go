@@ -152,6 +152,30 @@ func TestWorkspaceCwdComesFromTheActiveTabsPane(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOnACheckoutIsThatCheckout(t *testing.T) {
+	f := herdrtest.Start(t)
+	f.OK(map[string]any{
+		"snapshot": map[string]any{
+			"workspaces": []map[string]any{
+				{"workspace_id": "w1", "label": "wt", "active_tab_id": "w1:t1",
+					"worktree": map[string]any{"checkout_path": `\\?\C:\repos\app-wt-1`}},
+			},
+			"panes": []map[string]any{
+				{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1", "cwd": `C:\repos\app`},
+			},
+		},
+	})
+
+	c, _ := New()
+	got, err := c.Workspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Cwd != `C:\repos\app-wt-1` {
+		t.Fatalf("cwd = %q, want the checkout, not where the active pane stands", got[0].Cwd)
+	}
+}
+
 func TestWorkspaceWithNoPanesHasNoCwd(t *testing.T) {
 	f := herdrtest.Start(t)
 	f.OK(map[string]any{
