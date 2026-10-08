@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,6 +82,9 @@ func TestClosedWorktreeStaysOnTheBoard(t *testing.T) {
 	got := m.groups[pipeline.OnReview]
 	if len(got) != 1 || got[0].Key != store.Key(ticketDir) || got[0].Live {
 		t.Fatalf("Reviewing holds %+v, want the closed ticket worktree", got)
+	}
+	if got[0].Label != filepath.Base(ticketDir) {
+		t.Fatalf("label %q, want the folder name %q", got[0].Label, filepath.Base(ticketDir))
 	}
 	for _, st := range m.board.Statuses {
 		for _, sp := range m.groups[st.ID] {

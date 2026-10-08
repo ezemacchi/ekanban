@@ -848,8 +848,8 @@ func (m *Model) listHeight() int {
 }
 
 func baseName(path string) string {
-	path = strings.TrimRight(path, "/")
-	if i := strings.LastIndex(path, "/"); i >= 0 && i+1 < len(path) {
+	path = strings.TrimRight(path, `/\`)
+	if i := strings.LastIndexAny(path, `/\`); i >= 0 && i+1 < len(path) {
 		return path[i+1:]
 	}
 	if path == "" {
