@@ -99,6 +99,29 @@ func TestClosedWorktreeStaysOnTheBoard(t *testing.T) {
 	}
 }
 
+// Worktrees of one ticket are told apart by what their folder adds after the
+// key; a ticket with one worktree is just its key.
+func TestTicketCardsAreNamedByKey(t *testing.T) {
+	m := newTestModel(t)
+	m.SetPipeline(pipeline.New("", pipeline.Settings{}, nil))
+	m.pipeInfo = map[string]pipeline.Info{
+		`C:\repos\App-wt-ABC-1`:        {Key: "ABC-1"},
+		`C:\repos\App-wt-ABC-1-dialog`: {Key: "ABC-1"},
+		`C:\repos\App-wt-ABC-2`:        {Key: "ABC-2"},
+		`C:\repos\other-place`:         {Key: "ABC-2"},
+	}
+	cases := map[string]string{
+		`C:\repos\App-wt-ABC-1`:        "ABC-1",
+		`C:\repos\App-wt-ABC-1-dialog`: "ABC-1 dialog",
+		`C:\repos\other-place`:         "ABC-2 other-place",
+	}
+	for space, want := range cases {
+		if got := m.ticketName(space, m.pipeInfo[space].Key); got != want {
+			t.Errorf("%s: got %q, want %q", space, got, want)
+		}
+	}
+}
+
 // A column renamed in config.toml shows its new name, and the messages that
 // name the ready_qa column follow it.
 func TestConfiguredColumnNamesShow(t *testing.T) {

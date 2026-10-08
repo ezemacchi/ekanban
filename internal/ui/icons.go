@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
@@ -32,13 +34,38 @@ func (m *Model) statusLabel(st store.Status) string {
 	return m.glyph(g, st.Label)
 }
 
+// ticketName is a ticket worktree's name on the pipeline board: its key, and
+// when another worktree holds the same ticket, what its folder adds after the
+// key ("ABC-1 dialog" for App-wt-ABC-1-dialog).
+func (m *Model) ticketName(space, key string) string {
+	shared := false
+	for other, info := range m.pipeInfo {
+		if other != space && info.Key == key {
+			shared = true
+			break
+		}
+	}
+	if !shared {
+		return key
+	}
+	folder := baseName(space)
+	i := strings.Index(strings.ToUpper(folder), strings.ToUpper(key))
+	if i < 0 {
+		return key + " " + folder
+	}
+	if rest := strings.Trim(folder[i+len(key):], "-_. "); rest != "" {
+		return key + " " + rest
+	}
+	return key
+}
+
 // spaceLabel prefixes a space's name with what it is: a git worktree on a
 // branch, or a plain folder. On the pipeline board a ticket worktree is
 // named by its ticket key: the folder names of one repository's worktrees
 // share a long prefix, so cut to a card's width they all read the same.
 func (m *Model) spaceLabel(sp *space) string {
 	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
-		return m.glyph(look.Branch, info.Key)
+		return m.glyph(look.Branch, m.ticketName(sp.Key, info.Key))
 	}
 	if m.branchFor(sp.Key) != "" {
 		return m.glyph(look.Branch, sp.Label)
