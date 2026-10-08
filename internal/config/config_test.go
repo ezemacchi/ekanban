@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -107,11 +108,16 @@ func TestHerdrConfigDirWins(t *testing.T) {
 // Run by hand there is no injected directory, so the same path is rebuilt.
 func TestDirReconstructedWhenRunByHand(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", "")
+	want := filepath.Join(".config", "herdr", "plugins", "config", PluginID)
+	if runtime.GOOS == "windows" {
+		roaming := t.TempDir()
+		t.Setenv("APPDATA", roaming)
+		want = filepath.Join(roaming, "herdr", "plugins", "config", PluginID)
+	}
 	dir, err := Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(".config", "herdr", "plugins", "config", PluginID)
 	if !strings.HasSuffix(dir, want) {
 		t.Fatalf("Dir() = %q, want it to end in %q", dir, want)
 	}

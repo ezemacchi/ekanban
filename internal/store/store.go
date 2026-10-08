@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -137,6 +138,9 @@ const PluginID = "ekanban"
 func Path() (string, error) {
 	if dir := os.Getenv("HERDR_PLUGIN_STATE_DIR"); dir != "" {
 		return filepath.Join(dir, "board.json"), nil
+	}
+	if local := os.Getenv("LOCALAPPDATA"); runtime.GOOS == "windows" && local != "" {
+		return filepath.Join(local, "herdr", "plugins", PluginID, "board.json"), nil
 	}
 
 	state := os.Getenv("XDG_STATE_HOME")

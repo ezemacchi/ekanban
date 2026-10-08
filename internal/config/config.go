@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -88,6 +89,9 @@ type Settings struct {
 func Dir() (string, error) {
 	if dir := os.Getenv("HERDR_PLUGIN_CONFIG_DIR"); dir != "" {
 		return dir, nil
+	}
+	if roaming := os.Getenv("APPDATA"); runtime.GOOS == "windows" && roaming != "" {
+		return filepath.Join(roaming, "herdr", "plugins", "config", PluginID), nil
 	}
 	base, err := os.UserHomeDir()
 	if err != nil {
