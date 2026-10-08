@@ -518,13 +518,19 @@ func (m *Model) focusSelected() tea.Cmd {
 }
 
 // View renders the header, the role columns, and what the run is waiting on.
+// lookingFor is where a run's state file is expected, for the not-found message.
+func (m *Model) lookingFor() string {
+	l := m.opts.RunLayout()
+	return l.Dir + "/<KEY>/" + l.State
+}
+
 func (m *Model) View() string {
 	width := m.width
 	if width <= 0 {
 		width = 100
 	}
 	if m.err != nil && m.run == nil {
-		return errStyle.Render("No run found in "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render("Looking for .runs/<KEY>/STATE.md · q quit")
+		return errStyle.Render("No run found in "+m.worktree+": "+m.err.Error()) + "\n" + dimStyle.Render("Looking for "+m.lookingFor()+" · q quit")
 	}
 	if m.run == nil {
 		return dimStyle.Render(m.spinner.Frame() + " loading")
@@ -654,12 +660,12 @@ func (m *Model) View() string {
 	}
 	b.WriteString(headStyle.Render(ic.With(look.Question, fmt.Sprintf("Open questions (%d)", len(r.Questions)))) + "\n")
 	if len(r.Questions) == 0 {
-		b.WriteString(dimStyle.Render("none in STATE.md") + "\n")
+		b.WriteString(dimStyle.Render("none in "+r.Layout().State) + "\n")
 	}
 	limit := 8
 	for i, q := range r.Questions {
 		if i == limit {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("and %d more in STATE.md", len(r.Questions)-limit)) + "\n")
+			b.WriteString(dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-limit, r.Layout().State)) + "\n")
 			break
 		}
 		b.WriteString("- " + look.Truncate(q, width-2) + "\n")

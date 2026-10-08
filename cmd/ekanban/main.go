@@ -105,7 +105,7 @@ func run(args []string) error {
 		} else if worktree, err = os.Getwd(); err != nil {
 			return err
 		}
-		settings := config.Load()
+		settings := config.LoadFor(worktree)
 		links.Configure(settings.IssueURL, settings.Pipeline.PRURL)
 		_, err := tea.NewProgram(ticketui.New(client, worktree, ticketSettings(settings)), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 		return err
@@ -151,11 +151,11 @@ func run(args []string) error {
 	if sidebar {
 		model = ui.NewSidebar(client, board)
 	}
-	settings := config.Load()
+	cwd, _ := os.Getwd()
+	settings := config.LoadFor(cwd)
 	model.SetIcons(settings.Icons)
 	model.SetKeys(settings.KeysFor("board"))
-	model.SetProblems(unknownKeys(settings))
-	cwd, _ := os.Getwd()
+	model.SetProblems(append(settings.Problems, unknownKeys(settings)...))
 	if cwd != "" {
 		model.SetScope(cwd)
 	}
@@ -268,12 +268,16 @@ func showConfig(args []string) error {
 		return nil
 	}
 
-	s := config.Load()
+	cwd, _ := os.Getwd()
+	s := config.LoadFor(cwd)
 	if _, err := os.Stat(s.Path); err != nil {
 		fmt.Printf("no config file at %s — using defaults\n", s.Path)
 		fmt.Println("create one with: ekanban config --init")
 	} else {
 		fmt.Printf("config: %s\n", s.Path)
+	}
+	if s.RepoPath != "" {
+		fmt.Printf("repository file: %s\n", s.RepoPath)
 	}
 
 	fmt.Printf("poll_interval  %s\n", s.PollInterval)

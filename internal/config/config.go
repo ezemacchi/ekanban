@@ -19,6 +19,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/team"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 // PluginID must match herdr-plugin.toml, since Herdr keys the config directory
@@ -50,6 +51,8 @@ type Config struct {
 	// Lead overrides the teams' [lead]: how the agent running a ticket is
 	// recognised and started.
 	Lead team.Lead `toml:"lead"`
+	// Run is where a team run lives and how its state file reads.
+	Run ticket.LayoutConfig `toml:"run"`
 }
 
 // TicketConfig is the [ticket] table.
@@ -114,8 +117,11 @@ type Settings struct {
 	Keys          map[string][]string            // action name -> keys
 	ScreenKeys    map[string]map[string][]string // [keys.board], [keys.ticket]
 	Lead          team.Lead                      // [lead], over each team's
-	// Path is where the file was read from, whether or not it existed.
+	Layout        ticket.Layout                  // [run]
+	// Path is where config.toml was read from, whether or not it existed.
 	Path string
+	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
+	RepoPath string
 	// Problems are complaints about the file's contents. A bad value falls back
 	// to its default rather than stopping the board, but it is reported so a
 	// typo is not silently ignored.
@@ -138,32 +144,57 @@ func Dir() (string, error) {
 	return filepath.Join(base, ".config", "herdr", "plugins", "config", PluginID), nil
 }
 
-// Load reads the settings, falling back to defaults for anything absent or
-// unusable. A missing file is the normal case, not an error.
-func Load() Settings {
+// Load reads config.toml alone; LoadFor also reads a repository's file.
+func Load() Settings { return LoadFor("") }
+
+// LoadFor reads config.toml, then the .ekanban.toml of the repository dir is
+// in over it: a value the repository file sets replaces config.toml's, a list
+// replaces the whole list, and a table merges field by field. Anything absent
+// or unusable falls back to its default; a missing file is the normal case,
+// not an error.
+//
+// The repository file describes the project's process, so it cannot choose
+// which program starts: [lead] kind and args are read from config.toml only.
+func LoadFor(dir string) Settings {
 	s := Settings{PollInterval: DefaultPollInterval, Notifications: true}
-
-	dir, err := Dir()
-	if err != nil {
-		return s
-	}
-	s.Path = filepath.Join(dir, "config.toml")
-
-	data, err := os.ReadFile(s.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return s
-	}
-	if err != nil {
-		s.Problems = append(s.Problems, fmt.Sprintf("could not read %s: %v", s.Path, err))
-		return s
-	}
-
 	var c Config
-	if err := toml.Unmarshal(data, &c); err != nil {
-		s.Problems = append(s.Problems, fmt.Sprintf("%s is not valid TOML: %v", s.Path, err))
-		return s
+	if base, err := Dir(); err == nil {
+		s.Path = filepath.Join(base, "config.toml")
+		s.Problems = decodeOver(&c, s.Path, s.Problems)
 	}
+	if s.RepoPath = RepoFile(dir); s.RepoPath != "" {
+		lead := c.Lead
+		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
+		if c.Lead.Kind != lead.Kind || !slices.Equal(c.Lead.Args, lead.Args) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [lead] kind and args are only read from config.toml — ignored", s.RepoPath))
+			c.Lead.Kind, c.Lead.Args = lead.Kind, lead.Args
+		}
+	}
+	return resolve(c, s)
+}
 
+// decodeOver decodes the file at path over c. An unreadable or invalid file
+// is reported and leaves c as it was.
+func decodeOver(c *Config, path string, problems []string) []string {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return problems
+	}
+	if err != nil {
+		return append(problems, fmt.Sprintf("could not read %s: %v", path, err))
+	}
+	// Checked on its own first: a decode that fails halfway would leave c
+	// partly overwritten.
+	var probe Config
+	if err := toml.Unmarshal(data, &probe); err != nil {
+		return append(problems, fmt.Sprintf("%s is not valid TOML: %v", path, err))
+	}
+	_ = toml.Unmarshal(data, c)
+	return problems
+}
+
+// resolve validates c into s.
+func resolve(c Config, s Settings) Settings {
 	if c.PollInterval != "" {
 		d, err := time.ParseDuration(c.PollInterval)
 		switch {
@@ -205,6 +236,9 @@ func Load() Settings {
 	if len(s.Pipeline.Targets) == 0 {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
+	var layoutProblems []string
+	s.Layout, layoutProblems = ticket.NewLayout(c.Run)
+	s.Problems = append(s.Problems, layoutProblems...)
 	return s
 }
 
@@ -272,6 +306,13 @@ func bindingsOf(raw map[string]any, where string, problems []string) (map[string
 const Example = `# ekanban settings.
 #
 # Every value is optional; delete a line to go back to its default.
+#
+# A repository can add its own .ekanban.toml at its root, with any of the
+# settings below: it is read over this file whenever a board opens inside that
+# repository (or one of its worktrees). Put the project's process there --
+# tracker, pull request and build server links, targets, [run], the [lead]
+# prompt -- and keep personal choices here. [lead] kind and args, which choose
+# the program a board starts, are read from this file only.
 
 # How often the background watcher asks GitHub about your pull requests.
 # Minimum 30s, maximum 1h. Opening or closing a workspace polls immediately
@@ -349,6 +390,28 @@ icons = false
 # kind = "cursor"
 # args = ["--model", "some-model"]
 # prompt = "You are the {label} of {key}. Read {state} in full and continue the run."
+
+# Where a team run lives in a worktree and how its state file reads. A run is
+# <dir>/<KEY>/<state>; the boards read its header fields and "## " sections.
+# The patterns are regular expressions. The defaults are shown.
+# [run]
+# dir = ".runs"
+# state = "STATE.md"
+# dispatch = '(?i)^dispatch[-_].*\.md$'   # files that send work to a role
+# team_field = "Team"
+# target_field = "Target"
+# spec_field = "Spec"
+# objective = '(?i)^objective'            # section headings ...
+# current_step = '(?i)^(current step|pipeline)'
+# landed = '(?i)^landed'
+# not_landed = '(?i)not landed|exit 1|blocked'  # ... and text in the landed one
+# questions = '(?i)open|pending|blocker|question'
+# not_question = '(?i)defect'
+# settled = '(?i)\b(decided|ruled|answered|settled|deferred|closed)\b|defects: none|^-\s*none\b'
+# A story code in the run's files, and the folder under spec_clone holding its
+# HTML prototypes ({1}, {2}... are the code's groups). Off unless set.
+# spec_code = '(?i)\b(E\d+)[_-](US|TS)[_-](\d+)'
+# prototypes = "specifications/backlog/{1}"
 
 # Keys, by action name: one key or a list. A rebound action stops answering
 # its old key, and an empty list turns it off. The help screen (?) shows the

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -89,10 +88,11 @@ type Settings struct {
 	Host      CodeHost // nil: "any"
 	TicketKey *regexp.Regexp
 	Targets   []Target
-	Rules     []Rule      // nil: DefaultRules
-	Teams     []team.Team // nil: the built-in teams
-	Lead      team.Lead   // config.toml's [lead], over each team's
-	Columns   columns.Set // nil: DefaultColumns
+	Rules     []Rule         // nil: DefaultRules
+	Teams     []team.Team    // nil: the built-in teams
+	Lead      team.Lead      // config.toml's [lead], over each team's
+	Columns   columns.Set    // nil: DefaultColumns
+	Layout    *ticket.Layout // nil: ticket.DefaultLayout
 }
 
 // CIName names the build server on the board, "CI" when there is none.
@@ -188,7 +188,7 @@ func (s *Source) Refresh(ctx context.Context) {
 
 // Run reads worktree's run with the board's teams and lead.
 func (s *Source) Run(worktree string, live ticket.Live) (*ticket.Run, error) {
-	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Lead: s.set.Lead}, live)
+	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Lead: s.set.Lead, Layout: s.set.Layout}, live)
 }
 
 // Classify places one worktree. knownPR is a pull request number remembered
@@ -236,7 +236,7 @@ func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live
 		info.PR, info.PROpen, info.Build = job.Number, job.Open, job.Result
 	}
 	if info.PR == 0 && run != nil {
-		info.PR = prMentioned(run.Dir)
+		info.PR = prMentioned(run)
 	}
 	if info.PR == 0 {
 		info.PR = s.prFromMergeCommit(ctx, branch)
@@ -370,11 +370,11 @@ var prRef = regexp.MustCompile(`(?i)\bPR[- #]?(\d{2,5})\b|pull request #(\d{2,5}
 
 var prField = regexp.MustCompile(`(?i)^(pr|pull request|pull-request)\s*:`)
 
-// prMentioned finds the run's own pull request in STATE.md: a "PR:" header
+// prMentioned finds the run's own pull request in its state file: a "PR:" header
 // field or the Landed section. Elsewhere the file names other pull requests
 // too (overlapping branches, earlier attempts).
-func prMentioned(dir string) int {
-	raw, err := os.ReadFile(filepath.Join(dir, "STATE.md"))
+func prMentioned(run *ticket.Run) int {
+	raw, err := os.ReadFile(run.StatePath())
 	if err != nil {
 		return 0
 	}
@@ -382,7 +382,7 @@ func prMentioned(dir string) int {
 	inLanded := false
 	for _, line := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
 		if strings.HasPrefix(line, "## ") {
-			inLanded = strings.HasPrefix(strings.ToLower(strings.TrimSpace(line[3:])), "landed")
+			inLanded = run.Layout().IsLandedHeading(strings.TrimSpace(line[3:]))
 			continue
 		}
 		if inLanded || prField.MatchString(strings.TrimSpace(line)) {

@@ -80,6 +80,17 @@ type Options struct {
 	Teams []team.Team
 	// Lead overrides fields of the team's [lead]: config.toml's [lead].
 	Lead team.Lead
+	// Layout is where runs live and how their state file reads; the zero
+	// value is DefaultLayout.
+	Layout *Layout
+}
+
+// RunLayout is Layout, or DefaultLayout when it is not set.
+func (o Options) RunLayout() Layout {
+	if o.Layout == nil {
+		return DefaultLayout()
+	}
+	return *o.Layout
 }
 
 // Live is what Herdr shows right now.
@@ -267,15 +278,29 @@ type Run struct {
 
 	fields   map[string]string
 	sections map[string][]string
+	layout   Layout
 }
 
-// Field returns a header field of STATE.md ("Team", "Target", ...).
+// Field returns a header field of the state file ("Team", "Target", ...).
 func (r *Run) Field(name string) string { return r.fields[strings.ToLower(name)] }
 
-// Find locates the run directory for a worktree: .runs/<KEY>/STATE.md, picking
-// the key named in the branch when several runs share the worktree.
-func Find(worktree string) (dir, key string, ok bool) {
-	matches, _ := filepath.Glob(filepath.Join(worktree, ".runs", "*", "STATE.md"))
+// StatePath is the run's state file.
+func (r *Run) StatePath() string { return filepath.Join(r.Dir, r.Layout().State) }
+
+// Layout is the layout the run was read with; DefaultLayout for a Run that
+// was not read by Load.
+func (r *Run) Layout() Layout {
+	if r.layout.landed == nil {
+		return DefaultLayout()
+	}
+	return r.layout
+}
+
+// Find locates the run directory for a worktree, <dir>/<KEY>/<state> in the
+// layout, picking the key named in the branch when several runs share the
+// worktree.
+func Find(worktree string, l Layout) (dir, key string, ok bool) {
+	matches, _ := filepath.Glob(filepath.Join(worktree, l.Dir, "*", l.State))
 	if len(matches) == 0 {
 		return "", "", false
 	}
@@ -292,11 +317,12 @@ func Find(worktree string) (dir, key string, ok bool) {
 
 // Load reads the run and places each role of its team on the board.
 func Load(worktree string, opts Options, live Live) (*Run, error) {
-	dir, key, ok := Find(worktree)
+	l := opts.RunLayout()
+	dir, key, ok := Find(worktree, l)
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	text, err := os.ReadFile(filepath.Join(dir, "STATE.md"))
+	text, err := os.ReadFile(filepath.Join(dir, l.State))
 	if err != nil {
 		return nil, err
 	}
@@ -306,21 +332,22 @@ func Load(worktree string, opts Options, live Live) (*Run, error) {
 		Worktree: worktree,
 		Branch:   ReadBranch(worktree),
 		JiraURL:  links.Issue(key),
+		layout:   l,
 	}
 	r.parse(string(text))
-	r.Team = r.Field("Team")
-	r.Target = r.Field("Target")
-	r.Spec = normalizeSpec(r.Field("Spec"))
+	r.Team = r.Field(l.TeamField)
+	r.Target = r.Field(l.TargetField)
+	r.Spec = l.normalizeSpec(r.Field(l.SpecField))
 	if r.Spec == "" {
-		r.Spec = mostMentionedSpec(dir)
+		r.Spec = l.mostMentionedSpec(dir)
 	}
-	r.Prototype = findPrototype(opts.SpecRoot, r.Spec)
-	r.Objective = firstLines(r.section(`(?i)^(objective|objetivo)`), 3)
-	r.CurrentStep = firstLines(r.section(`(?i)^(current step|paso actual|pipeline)`), 4)
+	r.Prototype = findPrototype(opts.SpecRoot, l.prototypeDir(r.Spec), r.Spec)
+	r.Objective = firstLines(r.section(l.objective), 3)
+	r.CurrentStep = firstLines(r.section(l.currentStep), 4)
 	r.Questions = r.openQuestions()
-	landed := strings.Join(r.section(`(?i)^landed`), "\n")
+	landed := strings.Join(r.section(l.landed), "\n")
 	// The landing check writes its report here whether it passed or not.
-	r.Landed = strings.TrimSpace(landed) != "" && !regexp.MustCompile(`(?i)not landed|exit 1|blocked|bloquead`).MatchString(landed)
+	r.Landed = strings.TrimSpace(landed) != "" && !l.notLanded.MatchString(landed)
 
 	teams := opts.Teams
 	if teams == nil {
@@ -362,22 +389,21 @@ func (r *Run) parse(text string) {
 	}
 }
 
-// section returns the lines of the first section whose heading matches.
-func (r *Run) section(pattern string) []string {
-	re := regexp.MustCompile(pattern)
-	for h, lines := range r.sections {
+// section returns the lines of the first section, by heading in order, whose
+// heading matches.
+func (r *Run) section(re *regexp.Regexp) []string {
+	headings := make([]string, 0, len(r.sections))
+	for h := range r.sections {
+		headings = append(headings, h)
+	}
+	sort.Strings(headings)
+	for _, h := range headings {
 		if re.MatchString(h) {
-			return lines
+			return r.sections[h]
 		}
 	}
 	return nil
 }
-
-var (
-	openHeading = regexp.MustCompile(`(?i)open|abiert|pendient|pending|blocker|bloque|pregunta|question`)
-	notOpen     = regexp.MustCompile(`(?i)defect`)
-	settled     = regexp.MustCompile(`(?i)\b(decided|ruled|answered|resuelt|settled|deferred|diferid|closed|cerrad)\b|defects: none|^-\s*none\b`)
-)
 
 // openQuestions collects the bullets of every "open" section that are not
 // already marked settled. It is a hint for the person, not a verdict.
@@ -389,12 +415,12 @@ func (r *Run) openQuestions() []string {
 	}
 	sort.Strings(headings)
 	for _, h := range headings {
-		if !openHeading.MatchString(h) || notOpen.MatchString(h) {
+		if !r.layout.questions.MatchString(h) || r.layout.notQuestion.MatchString(h) {
 			continue
 		}
 		for _, l := range r.sections[h] {
 			t := strings.TrimSpace(l)
-			if !strings.HasPrefix(t, "- ") || settled.MatchString(t) {
+			if !strings.HasPrefix(t, "- ") || r.layout.settled.MatchString(t) {
 				continue
 			}
 			out = append(out, strings.TrimSpace(t[2:]))
@@ -524,29 +550,15 @@ func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[
 	}
 }
 
-var dispatchFile = regexp.MustCompile(`(?i)^dispatch[-_].*\.md$`)
-
 func (r *Run) dispatchNames() []string {
 	entries, _ := os.ReadDir(r.Dir)
 	var out []string
 	for _, e := range entries {
-		if dispatchFile.MatchString(e.Name()) {
+		if r.layout.dispatch.MatchString(e.Name()) {
 			out = append(out, strings.ToLower(e.Name()))
 		}
 	}
 	return out
-}
-
-var specCode = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(E\d+)[_-](US|TS)[_-](\d+)`)
-
-// normalizeSpec turns any spelling of a story code into E7_US_42.
-func normalizeSpec(s string) string {
-	m := specCode.FindStringSubmatch(s)
-	if m == nil {
-		return ""
-	}
-	n, _ := strconv.Atoi(m[3])
-	return strings.ToUpper(m[1]) + "_" + strings.ToUpper(m[2]) + "_" + leftPad2(n)
 }
 
 func leftPad2(n int) string {
@@ -557,9 +569,12 @@ func leftPad2(n int) string {
 }
 
 // mostMentionedSpec picks the story code the run's files mention most. Runs
-// started before STATE.md carried a Spec field name related stories too, but
-// their own story dominates.
-func mostMentionedSpec(dir string) string {
+// whose state file has no spec field name related stories too, but their own
+// story dominates.
+func (l Layout) mostMentionedSpec(dir string) string {
+	if l.specCode == nil {
+		return ""
+	}
 	counts := map[string]int{}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
@@ -570,8 +585,8 @@ func mostMentionedSpec(dir string) string {
 		if err != nil {
 			continue
 		}
-		for _, m := range specCode.FindAllString(string(data), -1) {
-			if code := normalizeSpec(m); code != "" {
+		for _, m := range l.specCode.FindAllString(string(data), -1) {
+			if code := l.normalizeSpec(m); code != "" {
 				counts[code]++
 			}
 		}
@@ -585,14 +600,13 @@ func mostMentionedSpec(dir string) string {
 	return best
 }
 
-// findPrototype finds the story's prototype under
-// specifications/backlog/<E1>/: its _00_index page, else its first HTML file.
-func findPrototype(specRoot, spec string) string {
-	if specRoot == "" || spec == "" {
+// findPrototype finds the story's prototype in folder (relative to specRoot):
+// an HTML file named <spec>_..., preferring its _00_index page.
+func findPrototype(specRoot, folder, spec string) string {
+	if specRoot == "" || folder == "" || spec == "" {
 		return ""
 	}
-	increment := spec[:strings.Index(spec, "_")]
-	base := filepath.Join(specRoot, "specifications", "backlog", increment)
+	base := filepath.Join(specRoot, filepath.FromSlash(folder))
 	var pages []string
 	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
 		if err != nil {

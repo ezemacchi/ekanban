@@ -20,6 +20,13 @@ func write(t *testing.T, path, text string) {
 }
 
 func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
+	specs, problems := NewLayout(LayoutConfig{
+		SpecCode:   `(?i)(?:^|[^a-z0-9])(E\d+)[_-](US|TS)[_-](\d+)`,
+		Prototypes: "specifications/backlog/{1}",
+	})
+	if len(problems) > 0 {
+		t.Fatal(problems)
+	}
 	specsDir := t.TempDir()
 	protos := filepath.Join(specsDir, "specifications", "backlog", "E7", "prototypes")
 	write(t, filepath.Join(protos, "E7_US_42_batch_01_baseline.html"), "x")
@@ -29,7 +36,8 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	wt := t.TempDir()
 	run := filepath.Join(wt, ".runs", "ABC-1")
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\nSpec: e7-us-42\n")
-	r, err := Load(wt, Options{SpecRoot: specsDir}, Live{})
+	opts := Options{SpecRoot: specsDir, Layout: &specs}
+	r, err := Load(wt, opts, Live{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +48,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 	// No Spec field: the story the run's files mention most wins.
 	write(t, filepath.Join(run, "STATE.md"), "Team: Full Team\n")
 	write(t, filepath.Join(run, "ENVELOPE.md"), "E7_US_42 E7_US_42 related: E7_US_05")
-	if r, _ = Load(wt, Options{SpecRoot: specsDir}, Live{}); r.Spec != "E7_US_42" {
+	if r, _ = Load(wt, opts, Live{}); r.Spec != "E7_US_42" {
 		t.Fatalf("most mentioned: %q", r.Spec)
 	}
 }
@@ -73,7 +81,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 		t.Fatal("empty Landed section must not count")
 	}
 	r.parse("Team: x\n## Landed\n```\nNOT LANDED: run ABC-1\n```\n")
-	if l := strings.Join(r.section(`(?i)^landed`), "\n"); !strings.Contains(l, "NOT LANDED") {
+	if l := strings.Join(r.section(r.layout.landed), "\n"); !strings.Contains(l, "NOT LANDED") {
 		t.Fatalf("landed section: %q", l)
 	}
 	want := map[string]Column{"technical-lead": Done, "evidence": Pending, "implementer": Working, "qa": Pending}

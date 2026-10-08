@@ -93,7 +93,7 @@ func Expand(prompt string, run *ticket.Run) string {
 		"{branch}", run.Branch,
 		"{worktree}", slash(run.Worktree),
 		"{run}", slash(run.Dir),
-		"{state}", slash(filepath.Join(run.Dir, "STATE.md")),
+		"{state}", slash(run.StatePath()),
 		"{workspace}", run.Workspace,
 		"{issue}", run.JiraURL,
 	).Replace(prompt)

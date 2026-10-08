@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	set, problems := pipelineSettings(config.Load())
+	set, problems := pipelineSettings(config.LoadFor(repo))
 	for _, p := range problems {
 		fmt.Fprintln(os.Stderr, p)
 	}
@@ -68,7 +69,7 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	ci, ciProblems := pipeline.NewCI(pipeline.CIConfig{Kind: cfg.Pipeline.CI.Kind, URL: cfg.Pipeline.CI.URL})
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
-	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Lead: cfg.Lead, Columns: cols}
+	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Lead: cfg.Lead, Columns: cols, Layout: &cfg.Layout}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
@@ -82,9 +83,9 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 func ticketSettings(cfg config.Settings) ticketui.Settings {
 	teams, problems := loadTeams()
 	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
-	problems = append(problems, colProblems...)
+	problems = slices.Concat(cfg.Problems, problems, colProblems)
 	return ticketui.Settings{
-		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Lead: cfg.Lead},
+		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Lead: cfg.Lead, Layout: &cfg.Layout},
 		Columns:  cols,
 		Keys:     cfg.KeysFor("ticket"),
 		Icons:    cfg.Icons,
@@ -107,7 +108,8 @@ func unknownKeys(cfg config.Settings) []string {
 
 // showKeys lists every action by screen: what [keys] in config.toml can bind.
 func showKeys() {
-	cfg := config.Load()
+	cwd, _ := os.Getwd()
+	cfg := config.LoadFor(cwd)
 	screens := []struct {
 		name    string
 		screen  string // the [keys.<screen>] table that applies
