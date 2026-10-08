@@ -327,9 +327,9 @@ func (m *Model) goLead() tea.Cmd {
 		m.status = sp.Label + " has no ticket run"
 		return nil
 	}
-	m.status = "looking for the orchestrator of " + sp.Label + "…"
+	start := m.working("looking for the orchestrator of " + m.spaceName(sp) + "…")
 	src, client, worktree := m.pipe, m.client, sp.Key
-	return func() tea.Msg {
+	return tea.Batch(start, func() tea.Msg {
 		live, err := ticket.ReadLive(client)
 		if err != nil {
 			return leadMsg{err: err}
@@ -340,7 +340,7 @@ func (m *Model) goLead() tea.Cmd {
 		}
 		text, err := lead.Go(client, run)
 		return leadMsg{text: text, err: err}
-	}
+	})
 }
 
 // acceptSelected archives a ticket in the ready_qa column.

@@ -168,7 +168,9 @@ func (m *Model) viewTable() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.viewFooter())
+	footer := m.viewFooter()
+	m.placeFooter(linesIn(b.String()))
+	b.WriteString(footer)
 	return b.String()
 }
 

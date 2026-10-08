@@ -29,15 +29,41 @@ func (m *Model) viewKanbanBoard() string {
 	height := m.listHeight()
 
 	type column struct {
-		lines []string
-		width int
+		lines  []string
+		owners []lineOwner
+		width  int
 	}
 	var rendered []column
 	for col := m.colOffset; col < end; col++ {
 		if widths[col] == 0 {
 			continue
 		}
-		rendered = append(rendered, column{m.renderColumn(col, widths[col], height), widths[col]})
+		lines, owners := m.renderColumn(col, widths[col], height)
+		rendered = append(rendered, column{lines, owners, widths[col]})
+	}
+
+	// What each line of each column is, as zones a click can land on.
+	top := linesIn(b.String())
+	x := 1
+	for _, c := range rendered {
+		for line, o := range c.owners {
+			if line >= height {
+				break
+			}
+			z := zone{y: top + line, x0: x, x1: x + c.width - columnGutter, col: o.col, row: o.row}
+			switch {
+			case o.status >= 0:
+				z.kind, z.status = zoneStatus, o.status
+			case o.row == rowHeaderLine:
+				z.kind = zoneColumn
+			case o.row >= 0:
+				z.kind = zoneCard
+			default:
+				continue
+			}
+			m.addZone(z)
+		}
+		x += c.width
 	}
 
 	for line := 0; line < height; line++ {
@@ -53,9 +79,20 @@ func (m *Model) viewKanbanBoard() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.viewFooter())
+	footer := m.viewFooter()
+	m.placeFooter(linesIn(b.String()))
+	b.WriteString(footer)
 	return b.String()
 }
+
+// lineOwner is what one line of a kanban column belongs to: its header, a
+// card (row), a status choice of the picker inside a card, or nothing.
+type lineOwner struct {
+	col, row int // row: the card's index, rowHeaderLine, or -1
+	status   int // a picker choice, else -1
+}
+
+const rowHeaderLine = -2
 
 // columnWidths gives each status its width; 0 hides it (the status filter).
 // An empty column takes only what its header needs, so the columns holding
@@ -123,7 +160,7 @@ func (m *Model) columnHeader(col int) string {
 	return m.statusLabel(m.board.Statuses[col]) + fmt.Sprintf(" %d", m.columnCount(col))
 }
 
-func (m *Model) renderColumn(col, width, height int) []string {
+func (m *Model) renderColumn(col, width, height int) ([]string, []lineOwner) {
 	st := m.board.Statuses[col]
 	group := m.columnSpaces(col)
 	inner := width - columnGutter
@@ -134,16 +171,29 @@ func (m *Model) renderColumn(col, width, height int) []string {
 		headStyle.Render(truncate(m.statusLabel(st), inner-len(count))) + dimStyle.Render(count),
 		dimStyle.Render(strings.Repeat("─", inner)),
 	}
+	none := lineOwner{col: col, row: -1, status: -1}
+	header := lineOwner{col: col, row: rowHeaderLine, status: -1}
+	owners := []lineOwner{header, header}
 
 	if len(group) == 0 {
 		lines = append(lines, dimStyle.Render(truncate("—", inner)))
+		owners = append(owners, none)
 	}
 
 	// Track where the selected card ends so the column can be scrolled to it.
 	selectedEnd := -1
 	for i, sp := range group {
-		lines = append(lines, m.renderCard(sp, col == m.col && i == m.rowInCol, inner)...)
-		if col == m.col && i == m.rowInCol {
+		selected := col == m.col && i == m.rowInCol
+		card, choices := m.renderCard(sp, selected, inner)
+		for j := range card {
+			o := lineOwner{col: col, row: i, status: -1}
+			if choices >= 0 && j >= choices && j < choices+len(m.board.Statuses) {
+				o.status = j - choices
+			}
+			owners = append(owners, o)
+		}
+		lines = append(lines, card...)
+		if selected {
 			selectedEnd = len(lines)
 		}
 	}
@@ -151,19 +201,21 @@ func (m *Model) renderColumn(col, width, height int) []string {
 	if selectedEnd >= 0 && len(lines) > height {
 		// Keep the header visible where possible, otherwise follow the card.
 		if overflow := selectedEnd - height; overflow > 0 {
-			keep := append([]string{}, lines[:2]...)
-			lines = append(keep, lines[2+overflow:]...)
+			lines = append(append([]string{}, lines[:2]...), lines[2+overflow:]...)
+			owners = append(append([]lineOwner{}, owners[:2]...), owners[2+overflow:]...)
 		}
 	}
 	if len(lines) > height {
-		lines = lines[:height]
+		lines, owners = lines[:height], owners[:height]
 	}
-	return lines
+	return lines, owners
 }
 
 // renderCard draws a space as a boxed card width cells wide. The border, not
-// a marker, shows the cursor and a card picked up to move.
-func (m *Model) renderCard(sp *space, selected bool, width int) []string {
+// a marker, shows the cursor and a card picked up to move. While the status
+// picker is open the selected card expands to hold its choices; choices is
+// the card line of the first one, -1 when there are none.
+func (m *Model) renderCard(sp *space, selected bool, width int) (card []string, choices int) {
 	held := sp.Key == m.grabbed
 	text := look.CardInner(width)
 
@@ -203,6 +255,14 @@ func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 		}
 	}
 
+	choices = -1
+	if selected && m.mode == modeStatusPick {
+		picker := m.pickerLines(text)
+		// Past the top border and the lines above, after the caption.
+		choices = 1 + len(lines) + 1
+		lines = append(lines, picker...)
+	}
+
 	border := look.CardBorder
 	switch {
 	case held:
@@ -210,7 +270,7 @@ func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 	case selected:
 		border = look.CardSelected
 	}
-	return look.Card(lines, width, border)
+	return look.Card(lines, width, border), choices
 }
 
 // padCell pads a rendered cell to width, ignoring ANSI escapes.

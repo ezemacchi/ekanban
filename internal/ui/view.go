@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -32,6 +33,7 @@ func (m *Model) View() string {
 	// Link regions are rebuilt every frame, so a click is always tested
 	// against what is on screen now rather than a stale layout.
 	m.resetLinks()
+	m.resetZones()
 	return m.overlayMenu(m.viewFrame())
 }
 
@@ -49,16 +51,14 @@ func (m *Model) viewFrame() string {
 		return m.viewHelp()
 	case modeManage, modeManageAdd, modeManageRename:
 		return m.viewManage()
-	case modeStatusPick:
-		return m.viewPicker()
 	case modeDetail:
-		base := m.viewKanbanBoard()
-		if m.layout == layoutTable {
-			base = m.viewTable()
+		return m.viewDetailOverBoard()
+	case modeStatusPick:
+		// The picker opens inside what it was opened from: the detail modal,
+		// else the selected kanban card, else a bar in the footer.
+		if m.prevMode == modeDetail {
+			return m.viewDetailOverBoard()
 		}
-		// The board's own link regions sit under the box; only the box's count.
-		m.resetLinks()
-		return m.viewDetailModal(base)
 	}
 
 	switch m.layout {
@@ -94,7 +94,9 @@ func (m *Model) viewFrame() string {
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
-		b.WriteString(m.viewFooter())
+		footer := m.viewFooter()
+		m.placeFooter(linesIn(b.String()))
+		b.WriteString(footer)
 		return b.String()
 	}
 
@@ -119,7 +121,9 @@ func (m *Model) viewFrame() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.viewFooter())
+	footer := m.viewFooter()
+	m.placeFooter(linesIn(b.String()))
+	b.WriteString(footer)
 	return b.String()
 }
 
@@ -203,54 +207,111 @@ func (m *Model) viewFooter() string {
 
 	if m.pipelineOn() {
 		k := m.hintKey
-		hint := k("accept") + " accept (" + m.columns.Label(pipeline.ReadyQA) + ") · " + k("archive") + " archive · " +
-			k("detail") + " detail · " + k("note") + " note · " + k("jump") + " go · " + k("refresh") + " refresh · " + k("help") + " help"
-		if m.status != "" {
-			hint = m.status
+		hints := []hint{
+			{k("accept"), "accept (" + m.columns.Label(pipeline.ReadyQA) + ")"}, {k("archive"), "archive"},
+			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("lead"), "orchestrator"},
+			{k("refresh"), "refresh"}, {k("help"), "help"},
 		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
 		if !m.pipeAt.IsZero() {
 			state = m.pipe.CIName() + " and git read at " + m.pipeAt.Local().Format("15:04")
 			if m.pipeLoading {
-				state += " " + m.spinner.Frame()
+				state = m.spinner.Frame() + " " + state + ", reading again"
 			}
 		}
-		return dimStyle.Render(" "+truncate(state, m.width-2)) + "\n" + dimStyle.Render(" "+truncate(hint, m.width-2))
+		if s := m.statusText(); s != "" {
+			state += " · " + s
+		}
+		return dimStyle.Render(" "+truncate(state, m.width-2)) + "\n " + m.buttons(1, 1, hints, m.width-2)
+	}
+
+	// The picker in a list or table has no card to open in, so it takes the
+	// footer: a bar of choices, then how to drive it.
+	if m.mode == modeStatusPick {
+		help := "s/arrows move · enter set · esc cancel · or click one"
+		if m.layout == layoutKanban {
+			return " " + m.statusLegend() + "\n" + dimStyle.Render(" "+truncate(help, m.width-2))
+		}
+		return m.pickerBar(0, m.width) + "\n" + dimStyle.Render(" "+truncate(help, m.width-2))
 	}
 
 	// The numbered statuses are the fastest way to file something, so show the
-	// actual mapping rather than a generic "1-9".
-	var keys strings.Builder
-	keys.WriteString(" ")
+	// actual mapping rather than a generic "1-9". Each is a button too.
+	keys := " " + m.statusLegend()
+
+	var hints []hint
+	switch {
+	case m.grabbed != "" && m.layout == layoutKanban:
+		hints = []hint{{"h/l", "retag"}, {"j/k", "reorder"}, {"enter", "drop"}}
+	case m.grabbed != "":
+		hints = []hint{{"j/k", "move (across a group changes status)"}, {"enter", "drop"}}
+	case m.layout == layoutKanban:
+		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "list"}, {"?", "help"}}
+	case m.layout == layoutTable:
+		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"o", "sort"}, {"enter", "jump"}, {"K", "kanban"}, {"?", "help"}}
+	case m.board.HideDetail:
+		hints = []hint{{"s", "status"}, {"d", "detail"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "table"}, {"?", "help"}}
+	default:
+		hints = []hint{{"s", "status"}, {"n", "note"}, {"v", "move"}, {"enter", "jump"}, {"K", "table"}, {"?", "help"}}
+	}
+	line := " "
+	x := 1
+	if s := m.statusText(); s != "" {
+		s = truncate(s, max(m.width/2, 20))
+		line += dimStyle.Render(s + " · ")
+		x += lipgloss.Width(s) + 3
+	}
+	return keys + "\n" + line + m.buttons(1, x, hints, m.width-x-1)
+}
+
+// statusLegend is the numbered statuses, each a button for its digit on the
+// footer's first line.
+func (m *Model) statusLegend() string {
+	var b strings.Builder
+	x := 1
 	for i, st := range m.board.Statuses {
 		if i >= 9 {
 			break
 		}
 		if i > 0 {
-			keys.WriteString(dimStyle.Render("  "))
+			b.WriteString(dimStyle.Render("  "))
+			x += 2
+		}
+		text := fmt.Sprintf("%d %s", i+1, st.Label)
+		if x+lipgloss.Width(text) > m.width {
+			break
 		}
 		numbered := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color))
-		keys.WriteString(numbered.Render(fmt.Sprintf("%d %s", i+1, st.Label)))
+		b.WriteString(numbered.Render(text))
+		w := lipgloss.Width(text)
+		m.addZone(zone{kind: zoneButton, y: 0, x0: x, x1: x + w, key: fmt.Sprintf("%d", i+1), footer: true})
+		x += w
 	}
+	return b.String()
+}
 
-	var hint string
-	switch {
-	case m.status != "":
-		hint = truncate(m.status, m.width-2)
-	case m.grabbed != "" && m.layout == layoutKanban:
-		hint = "h/l move between columns to retag · j/k reorder · enter drop"
-	case m.grabbed != "":
-		hint = "j/k move · across a group changes status · enter drop"
-	case m.layout == layoutKanban:
-		hint = "K list · d detail · v move · n note · enter jump · ? help"
-	case m.layout == layoutTable:
-		hint = "K kanban · o sort · d detail · v move · n note · enter jump · ? help"
-	case m.board.HideDetail:
-		hint = "K table · d detail · v move · n note · enter jump · ? help"
-	default:
-		hint = "K table · v move · n note · gp open PR · enter jump · ? help"
+// statusText is the transient status line, with a live spinner in front while
+// the work it names is still running.
+func (m *Model) statusText() string {
+	if m.status == "" {
+		return ""
 	}
-	return keys.String() + "\n" + dimStyle.Render(" "+hint)
+	if m.isBusy() {
+		return m.spinner.Frame() + " " + m.status
+	}
+	return m.status
+}
+
+// working shows text as the status while the work it names runs, with the
+// spinner in front. Whatever replaces the status -- the result, an error --
+// ends it; nothing has to remember to stop it.
+func (m *Model) working(text string) tea.Cmd {
+	m.status, m.busyText = text, text
+	return m.spinner.Start()
+}
+
+func (m *Model) isBusy() bool {
+	return m.busyText != "" && m.status == m.busyText && m.err == nil
 }
 
 func (m *Model) renderRow(i int) string {
@@ -482,26 +543,6 @@ func agentHint(sp *space) string {
 	default:
 		return ""
 	}
-}
-
-func (m *Model) viewPicker() string {
-	var b strings.Builder
-	name := "space"
-	if sp := m.selected(); sp != nil {
-		name = sp.Label
-	}
-	b.WriteString(titleStyle.Render(" Set status") + dimStyle.Render("  "+name) + "\n\n")
-
-	for i, st := range m.board.Statuses {
-		cursor := "   "
-		if i == m.manageIdx {
-			cursor = cursorStyle.Render(" ❯ ")
-		}
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color))
-		b.WriteString(cursor + dimStyle.Render(fmt.Sprintf("%d ", i+1)) + style.Render(st.Label) + "\n")
-	}
-	b.WriteString("\n" + dimStyle.Render(" enter select · esc cancel"))
-	return b.String()
 }
 
 func (m *Model) viewManage() string {

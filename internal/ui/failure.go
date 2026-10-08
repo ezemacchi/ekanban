@@ -48,9 +48,9 @@ func (m *Model) sendFailure() tea.Cmd {
 	}
 
 	ghClient, dir := m.gh, sp.Key
-	m.status = fmt.Sprintf("reading %s…", check.Name)
+	start := m.working(fmt.Sprintf("reading %s…", check.Name))
 
-	return func() tea.Msg {
+	return tea.Batch(start, func() tea.Msg {
 		log, err := ghClient.FailedLog(context.Background(), dir, check)
 		if err != nil && !errors.Is(err, gh.ErrNoLog) {
 			// gh missing or logged out is worth saying; anything else about
@@ -59,7 +59,7 @@ func (m *Model) sendFailure() tea.Cmd {
 			return statusMsg(err.Error())
 		}
 		return failureFetchedMsg{text: failureMessage(pr, check, log)}
-	}
+	})
 }
 
 // firstFailing picks the check to talk about. Notable already leads with the

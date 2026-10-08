@@ -41,6 +41,8 @@ var (
 	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
 	waitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	doneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
+	// linkStyle marks a line a click opens.
+	linkStyle = look.Dim.Underline(true)
 )
 
 // Model is the bubbletea model for one ticket.
@@ -75,6 +77,51 @@ type Model struct {
 
 	seen     map[string]string // agent statuses at the last load, by pane
 	activity []string          // the latest status changes, newest first
+
+	busyText string // the status naming work still running; see working
+	zones    []zone // what the last frame drew that a click can act on
+}
+
+// zone is a clickable part of the last frame: a role card, or a line or
+// button that stands for a key.
+type zone struct {
+	y, x0, x1 int // x1 exclusive
+	col, row  int // a card; col < 0 for a key
+	key       string
+}
+
+func (m *Model) zoneAt(x, y int) (zone, bool) {
+	for i := len(m.zones) - 1; i >= 0; i-- {
+		z := m.zones[i]
+		if y == z.y && x >= z.x0 && x < z.x1 {
+			return z, true
+		}
+	}
+	return zone{}, false
+}
+
+// keyZone records a line or button that stands for the key bound to action.
+func (m *Model) keyZone(y, x0, x1 int, action string) {
+	m.zones = append(m.zones, zone{y: y, x0: x0, x1: x1, col: -1, key: m.keyMap().Key(action)})
+}
+
+// click selects the card under the pointer; a second click on it goes to its
+// tab, like enter. A click on a key's line or button presses that key.
+func (m *Model) click(x, y int) tea.Cmd {
+	z, ok := m.zoneAt(x, y)
+	if !ok {
+		return nil
+	}
+	if z.col < 0 {
+		return m.key(z.key)
+	}
+	already := m.col == z.col && m.row == z.row
+	m.col, m.row = z.col, z.row
+	m.status = ""
+	if already {
+		return m.focusSelected()
+	}
+	return nil
 }
 
 // activityKept is how many status changes the Activity list shows.
@@ -240,6 +287,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.run != nil {
 			m.note(msg.run.Agents(), time.Now())
 		}
+		if m.isBusy() && m.busyText == refreshing {
+			m.status = ""
+		}
 		var cmds []tea.Cmd
 		if m.client != nil && msg.err == nil {
 			cmds = append(cmds, m.subscribe(msg.panes))
@@ -283,9 +333,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.text
 		return m, m.reload()
 	case look.SpinMsg:
-		return m, m.spinner.Update(msg, m.run == nil && m.err == nil)
+		return m, m.spinner.Update(msg, m.run == nil && m.err == nil || m.isBusy())
 	case tea.KeyMsg:
 		return m, m.key(msg.String())
+	case tea.MouseMsg:
+		switch {
+		case msg.Button == tea.MouseButtonWheelUp:
+			m.row--
+			m.clamp()
+		case msg.Button == tea.MouseButtonWheelDown:
+			m.row++
+			m.clamp()
+		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+			return m, m.click(msg.X, msg.Y)
+		}
 	}
 	return m, nil
 }
@@ -315,7 +376,9 @@ func (m *Model) key(k string) tea.Cmd {
 		}
 		return nil
 	}
-	m.status = ""
+	if !m.isBusy() {
+		m.status = ""
+	}
 	if k == "ctrl+c" {
 		return tea.Quit
 	}
@@ -338,8 +401,7 @@ func (m *Model) key(k string) tea.Cmd {
 	case "G":
 		m.row = 1 << 30
 	case "r":
-		m.status = "refreshing…"
-		return m.reload()
+		return tea.Batch(m.working(refreshing), m.reload())
 	case "o":
 		return m.goLead()
 	case "t":
@@ -406,18 +468,38 @@ func (m *Model) goLead() tea.Cmd {
 		return nil
 	}
 	if m.opening {
-		m.status = "already opening the " + strings.ToLower(m.run.Lead.Label) + "…"
-		return nil
+		return nil // its spinner is already on the status line
 	}
 	run, client := m.run, m.client
+	var start tea.Cmd
 	if run.LeadPane == "" {
 		m.opening = true
-		m.status = m.spinner.Frame() + " opening a new " + strings.ToLower(run.Lead.Label) + "…"
+		start = m.working("opening a new " + strings.ToLower(run.Lead.Label) + "…")
 	}
-	return func() tea.Msg {
+	return tea.Batch(start, func() tea.Msg {
 		text, err := lead.Go(client, run)
 		return leadMsg{text: text, err: err}
+	})
+}
+
+// refreshing is the status while r reloads; the load clears it.
+const refreshing = "refreshing…"
+
+// working shows text as the status while the work it names runs, with the
+// spinner in front; whatever replaces the status ends it.
+func (m *Model) working(text string) tea.Cmd {
+	m.status, m.busyText = text, text
+	return m.spinner.Start()
+}
+
+func (m *Model) isBusy() bool { return m.busyText != "" && m.status == m.busyText }
+
+// statusText is the status line, a live spinner in front while busy.
+func (m *Model) statusText() string {
+	if m.isBusy() {
+		return m.spinner.Frame() + " " + m.status
 	}
+	return m.status
 }
 
 func (m *Model) focusSelected() tea.Cmd {
@@ -450,6 +532,12 @@ func (m *Model) View() string {
 	r := m.run
 	ic := m.icons
 	var b strings.Builder
+	m.zones = m.zones[:0]
+	// line writes one line that a click turns into the key of action.
+	line := func(text, action string) {
+		m.keyZone(linesIn(b.String()), 0, lipgloss.Width(text), action)
+		b.WriteString(text + "\n")
+	}
 
 	team := r.Team
 	if team == "" {
@@ -457,10 +545,10 @@ func (m *Model) View() string {
 	}
 	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(r.Key), dimStyle.Render(fmt.Sprintf("%s · %s · %s",
 		team, ic.With(look.Target, orDash(r.Target)), ic.With(look.Branch, orDash(r.Branch)))))
-	fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Jira, r.JiraURL)))
+	line(linkStyle.Render(ic.With(look.Jira, r.JiraURL)), "open-issue")
 	switch {
 	case r.Prototype != "":
-		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Brush, "Prototype "+r.Spec+": "+filepath.Base(r.Prototype)+"  (p)")))
+		line(linkStyle.Render(ic.With(look.Brush, "Prototype "+r.Spec+": "+filepath.Base(r.Prototype))), "prototype")
 	case r.Spec != "":
 		fmt.Fprintf(&b, "%s\n", dimStyle.Render(ic.With(look.Brush, "No prototype for "+r.Spec)))
 	}
@@ -481,8 +569,10 @@ func (m *Model) View() string {
 			orchStyle = al.Style
 		}
 	}
-	fmt.Fprintf(&b, "%s\n\n", orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), width)))
+	line(orchStyle.Render(look.Truncate(ic.With(look.Sitemap, orch), width)), "lead")
+	b.WriteString("\n")
 
+	top := linesIn(b.String())
 	shown := m.columns()
 	colWidth := (width - 3) / len(shown)
 	if colWidth < 14 {
@@ -500,6 +590,7 @@ func (m *Model) View() string {
 		cb.WriteString(head.Render(ic.With(def.Icon, fmt.Sprintf("%s (%d)", def.Label, len(cards)))) + "\n")
 		cardWidth := colWidth - 1
 		text := look.CardInner(cardWidth)
+		y := top + 1
 		for j, card := range cards {
 			selected := i == m.col && j == m.row
 			style := lipgloss.NewStyle()
@@ -531,7 +622,12 @@ func (m *Model) View() string {
 			if selected {
 				border = look.CardSelected
 			}
-			cb.WriteString(strings.Join(look.Card(lines, cardWidth, border), "\n") + "\n")
+			boxed := look.Card(lines, cardWidth, border)
+			for range boxed {
+				m.zones = append(m.zones, zone{y: y, x0: i * colWidth, x1: i*colWidth + cardWidth, col: i, row: j})
+				y++
+			}
+			cb.WriteString(strings.Join(boxed, "\n") + "\n")
 		}
 		cols[i] = lipgloss.NewStyle().Width(colWidth).Render(cb.String())
 	}
@@ -573,17 +669,30 @@ func (m *Model) View() string {
 	}
 
 	b.WriteString("\n")
-	if m.status != "" {
-		b.WriteString(dimStyle.Render(m.status) + "\n")
+	if s := m.statusText(); s != "" {
+		b.WriteString(dimStyle.Render(s) + "\n")
 	}
 	if m.err != nil {
 		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
 	}
 	k := func(name string) string { return keyStyle.Render(m.keyMap().Key(name)) }
-	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  " + k("jump") + " go to its tab  " +
-		k("lead") + " " + leadName + "  " + k("open-issue") + " tracker  " + k("prototype") + " prototype  " + k("refresh") + " refresh  " + k("quit") + " quit")
+	b.WriteString(k("left") + "/" + k("right") + " column  " + k("up") + "/" + k("down") + " role  ")
+	// The actions are buttons as well as hints.
+	y, x := linesIn(b.String()), lipgloss.Width(k("left")+"/"+k("right")+" column  "+k("up")+"/"+k("down")+" role  ")
+	for _, a := range []struct{ action, label string }{
+		{"jump", "go to its tab"}, {"lead", leadName}, {"open-issue", "tracker"},
+		{"prototype", "prototype"}, {"refresh", "refresh"}, {"quit", "quit"},
+	} {
+		text := k(a.action) + " " + a.label
+		m.keyZone(y, x, x+lipgloss.Width(text), a.action)
+		b.WriteString(text + "  ")
+		x += lipgloss.Width(text) + 2
+	}
 	return b.String()
 }
+
+// linesIn is how many rows s takes before its last line.
+func linesIn(s string) int { return strings.Count(s, "\n") }
 
 func orDash(s string) string {
 	if s == "" {

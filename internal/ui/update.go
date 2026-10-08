@@ -34,7 +34,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyPipeline(msg)
 
 	case look.SpinMsg:
-		return m, m.spinner.Update(msg, m.pipelineBusy())
+		return m, m.spinner.Update(msg, m.pipelineBusy() || m.isBusy())
 
 	case branchesMsg:
 		m.branchLoading = false
@@ -94,7 +94,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case errMsg:
-		m.err = msg.err
+		m.err, m.busyText = msg.err, ""
 		return m, nil
 
 	case statusMsg:
@@ -115,16 +115,33 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// The wheel scrolls the list rather than moving the cursor: the cursor is
 	// what the keys act on, and having a look further down the board should not
 	// change what `1` or `enter` would do.
+	//
+	// The kanban is the exception: a column scrolls only to follow its
+	// selection, so there the wheel steps through the column's cards, and the
+	// picker's choices while it is open.
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		m.scroll(-wheelStep)
-		return m, nil
-	case tea.MouseButtonWheelDown:
-		m.scroll(wheelStep)
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		delta := 1
+		if msg.Button == tea.MouseButtonWheelUp {
+			delta = -1
+		}
+		switch {
+		case m.mode == modeStatusPick:
+			m.pickerStep(delta)
+		case m.mode == modeNormal && m.layout == layoutKanban:
+			m.moveCursor(delta)
+		default:
+			m.scroll(delta * wheelStep)
+		}
 		return m, nil
 	}
 
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	if m.mode == modeHelp {
+		m.mode = modeNormal
 		return m, nil
 	}
 
@@ -154,6 +171,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if done, model, cmd := m.clickZone(msg.X, msg.Y); done {
+		return model, cmd
+	}
 	return m.clickRow(msg.Y)
 }
 
@@ -428,6 +448,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.requireSpace() {
 			return m, nil
 		}
+		m.prevMode = modeNormal
 		m.mode = modeStatusPick
 		m.manageIdx = m.statusIndex(m.selected().StatusID)
 
@@ -468,8 +489,12 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleStatusFilter()
 
 	case "O":
-		m.status = "reordering Herdr's spaces to match the board…"
-		return m, m.reorderWorkspaces()
+		start := m.working("reordering Herdr's spaces to match the board…")
+		cmd := m.reorderWorkspaces()
+		if !m.isBusy() {
+			return m, cmd // it said why there is nothing to do
+		}
+		return m, tea.Batch(start, cmd)
 
 	case "a":
 		m.showArchive = !m.showArchive
@@ -507,22 +532,26 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handlePickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	switch key {
 	case "esc", "q":
 		m.mode = m.inputParentMode()
-	case "j", "down":
-		if m.manageIdx < len(m.board.Statuses)-1 {
-			m.manageIdx++
-		}
-	case "k", "up":
-		if m.manageIdx > 0 {
-			m.manageIdx--
-		}
-	case "enter":
+	case "s", "j", "down", "l", "right", "tab":
+		m.pickerStep(1)
+	case "S", "k", "up", "h", "left", "shift+tab":
+		m.pickerStep(-1)
+	case "enter", " ":
 		selected := m.manageIdx < len(m.board.Statuses)
 		m.mode = m.inputParentMode()
 		if selected {
 			return m.applyStatus(m.board.Statuses[m.manageIdx])
+		}
+	default:
+		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+			if i := int(key[0] - '1'); i < len(m.board.Statuses) {
+				m.mode = m.inputParentMode()
+				return m.applyStatus(m.board.Statuses[i])
+			}
 		}
 	}
 	return m, nil
@@ -614,6 +643,10 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "s":
+		if m.pipelineOn() {
+			m.status = m.computedColumns()
+			return m, nil
+		}
 		if sp := m.selected(); sp != nil {
 			m.prevMode = modeDetail
 			m.mode = modeStatusPick

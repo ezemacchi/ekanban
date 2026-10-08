@@ -22,8 +22,6 @@ const (
 	detailPaneFloor = 76 // below this terminal width the pane is not worth it
 )
 
-var detailKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-
 // detailLine is one rendered line, optionally standing for a URL.
 //
 // Herdr opens URLs in pane content on click, but only in panes that have not
@@ -199,25 +197,61 @@ const (
 
 // viewDetailModal draws the selected space's detail in a box over the board,
 // which stays visible around it.
+// viewDetailOverBoard is the detail modal over the board it was opened from.
+// The board's links and zones sit under the box; only the box's count.
+func (m *Model) viewDetailOverBoard() string {
+	base := m.viewKanbanBoard()
+	if m.layout == layoutTable {
+		base = m.viewTable()
+	}
+	m.resetLinks()
+	m.resetZones()
+	return m.viewDetailModal(base)
+}
+
 func (m *Model) viewDetailModal(base string) string {
 	sp := m.selected()
 	maxInner := min(m.width-detailModalMargin, detailModalMax) - 4
 	if maxInner < detailModalMin {
 		maxInner = detailModalMin
 	}
-	keys := detailKeyStyle.Render("n note · s status · enter jump · esc close")
+	hints := []hint{{"n", "note"}, {"s", "status"}, {"enter", "jump"}, {"esc", "close"}}
+	if m.pipelineOn() {
+		hints = []hint{{"n", "note"}, {"enter", "jump"}, {"esc", "close"}}
+	}
+	picking := m.mode == modeStatusPick
 
 	// Lay out at the widest allowed, then shrink to what the content uses and
 	// lay out again so wrapped lines fill the final width.
-	inner := lipgloss.Width(keys)
+	inner := 0
+	for _, h := range hints {
+		inner += lipgloss.Width(h.key+" "+h.label) + 3
+	}
 	for _, l := range texts(m.modalContent(sp, maxInner)) {
 		inner = max(inner, lipgloss.Width(l))
 	}
 	inner = max(min(inner, maxInner), detailModalMin)
 	content := m.modalContent(sp, inner)
 
+	// The buttons, or while picking the status choices, close the box. Their
+	// zones are recorded from row 0 at column 0 and moved once the box is placed.
+	mark := len(m.zones)
+	var bottom []string
+	if picking {
+		bottom = m.pickerLines(inner)
+		for i := range m.board.Statuses {
+			m.addZone(zone{kind: zoneStatus, y: i + 1, x0: 0, x1: inner, status: i})
+		}
+		bottom = append(bottom, dimStyle.Render(truncate("s/arrows move · enter set · esc cancel", inner)))
+	} else {
+		bottom = []string{m.buttons(0, 0, hints, inner)}
+		for i := mark; i < len(m.zones); i++ {
+			m.zones[i].footer = false
+		}
+	}
+
 	title := m.modalTitle(sp, inner)
-	body := title + "\n\n" + strings.Join(texts(content), "\n") + "\n\n" + truncate(keys, inner)
+	body := title + "\n\n" + strings.Join(texts(content), "\n") + "\n\n" + strings.Join(bottom, "\n")
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -232,6 +266,17 @@ func (m *Model) viewDetailModal(base string) string {
 	originX := max0((m.width - boxW) / 2)
 	originY := max0((m.height - boxH) / 2)
 	m.trackLinks(content, originY+3, originX+2, originX+2+inner)
+
+	// Past the border, the title, the blank line, the content and the blank.
+	bottomY := originY + 1 + 2 + len(content) + 1
+	for i := mark; i < len(m.zones); i++ {
+		m.zones[i].y += bottomY
+		m.zones[i].x0 += originX + 2
+		m.zones[i].x1 += originX + 2
+	}
+	// The box goes under its own zones: a click inside it on nothing does not
+	// close it.
+	m.zones = append(m.zones[:mark], append([]zone{{kind: zoneModal, y: originY, h: boxH, x0: originX, x1: originX + boxW}}, m.zones[mark:]...)...)
 
 	return overlay(base, box, originX, originY, m.width, m.height)
 }

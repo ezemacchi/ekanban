@@ -107,7 +107,7 @@ func run(args []string) error {
 		}
 		settings := config.Load()
 		links.Configure(settings.IssueURL, settings.Pipeline.PRURL)
-		_, err := tea.NewProgram(ticketui.New(client, worktree, ticketSettings(settings)), tea.WithAltScreen()).Run()
+		_, err := tea.NewProgram(ticketui.New(client, worktree, ticketSettings(settings)), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 		return err
 	}
 	board, err := store.Load()

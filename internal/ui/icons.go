@@ -59,6 +59,18 @@ func (m *Model) ticketName(space, key string) string {
 	return key
 }
 
+// spaceName is what a message calls a space: its ticket on the pipeline
+// board, else its label, else its folder.
+func (m *Model) spaceName(sp *space) string {
+	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
+		return m.ticketName(sp.Key, info.Key)
+	}
+	if sp.Label != "" {
+		return sp.Label
+	}
+	return baseName(sp.Key)
+}
+
 // spaceLabel prefixes a space's name with what it is: a git worktree on a
 // branch, or a plain folder. On the pipeline board a ticket worktree is
 // named by its ticket key: the folder names of one repository's worktrees
