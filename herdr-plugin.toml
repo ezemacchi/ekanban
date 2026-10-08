@@ -37,6 +37,14 @@ title = "Board"
 placement = "split"
 command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sidebar"]
 
+# One Big Team or Full Team run as a kanban of its roles. Open it as a tab
+# with --cwd set to the run's worktree; it reads .runs/<KEY>/STATE.md there.
+[[panes]]
+id = "ticket"
+title = "Ticket"
+placement = "tab"
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "ticket"]
+
 [[startup]]
 command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "startup"]
 

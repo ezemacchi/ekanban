@@ -19,6 +19,7 @@ import (
 	"github.com/phin-tech/herdr-phin-board/internal/config"
 	"github.com/phin-tech/herdr-phin-board/internal/herdr"
 	"github.com/phin-tech/herdr-phin-board/internal/store"
+	"github.com/phin-tech/herdr-phin-board/internal/ticketui"
 	"github.com/phin-tech/herdr-phin-board/internal/ui"
 	"github.com/phin-tech/herdr-phin-board/internal/version"
 	"github.com/phin-tech/herdr-phin-board/internal/watch"
@@ -77,6 +78,18 @@ func run(args []string) error {
 	// Everything below talks to Herdr.
 	client, err := herdr.New()
 	if err != nil {
+		return err
+	}
+
+	if len(args) > 0 && args[0] == "ticket" {
+		// One run's roles as a kanban; the first tab of a /handoff workspace.
+		worktree := ""
+		if len(args) > 1 {
+			worktree = args[1]
+		} else if worktree, err = os.Getwd(); err != nil {
+			return err
+		}
+		_, err := tea.NewProgram(ticketui.New(client, worktree, config.Load().Icons), tea.WithAltScreen()).Run()
 		return err
 	}
 	board, err := store.Load()

@@ -27,6 +27,9 @@ type Config struct {
 	// Notifications turns Herdr toasts on or off. Bells are recorded either
 	// way, so turning this off makes the board quiet rather than blind.
 	Notifications *bool `toml:"notifications"`
+	// Icons draws Nerd Font glyphs. Off by default: without a Nerd Font in the
+	// terminal they render as empty boxes.
+	Icons *bool `toml:"icons"`
 }
 
 const (
@@ -41,6 +44,7 @@ const (
 type Settings struct {
 	PollInterval  time.Duration
 	Notifications bool
+	Icons         bool
 	// Path is where the file was read from, whether or not it existed.
 	Path string
 	// Problems are complaints about the file's contents. A bad value falls back
@@ -107,6 +111,9 @@ func Load() Settings {
 	if c.Notifications != nil {
 		s.Notifications = *c.Notifications
 	}
+	if c.Icons != nil {
+		s.Icons = *c.Icons
+	}
 	return s
 }
 
@@ -123,6 +130,10 @@ poll_interval = "2m"
 # Herdr toasts when a pull request changes. Bells on the board are recorded
 # either way, so turning this off makes the board quiet rather than blind.
 notifications = true
+
+# Nerd Font icons on the ticket board. Needs a Nerd Font in the terminal
+# (e.g. Cascadia Code NF); without one they show as empty boxes.
+icons = false
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

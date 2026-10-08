@@ -15,11 +15,13 @@ import (
 // openURL launches a URL in the user's browser. A variable so tests can
 // observe it without opening anything.
 var openURL = func(url string) error {
-	opener := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		opener = "open"
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	}
-	return exec.Command(opener, url).Start()
+	return exec.Command("xdg-open", url).Start()
 }
 
 // chordModes are the modes where g means a chord rather than a letter.

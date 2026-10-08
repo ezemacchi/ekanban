@@ -140,6 +140,27 @@ type Agent struct {
 	PaneID      string  `json:"pane_id"`
 	TabID       string  `json:"tab_id"`
 	WorkspaceID string  `json:"workspace_id"`
+	// Name is set only for agents started with `herdr agent start <name>`.
+	Name string `json:"name"`
+	Cwd  string `json:"cwd"`
+}
+
+// Tab is one entry from tab.list.
+type Tab struct {
+	ID          string `json:"tab_id"`
+	Label       string `json:"label"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// Tabs lists the tabs of one workspace.
+func (c *Client) Tabs(workspaceID string) ([]Tab, error) {
+	var res struct {
+		Tabs []Tab `json:"tabs"`
+	}
+	if err := c.Request("tab.list", map[string]any{"workspace_id": workspaceID}, &res); err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
 }
 
 // Agents lists every pane Herdr considers an agent host.
