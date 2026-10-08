@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -157,13 +158,14 @@ func TestKeyCanonicalizes(t *testing.T) {
 // one would be invisible to the other.
 func TestPathMatchesTheHerdrStateLayout(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", "")
-	t.Setenv("XDG_STATE_HOME", "/tmp/state")
+	t.Setenv("LOCALAPPDATA", "") // Windows' own layout is tested below
+	t.Setenv("XDG_STATE_HOME", filepath.FromSlash("/tmp/state"))
 
 	got, err := Path()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/tmp/state/herdr/plugins/" + PluginID + "/board.json"
+	want := filepath.FromSlash("/tmp/state/herdr/plugins/" + PluginID + "/board.json")
 	if got != want {
 		t.Fatalf("Path() = %q, want %q", got, want)
 	}
@@ -177,8 +179,23 @@ func TestInjectedStateDirWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/injected/board.json" {
+	if got != filepath.FromSlash("/injected/board.json") {
 		t.Fatalf("Path() = %q, want the injected dir to win", got)
+	}
+}
+
+func TestWindowsStateIsUnderLocalAppData(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows layout")
+	}
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", "")
+	t.Setenv("LOCALAPPDATA", `C:\Users\u\AppData\Local`)
+	got, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `C:\Users\u\AppData\Local\herdr\plugins\` + PluginID + `\board.json`; got != want {
+		t.Fatalf("Path() = %q, want %q", got, want)
 	}
 }
 

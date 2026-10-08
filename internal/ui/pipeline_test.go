@@ -20,8 +20,8 @@ func pipelineBoard(t *testing.T) *Model {
 	m.SetPipeline(pipeline.New("", pipeline.Settings{}, nil))
 	send(t, m, liveWorkspaces())
 	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{
-		store.Key("/tmp/api"): {Stage: pipeline.ReadyQA, Key: "ABC-1", Title: "Arreglar la grilla", PR: 5, MergedTo: "predev", Deployed: "predev"},
-		store.Key("/tmp/web"): {},
+		store.Key(tmp + "api"): {Stage: pipeline.ReadyQA, Key: "ABC-1", Title: "Arreglar la grilla", PR: 5, MergedTo: "predev", Deployed: "predev"},
+		store.Key(tmp + "web"): {},
 	}})
 	return m
 }
@@ -42,7 +42,7 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 		}
 	}
 
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("1"))
 	if m.status != m.computedColumns() {
 		t.Fatalf("a number key must not retag in pipeline mode, status %q", m.status)
@@ -130,13 +130,13 @@ func TestConfiguredColumnNamesShow(t *testing.T) {
 	m.SetPipeline(pipeline.New("", pipeline.Settings{Columns: cols}, nil))
 	send(t, m, liveWorkspaces())
 	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{
-		store.Key("/tmp/api"): {Stage: pipeline.InProgress, Key: "ABC-1"},
+		store.Key(tmp + "api"): {Stage: pipeline.InProgress, Key: "ABC-1"},
 	}})
 	m.width = 200
 	if out := m.View(); !strings.Contains(out, "QA ready") || strings.Contains(out, "To QA") {
 		t.Fatalf("the renamed column is not shown:\n%s", out)
 	}
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("a"))
 	if !strings.Contains(m.status, "QA ready") {
 		t.Fatalf("status %q should name the configured column", m.status)
@@ -147,8 +147,8 @@ func TestConfiguredColumnNamesShow(t *testing.T) {
 func TestReboundAcceptKey(t *testing.T) {
 	m := pipelineBoard(t)
 	m.SetKeys(map[string][]string{"accept": {"y"}})
-	selectSpace(t, m, "/tmp/api")
-	api := store.Key("/tmp/api")
+	selectSpace(t, m, tmp+"api")
+	api := store.Key(tmp + "api")
 	send(t, m, key("a"))
 	if m.board.Entries[api].Accepted != nil {
 		t.Fatal("a still accepts after accept moved to y")
@@ -199,7 +199,7 @@ func TestEmptyColumnsTakeOnlyTheirHeader(t *testing.T) {
 // The computed columns must never be written over the user's own statuses.
 func TestPipelineSaveKeepsManualStatuses(t *testing.T) {
 	m := pipelineBoard(t)
-	m.board.SetNote(store.Key("/tmp/api"), "nota")
+	m.board.SetNote(store.Key(tmp+"api"), "nota")
 	m.save()
 	if m.board.Statuses[0].ID != pipeline.ToDo {
 		t.Fatal("save left the manual statuses on screen")
@@ -211,14 +211,14 @@ func TestPipelineSaveKeepsManualStatuses(t *testing.T) {
 	if saved.Statuses[0].ID != "todo" || len(saved.Statuses) != 4 {
 		t.Fatalf("saved statuses were replaced: %+v", saved.Statuses)
 	}
-	if saved.Entries[store.Key("/tmp/api")].Note != "nota" {
+	if saved.Entries[store.Key(tmp+"api")].Note != "nota" {
 		t.Fatal("note was not saved")
 	}
 }
 
 func TestAcceptMovesTicketToArchive(t *testing.T) {
 	m := pipelineBoard(t)
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("a"))
 	if got := labelsIn(m, pipeline.ReadyQA); len(got) != 0 {
 		t.Fatalf("accepted ticket is still on the board: %v", got)
@@ -227,7 +227,7 @@ func TestAcceptMovesTicketToArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := saved.Entries[store.Key("/tmp/api")].Accepted
+	rec := saved.Entries[store.Key(tmp+"api")].Accepted
 	if rec == nil || rec.Ticket != "ABC-1" || rec.PR != 5 || rec.Title != "Arreglar la grilla" {
 		t.Fatalf("archive record not saved: %+v", rec)
 	}
@@ -253,11 +253,11 @@ func TestAcceptMovesTicketToArchive(t *testing.T) {
 func TestAcceptOnlyFromReadyForQA(t *testing.T) {
 	m := pipelineBoard(t)
 	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{
-		store.Key("/tmp/api"): {Stage: pipeline.OnReview, Key: "ABC-1", PR: 5},
+		store.Key(tmp + "api"): {Stage: pipeline.OnReview, Key: "ABC-1", PR: 5},
 	}})
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("a"))
-	if m.board.Entries[store.Key("/tmp/api")].Accepted != nil {
+	if m.board.Entries[store.Key(tmp+"api")].Accepted != nil {
 		t.Fatal("a ticket still in review was accepted")
 	}
 }

@@ -2,21 +2,27 @@ package ui
 
 import (
 	"errors"
-	"github.com/ezemacchi/ekanban/internal/alert"
-	"time"
-
 	"fmt"
-	"github.com/charmbracelet/lipgloss"
-
-	"github.com/ezemacchi/ekanban/internal/gh"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ezemacchi/ekanban/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
+
+// tmp is the folder the tests' spaces live in, written the way store.Key
+// gives it on this system ("/tmp/", or "C:\tmp\" on Windows), so that a path
+// a test expects is the same string the board stored.
+var tmp = store.Key("/tmp") + string(filepath.Separator)
 
 // loadTestBoard gives every UI test the same four statuses, rather than
 // whatever the product currently ships. Changing the defaults is a product
@@ -75,8 +81,8 @@ func key(s string) tea.KeyMsg {
 
 func liveWorkspaces() workspacesMsg {
 	return workspacesMsg{
-		{ID: "w1", Label: "api", Cwd: "/tmp/api", AgentStatus: "working"},
-		{ID: "w2", Label: "web", Cwd: "/tmp/web", AgentStatus: "idle", Focused: true},
+		{ID: "w1", Label: "api", Cwd: tmp + "api", AgentStatus: "working"},
+		{ID: "w2", Label: "web", Cwd: tmp + "web", AgentStatus: "idle", Focused: true},
 	}
 }
 
@@ -142,7 +148,7 @@ func TestLiveWorkspacesLandInDefaultStatus(t *testing.T) {
 // An idle workspace still gets a hint; idle must outrank the zero value.
 func TestIdleAgentHintSurvives(t *testing.T) {
 	m := newTestModel(t)
-	send(t, m, workspacesMsg{{ID: "w1", Label: "web", Cwd: "/tmp/web", AgentStatus: "idle"}})
+	send(t, m, workspacesMsg{{ID: "w1", Label: "web", Cwd: tmp + "web", AgentStatus: "idle"}})
 
 	rows := spaceRows(m)
 	if len(rows) != 1 || rows[0].AgentStatus != "idle" {
@@ -156,16 +162,16 @@ func TestIdleAgentHintSurvives(t *testing.T) {
 func TestSetStatusByNumberMovesGroup(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("3")) // Waiting
 
-	if got := m.board.Entries["/tmp/api"].Status; got != "waiting" {
+	if got := m.board.Entries[store.Key(tmp+"api")].Status; got != "waiting" {
 		t.Fatalf("status is %q, want waiting", got)
 	}
 	// The cursor must follow the space into its new group, or repeated
 	// keypresses would silently retag whatever row slid underneath.
-	if sp := m.selected(); sp == nil || sp.Key != "/tmp/api" {
+	if sp := m.selected(); sp == nil || sp.Key != tmp+"api" {
 		t.Fatalf("cursor did not follow the space: %+v", sp)
 	}
 }
@@ -178,14 +184,14 @@ func TestStatusPersistsAcrossReload(t *testing.T) {
 	m := New(nil, board)
 	m.width, m.height = 100, 30
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/web")
+	selectSpace(t, m, tmp+"web")
 	send(t, m, key("2")) // In Progress
 
 	reloaded, err := store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := reloaded.Entries["/tmp/web"].Status; got != "in_progress" {
+	if got := reloaded.Entries[store.Key(tmp+"web")].Status; got != "in_progress" {
 		t.Fatalf("status did not persist, got %q", got)
 	}
 }
@@ -195,14 +201,14 @@ func TestStatusPersistsAcrossReload(t *testing.T) {
 func TestArchivedSpacesHiddenUntilToggled(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3"))
 
 	// The workspace goes away; the entry stays.
-	send(t, m, workspacesMsg{{ID: "w2", Label: "web", Cwd: "/tmp/web"}})
+	send(t, m, workspacesMsg{{ID: "w2", Label: "web", Cwd: tmp + "web"}})
 
 	for _, sp := range spaceRows(m) {
-		if sp.Key == "/tmp/api" {
+		if sp.Key == tmp+"api" {
 			t.Fatal("archived space is visible with the archive hidden")
 		}
 	}
@@ -211,7 +217,7 @@ func TestArchivedSpacesHiddenUntilToggled(t *testing.T) {
 
 	var found *space
 	for _, sp := range spaceRows(m) {
-		if sp.Key == "/tmp/api" {
+		if sp.Key == tmp+"api" {
 			found = sp
 		}
 	}
@@ -247,7 +253,7 @@ func TestCollapseHidesGroupMembers(t *testing.T) {
 func TestFilterOverridesCollapse(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("4")) // Done, which starts collapsed
 
 	if len(spaceRows(m)) != 1 {
@@ -258,7 +264,7 @@ func TestFilterOverridesCollapse(t *testing.T) {
 	m.rebuild()
 
 	rows := spaceRows(m)
-	if len(rows) != 1 || rows[0].Key != "/tmp/api" {
+	if len(rows) != 1 || rows[0].Key != tmp+"api" {
 		t.Fatalf("filter did not reach into the collapsed group: %+v", rows)
 	}
 }
@@ -266,16 +272,16 @@ func TestFilterOverridesCollapse(t *testing.T) {
 func TestFilterMatchesNote(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/web")
-	m.board.SetStatus("/tmp/web", "waiting", "web")
-	m.board.SetNote("/tmp/web", "waiting on Dave for the API key")
+	selectSpace(t, m, tmp+"web")
+	m.board.SetStatus(tmp+"web", "waiting", "web")
+	m.board.SetNote(tmp+"web", "waiting on Dave for the API key")
 	m.rebuild()
 
 	m.filter = "dave"
 	m.rebuild()
 
 	rows := spaceRows(m)
-	if len(rows) != 1 || rows[0].Key != "/tmp/web" {
+	if len(rows) != 1 || rows[0].Key != tmp+"web" {
 		t.Fatalf("note text is not searchable: %+v", rows)
 	}
 }
@@ -283,7 +289,7 @@ func TestFilterMatchesNote(t *testing.T) {
 func TestNoteEditingKeepsStatus(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting
 
 	send(t, m, key("n"))
@@ -293,7 +299,7 @@ func TestNoteEditingKeepsStatus(t *testing.T) {
 	m.input.SetValue("waiting on Dave")
 	send(t, m, key("enter"))
 
-	entry := m.board.Entries["/tmp/api"]
+	entry := m.board.Entries[store.Key(tmp+"api")]
 	if entry.Note != "waiting on Dave" {
 		t.Fatalf("note not saved: %q", entry.Note)
 	}
@@ -306,13 +312,13 @@ func TestNoteEditingKeepsStatus(t *testing.T) {
 func TestNoteOnUntaggedSpaceCreatesEntry(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("n"))
 	m.input.SetValue("check with ops")
 	send(t, m, key("enter"))
 
-	entry, ok := m.board.Entries["/tmp/api"]
+	entry, ok := m.board.Entries[store.Key(tmp+"api")]
 	if !ok {
 		t.Fatal("no entry was created")
 	}
@@ -345,10 +351,10 @@ func TestCustomStatusFlow(t *testing.T) {
 	}
 
 	send(t, m, key("esc"))
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("5")) // the new status is fifth
 
-	if got := m.board.Entries["/tmp/api"].Status; got != "blocked_on_vendor" {
+	if got := m.board.Entries[store.Key(tmp+"api")].Status; got != "blocked_on_vendor" {
 		t.Fatalf("could not assign the custom status, got %q", got)
 	}
 }
@@ -358,8 +364,8 @@ func TestCustomStatusFlow(t *testing.T) {
 func TestDuplicateDirectoriesCollapseToOneRow(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, workspacesMsg{
-		{ID: "w1", Label: "api", Cwd: "/tmp/api", AgentStatus: "idle"},
-		{ID: "w2", Label: "api-2", Cwd: "/tmp/api", AgentStatus: "working"},
+		{ID: "w1", Label: "api", Cwd: tmp + "api", AgentStatus: "idle"},
+		{ID: "w2", Label: "api-2", Cwd: tmp + "api", AgentStatus: "working"},
 	})
 
 	rows := spaceRows(m)
@@ -378,15 +384,15 @@ func TestDuplicateDirectoriesCollapseToOneRow(t *testing.T) {
 func TestForgetRemovesEntry(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3"))
 	send(t, m, key("x"))
 
-	if _, ok := m.board.Entries["/tmp/api"]; ok {
+	if _, ok := m.board.Entries[store.Key(tmp+"api")]; ok {
 		t.Fatal("entry was not forgotten")
 	}
 	// Still live, so it comes back under the default status.
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	if sp := m.selected(); sp.StatusID != "todo" {
 		t.Fatalf("forgotten live space is in %q, want todo", sp.StatusID)
 	}
@@ -395,9 +401,9 @@ func TestForgetRemovesEntry(t *testing.T) {
 func TestViewRenders(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/web")
+	selectSpace(t, m, tmp+"web")
 	send(t, m, key("3"))
-	m.board.SetNote("/tmp/web", "waiting on Dave")
+	m.board.SetNote(tmp+"web", "waiting on Dave")
 	m.rebuild()
 
 	out := m.View()
@@ -479,9 +485,9 @@ func threeInTodo(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
 	send(t, m, workspacesMsg{
-		{ID: "w1", Label: "alpha", Cwd: "/tmp/alpha", AgentStatus: "idle"},
-		{ID: "w2", Label: "beta", Cwd: "/tmp/beta", AgentStatus: "idle"},
-		{ID: "w3", Label: "gamma", Cwd: "/tmp/gamma", AgentStatus: "idle"},
+		{ID: "w1", Label: "alpha", Cwd: tmp + "alpha", AgentStatus: "idle"},
+		{ID: "w2", Label: "beta", Cwd: tmp + "beta", AgentStatus: "idle"},
+		{ID: "w3", Label: "gamma", Cwd: tmp + "gamma", AgentStatus: "idle"},
 	})
 	return m
 }
@@ -513,7 +519,7 @@ func TestGrabReordersWithinGroup(t *testing.T) {
 		t.Fatalf("setup: want 3 spaces, got %v", before)
 	}
 
-	selectSpace(t, m, "/tmp/"+strings.ToLower(before[0]))
+	selectSpace(t, m, tmp+strings.ToLower(before[0]))
 	send(t, m, key("v"))
 	if m.grabbed == "" {
 		t.Fatal("v did not grab the row")
@@ -539,12 +545,12 @@ func TestManualOrderPersists(t *testing.T) {
 	m := New(nil, board)
 	m.width, m.height = 100, 30
 	send(t, m, workspacesMsg{
-		{ID: "w1", Label: "alpha", Cwd: "/tmp/alpha"},
-		{ID: "w2", Label: "beta", Cwd: "/tmp/beta"},
+		{ID: "w1", Label: "alpha", Cwd: tmp + "alpha"},
+		{ID: "w2", Label: "beta", Cwd: tmp + "beta"},
 	})
 	first := labelsIn(m, "todo")[0]
 
-	selectSpace(t, m, "/tmp/"+first)
+	selectSpace(t, m, tmp+first)
 	send(t, m, key("v"))
 	send(t, m, key("j"))
 
@@ -555,8 +561,8 @@ func TestManualOrderPersists(t *testing.T) {
 	m2 := New(nil, reloaded)
 	m2.width, m2.height = 100, 30
 	send(t, m2, workspacesMsg{
-		{ID: "w1", Label: "alpha", Cwd: "/tmp/alpha"},
-		{ID: "w2", Label: "beta", Cwd: "/tmp/beta"},
+		{ID: "w1", Label: "alpha", Cwd: tmp + "alpha"},
+		{ID: "w2", Label: "beta", Cwd: tmp + "beta"},
 	})
 	if got := labelsIn(m2, "todo"); got[len(got)-1] != first {
 		t.Fatalf("manual order did not survive reload: %v", got)
@@ -567,12 +573,12 @@ func TestManualOrderPersists(t *testing.T) {
 func TestGrabCrossesBoundaryDown(t *testing.T) {
 	m := threeInTodo(t)
 	last := labelsIn(m, "todo")[2]
-	selectSpace(t, m, "/tmp/"+last)
+	selectSpace(t, m, tmp+last)
 
 	send(t, m, key("v"))
 	send(t, m, key("j"))
 
-	if got := m.board.Entries["/tmp/"+last].Status; got != "in_progress" {
+	if got := m.board.Entries[tmp+last].Status; got != "in_progress" {
 		t.Fatalf("status is %q, want in_progress", got)
 	}
 	// It enters at the top, since it arrived from above.
@@ -587,13 +593,13 @@ func TestGrabCrossesBoundaryDown(t *testing.T) {
 func TestGrabCrossesBoundaryUp(t *testing.T) {
 	m := threeInTodo(t)
 	first := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+first)
+	selectSpace(t, m, tmp+first)
 	// Park it in Waiting, then walk it back up into In Progress.
 	send(t, m, key("3"))
 	send(t, m, key("v"))
 	send(t, m, key("k"))
 
-	if got := m.board.Entries["/tmp/"+first].Status; got != "in_progress" {
+	if got := m.board.Entries[tmp+first].Status; got != "in_progress" {
 		t.Fatalf("status is %q, want in_progress", got)
 	}
 }
@@ -605,15 +611,15 @@ func TestGrabIntoCollapsedGroupExpandsIt(t *testing.T) {
 		t.Fatal("setup: done should start collapsed")
 	}
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 	send(t, m, key("3")) // Waiting, which sits directly above Done
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	// Grab it and walk it down across the boundary into collapsed Done.
 	send(t, m, key("v"))
 	send(t, m, key("j"))
 
-	if got := m.board.Entries["/tmp/"+target].Status; got != "done" {
+	if got := m.board.Entries[tmp+target].Status; got != "done" {
 		t.Fatalf("status is %q, want done", got)
 	}
 	if m.board.IsCollapsed("done") {
@@ -627,11 +633,11 @@ func TestGrabIntoCollapsedGroupExpandsIt(t *testing.T) {
 func TestGrabStopsAtTheEnds(t *testing.T) {
 	m := threeInTodo(t)
 	first := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+first)
+	selectSpace(t, m, tmp+first)
 	send(t, m, key("v"))
 	send(t, m, key("k")) // already in the first status, at the top
 
-	if got := m.board.Entries["/tmp/"+first]; got.Status != "" && got.Status != "todo" {
+	if got := m.board.Entries[tmp+first]; got.Status != "" && got.Status != "todo" {
 		t.Fatalf("row escaped off the top into %q", got.Status)
 	}
 	if len(labelsIn(m, "todo")) != 3 {
@@ -655,7 +661,7 @@ func TestGrabBlockedWhileFiltering(t *testing.T) {
 
 func TestGrabToggleAndDrop(t *testing.T) {
 	m := threeInTodo(t)
-	selectSpace(t, m, "/tmp/"+labelsIn(m, "todo")[0])
+	selectSpace(t, m, tmp+labelsIn(m, "todo")[0])
 
 	send(t, m, key("v"))
 	send(t, m, key("v"))
@@ -673,12 +679,12 @@ func TestGrabToggleAndDrop(t *testing.T) {
 func TestNumberKeySendsToStatusWhileGrabbed(t *testing.T) {
 	m := threeInTodo(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("v"))
 	send(t, m, key("3"))
 
-	if got := m.board.Entries["/tmp/"+target].Status; got != "waiting" {
+	if got := m.board.Entries[tmp+target].Status; got != "waiting" {
 		t.Fatalf("status is %q, want waiting", got)
 	}
 }
@@ -753,7 +759,7 @@ func TestLayoutTogglePersists(t *testing.T) {
 func TestLayoutToggleKeepsSelection(t *testing.T) {
 	m := threeInTodo(t)
 	target := labelsIn(m, "todo")[1]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 	send(t, m, key("3")) // Waiting, so the column is not the first one
 
 	send(t, m, key("K"))
@@ -769,7 +775,7 @@ func TestLayoutToggleKeepsSelection(t *testing.T) {
 func TestKanbanColumnNavigation(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 	send(t, m, key("3")) // retags the card to Waiting, column index 2
 
 	// h and l skip empty columns: In Progress sits empty between Todo and
@@ -794,12 +800,12 @@ func TestKanbanColumnNavigation(t *testing.T) {
 func TestKanbanGrabAcrossColumnsRetags(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("v"))
 	send(t, m, key("l"))
 
-	if got := m.board.Entries["/tmp/"+target].Status; got != "in_progress" {
+	if got := m.board.Entries[tmp+target].Status; got != "in_progress" {
 		t.Fatalf("status is %q, want in_progress", got)
 	}
 	// The card lands at the top of its new column and stays selected.
@@ -811,7 +817,7 @@ func TestKanbanGrabAcrossColumnsRetags(t *testing.T) {
 	}
 
 	send(t, m, key("h"))
-	if got := m.board.Entries["/tmp/"+target].Status; got != "todo" {
+	if got := m.board.Entries[tmp+target].Status; got != "todo" {
 		t.Fatalf("h did not move it back: %q", got)
 	}
 }
@@ -821,12 +827,12 @@ func TestKanbanGrabAcrossColumnsRetags(t *testing.T) {
 func TestKanbanVerticalMoveNeverRetags(t *testing.T) {
 	m := kanbanBoard(t)
 	before := labelsIn(m, "todo")
-	selectSpace(t, m, "/tmp/"+before[2]) // the last card in the column
+	selectSpace(t, m, tmp+before[2]) // the last card in the column
 
 	send(t, m, key("v"))
 	send(t, m, key("j")) // off the bottom
 
-	if got := m.board.Entries["/tmp/"+before[2]].Status; got != "" && got != "todo" {
+	if got := m.board.Entries[tmp+before[2]].Status; got != "" && got != "todo" {
 		t.Fatalf("vertical move retagged the card to %q", got)
 	}
 	if got := labelsIn(m, "todo"); len(got) != 3 {
@@ -844,10 +850,10 @@ func TestKanbanVerticalMoveNeverRetags(t *testing.T) {
 func TestKanbanNumberKeysWork(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("3"))
-	if got := m.board.Entries["/tmp/"+target].Status; got != "waiting" {
+	if got := m.board.Entries[tmp+target].Status; got != "waiting" {
 		t.Fatalf("status is %q, want waiting", got)
 	}
 	if sp := m.selected(); sp == nil || sp.Label != target {
@@ -914,12 +920,12 @@ func TestDetailPaneShowsFullNote(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 110, 24
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	long := "waiting on Dave re: API key rotation, he is back Thursday and will re-issue then"
-	m.board.SetStatus("/tmp/api", "waiting", "api")
-	m.board.SetNote("/tmp/api", long)
+	m.board.SetStatus(tmp+"api", "waiting", "api")
+	m.board.SetNote(tmp+"api", long)
 	m.rebuild()
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	out := m.View()
 	if m.detailPaneWidth() == 0 {
@@ -942,17 +948,17 @@ func TestDetailPaneTracksCursor(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 110, 24
 	send(t, m, liveWorkspaces())
-	m.board.SetStatus("/tmp/api", "todo", "api")
-	m.board.SetNote("/tmp/api", "note-for-api")
-	m.board.SetStatus("/tmp/web", "todo", "web")
-	m.board.SetNote("/tmp/web", "note-for-web")
+	m.board.SetStatus(tmp+"api", "todo", "api")
+	m.board.SetNote(tmp+"api", "note-for-api")
+	m.board.SetStatus(tmp+"web", "todo", "web")
+	m.board.SetNote(tmp+"web", "note-for-web")
 	m.rebuild()
 
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	if out := m.View(); !strings.Contains(out, "note-for-api") {
 		t.Fatalf("pane is not showing the selected space:\n%s", out)
 	}
-	selectSpace(t, m, "/tmp/web")
+	selectSpace(t, m, tmp+"web")
 	if out := m.View(); !strings.Contains(out, "note-for-web") {
 		t.Fatalf("pane did not follow the cursor:\n%s", out)
 	}
@@ -998,9 +1004,9 @@ func TestKanbanDetailIsAModalOverTheBoard(t *testing.T) {
 	m.width, m.height = 140, 30
 	target := labelsIn(m, "todo")[0]
 	long := "modal-note-text " + strings.Repeat("word ", 14) + "end"
-	m.board.SetNote(store.Key("/tmp/"+target), long)
+	m.board.SetNote(store.Key(tmp+target), long)
 	m.rebuild()
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	if m.detailPaneWidth() != 0 {
 		t.Fatal("kanban must not reserve a side pane")
@@ -1034,7 +1040,7 @@ func TestModalNoteEditReturnsToModal(t *testing.T) {
 	m := kanbanBoard(t)
 	m.width, m.height = 110, 24
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("d"))
 	send(t, m, key("n"))
@@ -1047,7 +1053,7 @@ func TestModalNoteEditReturnsToModal(t *testing.T) {
 	if m.mode != modeDetail {
 		t.Fatalf("returned to mode %v, want the modal", m.mode)
 	}
-	if got := m.board.Entries["/tmp/"+target].Note; got != "edited from the modal" {
+	if got := m.board.Entries[tmp+target].Note; got != "edited from the modal" {
 		t.Fatalf("note not saved: %q", got)
 	}
 }
@@ -1055,7 +1061,7 @@ func TestModalNoteEditReturnsToModal(t *testing.T) {
 func TestModalBrowsesWithoutClosing(t *testing.T) {
 	m := kanbanBoard(t)
 	m.width, m.height = 110, 24
-	selectSpace(t, m, "/tmp/"+labelsIn(m, "todo")[0])
+	selectSpace(t, m, tmp+labelsIn(m, "todo")[0])
 
 	send(t, m, key("d"))
 	send(t, m, key("j"))
@@ -1067,20 +1073,34 @@ func TestModalBrowsesWithoutClosing(t *testing.T) {
 	}
 }
 
-// The modal's rule must fit inside the border rather than wrapping.
-func TestModalRuleFitsTheBox(t *testing.T) {
+// Every line of the modal stays inside its border rather than wrapping out of
+// it, the way a too-long rule once did.
+func TestModalFitsTheBox(t *testing.T) {
 	m := kanbanBoard(t)
 	m.width, m.height = 110, 24
-	selectSpace(t, m, "/tmp/"+labelsIn(m, "todo")[0])
+	selectSpace(t, m, tmp+labelsIn(m, "todo")[0])
+	m.board.SetNote(tmp+labelsIn(m, "todo")[0], strings.Repeat("a long note that has to wrap ", 12))
+	m.rebuild()
 	send(t, m, key("d"))
 
-	for _, line := range strings.Split(m.View(), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "──") && !strings.Contains(line, "│") {
-			t.Fatalf("the rule escaped the box: %q", line)
+	// The modal alone: the board behind it has column rules of its own.
+	box := 0
+	for _, line := range strings.Split(m.viewDetailModal(""), "\n") {
+		trimmed := strings.TrimSpace(ansi.Strip(line))
+		if trimmed == "" {
+			continue
+		}
+		box++
+		first, _ := utf8.DecodeRuneInString(trimmed)
+		last, _ := utf8.DecodeLastRuneInString(trimmed)
+		if !strings.ContainsRune("╭│╰", first) || !strings.ContainsRune("╮│╯", last) {
+			t.Fatalf("a line escaped the box: %+q", line)
 		}
 	}
+	if box < 5 {
+		t.Fatalf("no modal drawn: %d lines", box)
+	}
 }
-
 func TestTableListsEveryFlatRow(t *testing.T) {
 	m := tableBoard(t)
 	if len(m.flat) != 3 {
@@ -1177,7 +1197,7 @@ func TestTableGrabReordersAndCrosses(t *testing.T) {
 	// Walking off the end of the group retags, exactly as in the list.
 	send(t, m, key("j"))
 	send(t, m, key("j"))
-	if got := m.board.Entries["/tmp/"+first].Status; got != "in_progress" {
+	if got := m.board.Entries[tmp+first].Status; got != "in_progress" {
 		t.Fatalf("status is %q, want in_progress", got)
 	}
 }
@@ -1217,7 +1237,7 @@ func TestTableRendersColumns(t *testing.T) {
 	m := tableBoard(t)
 	m.width, m.height = 118, 20
 	m.cursor = 0
-	m.board.SetNote("/tmp/"+m.flat[0].Label, "table-note-text")
+	m.board.SetNote(tmp+m.flat[0].Label, "table-note-text")
 	m.rebuild()
 
 	out := m.View()
@@ -1433,7 +1453,7 @@ func TestMenuHitTesting(t *testing.T) {
 func TestRenameUpdatesStoredLabel(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("R"))
 	if m.mode != modeRename {
@@ -1450,7 +1470,7 @@ func TestRenameUpdatesStoredLabel(t *testing.T) {
 	if m.mode != modeNormal {
 		t.Fatal("rename did not close the prompt")
 	}
-	if got := m.board.Entries["/tmp/api"].Label; got != "api-gateway" {
+	if got := m.board.Entries[store.Key(tmp+"api")].Label; got != "api-gateway" {
 		t.Fatalf("stored label is %q, want api-gateway", got)
 	}
 	if sp := m.selected(); sp == nil || sp.Label != "api-gateway" {
@@ -1463,8 +1483,8 @@ func TestRenameUpdatesStoredLabel(t *testing.T) {
 func TestRenameTargetsTheDisplayedWorkspace(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, workspacesMsg{
-		{ID: "w1", Label: "api", Cwd: "/tmp/api"},
-		{ID: "w2", Label: "api-2", Cwd: "/tmp/api", Focused: true},
+		{ID: "w1", Label: "api", Cwd: tmp + "api"},
+		{ID: "w2", Label: "api-2", Cwd: tmp + "api", Focused: true},
 	})
 
 	sp := m.selected()
@@ -1480,13 +1500,13 @@ func TestRenameTargetsTheDisplayedWorkspace(t *testing.T) {
 func TestRenameArchivedSpaceNeedsNoWorkspace(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3"))
 
 	// The workspace goes away; the entry stays and is still renameable.
-	send(t, m, workspacesMsg{{ID: "w2", Label: "web", Cwd: "/tmp/web"}})
+	send(t, m, workspacesMsg{{ID: "w2", Label: "web", Cwd: tmp + "web"}})
 	send(t, m, key("a"))
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	if sp := m.selected(); sp.DisplayWorkspaceID != "" {
 		t.Fatalf("archived space claims workspace %q", sp.DisplayWorkspaceID)
@@ -1495,7 +1515,7 @@ func TestRenameArchivedSpaceNeedsNoWorkspace(t *testing.T) {
 	m.input.SetValue("old-api")
 	send(t, m, key("enter"))
 
-	if got := m.board.Entries["/tmp/api"].Label; got != "old-api" {
+	if got := m.board.Entries[store.Key(tmp+"api")].Label; got != "old-api" {
 		t.Fatalf("archived rename not stored: %q", got)
 	}
 }
@@ -1504,7 +1524,7 @@ func TestRenameArchivedSpaceNeedsNoWorkspace(t *testing.T) {
 func TestRenameIgnoresEmptyName(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("R"))
 	m.input.SetValue("   ")
@@ -1518,7 +1538,7 @@ func TestRenameIgnoresEmptyName(t *testing.T) {
 func TestRenameShowsItsOwnPrompt(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("R"))
 
 	if out := m.View(); !strings.Contains(out, "rename:") {
@@ -1571,7 +1591,7 @@ func TestDefaultStatusClearsItsToken(t *testing.T) {
 func TestNonDefaultStatusSetsItsToken(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting
 
 	pushes := tokenPushes(m)
@@ -1588,13 +1608,13 @@ func TestNonDefaultStatusSetsItsToken(t *testing.T) {
 func TestReturningToDefaultClearsTheToken(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3"))
 	if v := tokenPushes(m)["w1"]; v == nil {
 		t.Fatal("setup: expected a token")
 	}
 
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("1")) // back to Todo
 	if v := tokenPushes(m)["w1"]; v != nil {
 		t.Fatalf("token %q survived the return to default", *v)
@@ -1608,7 +1628,7 @@ func TestSuppressionFollowsStatusOrder(t *testing.T) {
 	send(t, m, liveWorkspaces())
 	// File it as Todo explicitly. An untouched space has no stored status at
 	// all, so it follows whichever status is default rather than staying put.
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("1"))
 	if v := tokenPushes(m)["w1"]; v != nil {
 		t.Fatalf("Todo is the default, so it should be cleared; got %q", *v)
@@ -1626,7 +1646,7 @@ func TestSuppressionFollowsStatusOrder(t *testing.T) {
 func TestSetDefaultStatusFromManager(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting
 
 	// Waiting is badged while Todo is the default.
@@ -1692,13 +1712,13 @@ func withPR(m *Model, key string, pr gh.PR) {
 func TestPRNeverChangesGrouping(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting
 
-	before := m.board.Entries["/tmp/api"]
-	withPR(m, "/tmp/api", gh.PR{Number: 9, State: "MERGED", Checks: gh.ChecksFail})
+	before := m.board.Entries[store.Key(tmp+"api")]
+	withPR(m, tmp+"api", gh.PR{Number: 9, State: "MERGED", Checks: gh.ChecksFail})
 
-	after := m.board.Entries["/tmp/api"]
+	after := m.board.Entries[store.Key(tmp+"api")]
 	if after.Status != before.Status {
 		t.Fatalf("a merged PR changed the status: %q -> %q", before.Status, after.Status)
 	}
@@ -1708,7 +1728,7 @@ func TestPRNeverChangesGrouping(t *testing.T) {
 	// And the row is still in the group the user put it in.
 	found := false
 	for _, sp := range m.groups["waiting"] {
-		if sp.Key == "/tmp/api" {
+		if sp.Key == tmp+"api" {
 			found = true
 		}
 	}
@@ -1730,7 +1750,7 @@ func TestPRColumnAppearsOnlyWhenThereIsAPR(t *testing.T) {
 		t.Fatal("the PR heading rendered with no PRs")
 	}
 
-	withPR(m, "/tmp/api", gh.PR{Number: 42, State: "OPEN", Review: "APPROVED", Checks: gh.ChecksPass})
+	withPR(m, tmp+"api", gh.PR{Number: 42, State: "OPEN", Review: "APPROVED", Checks: gh.ChecksPass})
 	if m.tableWidths().pr == 0 {
 		t.Fatal("the PR column did not appear")
 	}
@@ -1746,11 +1766,11 @@ func TestPRRendersInDetailPane(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{
+	withPR(m, tmp+"api", gh.PR{
 		Number: 7, State: "OPEN", Review: "CHANGES_REQUESTED",
 		Checks: gh.ChecksFail, Title: "Rework the parser",
 	})
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	out := m.View()
 	for _, want := range []string{"#7", "changes", "Rework the parser"} {
@@ -1781,11 +1801,11 @@ func TestPRShortFormForSidebar(t *testing.T) {
 func TestApplyPRsForgetsMissing(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{Number: 11, State: "OPEN"})
+	withPR(m, tmp+"api", gh.PR{Number: 11, State: "OPEN"})
 
-	m.applyPRs(prLoadedMsg{missing: []string{"/tmp/api"}})
+	m.applyPRs(prLoadedMsg{missing: []string{tmp + "api"}})
 
-	if _, ok := m.prFor("/tmp/api"); ok {
+	if _, ok := m.prFor(tmp + "api"); ok {
 		t.Fatal("a PR that no longer exists is still cached")
 	}
 }
@@ -1794,11 +1814,11 @@ func TestApplyPRsForgetsMissing(t *testing.T) {
 func TestApplyPRsPrunesUnknownSpaces(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	m.prCache.Put("/tmp/long-gone", gh.PR{Number: 1, Fetched: time.Now()})
+	m.prCache.Put(tmp+"long-gone", gh.PR{Number: 1, Fetched: time.Now()})
 
 	m.applyPRs(prLoadedMsg{})
 
-	if _, ok := m.prFor("/tmp/long-gone"); ok {
+	if _, ok := m.prFor(tmp + "long-gone"); ok {
 		t.Fatal("the cache kept a space that is not on the board")
 	}
 }
@@ -1808,7 +1828,7 @@ func TestApplyPRsPrunesUnknownSpaces(t *testing.T) {
 func TestLoadPRsSkipsFreshEntries(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	for _, k := range []string{"/tmp/api", "/tmp/web"} {
+	for _, k := range []string{tmp + "api", tmp + "web"} {
 		m.prCache.Put(k, gh.PR{Number: 1, Fetched: time.Now()})
 	}
 	m.rebuild()
@@ -1830,7 +1850,7 @@ func TestNoPRSpacesAreNotRefetchedEveryRefresh(t *testing.T) {
 	if !m.prLoading {
 		t.Fatal("the first snapshot did not start a fetch")
 	}
-	m.applyPRs(prLoadedMsg{missing: []string{"/tmp/api", "/tmp/web"}})
+	m.applyPRs(prLoadedMsg{missing: []string{tmp + "api", tmp + "web"}})
 
 	// A workspace event arrives and the board refreshes.
 	send(t, m, liveWorkspaces())
@@ -1856,7 +1876,7 @@ func TestLoadPRsGuardsAgainstOverlap(t *testing.T) {
 	}
 
 	// Once the round lands, the guard clears and fetching is allowed again.
-	m.applyPRs(prLoadedMsg{missing: []string{"/tmp/api", "/tmp/web"}})
+	m.applyPRs(prLoadedMsg{missing: []string{tmp + "api", tmp + "web"}})
 	if m.prLoading {
 		t.Fatal("the in-flight guard was not cleared")
 	}
@@ -1866,9 +1886,9 @@ func TestLoadPRsGuardsAgainstOverlap(t *testing.T) {
 func TestAbsenceIsNotDisplayed(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	m.applyPRs(prLoadedMsg{missing: []string{"/tmp/api"}})
+	m.applyPRs(prLoadedMsg{missing: []string{tmp + "api"}})
 
-	if _, ok := m.prFor("/tmp/api"); ok {
+	if _, ok := m.prFor(tmp + "api"); ok {
 		t.Fatal("a cached absence is being reported as a PR")
 	}
 	if m.anyPR() {
@@ -1893,11 +1913,11 @@ func TestChordGPOpensThePR(t *testing.T) {
 	opened := captureOpens(t)
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{
+	withPR(m, tmp+"api", gh.PR{
 		Number: 42, State: "OPEN",
 		URL: "https://github.com/o/r/pull/42",
 	})
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("g"))
 	if m.chord != "g" {
@@ -1939,7 +1959,7 @@ func TestChordOnASpaceWithoutAPRExplains(t *testing.T) {
 	opened := captureOpens(t)
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("g"))
 	send(t, m, key("p"))
@@ -1991,8 +2011,8 @@ func TestChordWorksInTheDetailModal(t *testing.T) {
 	opened := captureOpens(t)
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	withPR(m, "/tmp/"+target, gh.PR{Number: 8, State: "OPEN", URL: "https://example.test/8"})
-	selectSpace(t, m, "/tmp/"+target)
+	withPR(m, tmp+target, gh.PR{Number: 8, State: "OPEN", URL: "https://example.test/8"})
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("d"))
 	if m.mode != modeDetail {
@@ -2077,7 +2097,7 @@ func TestPickAgentAcrossMergedWorkspaces(t *testing.T) {
 func TestMessageModeOpensAndPrompts(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("m"))
 	if m.mode != modeMessage {
@@ -2097,7 +2117,7 @@ func TestMessageModeOpensAndPrompts(t *testing.T) {
 func TestSendToAgentDoesNotSubmit(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("m"))
 	m.input.SetValue("can you rerun the failing test?")
@@ -2107,7 +2127,7 @@ func TestSendToAgentDoesNotSubmit(t *testing.T) {
 		t.Fatal("sending left the prompt open")
 	}
 	// Nothing was written to the board: a message is not a note.
-	if got := m.board.Entries["/tmp/api"].Note; got != "" {
+	if got := m.board.Entries[store.Key(tmp+"api")].Note; got != "" {
 		t.Fatalf("the message leaked into the note: %q", got)
 	}
 }
@@ -2115,7 +2135,7 @@ func TestSendToAgentDoesNotSubmit(t *testing.T) {
 func TestEmptyMessageSendsNothing(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	send(t, m, key("m"))
 	m.input.SetValue("   ")
@@ -2128,7 +2148,7 @@ func TestMergeConflictRendersAndColours(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 132, 20
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{
+	withPR(m, tmp+"api", gh.PR{
 		Number: 5, State: "OPEN", Checks: gh.ChecksPass,
 		Merge: gh.MergeConflict, URL: "https://example.test/5",
 	})
@@ -2140,7 +2160,7 @@ func TestMergeConflictRendersAndColours(t *testing.T) {
 	}
 
 	// A mergeable PR says nothing: the column is for what needs doing.
-	withPR(m, "/tmp/api", gh.PR{Number: 5, State: "OPEN", Merge: gh.MergeOK})
+	withPR(m, tmp+"api", gh.PR{Number: 5, State: "OPEN", Merge: gh.MergeOK})
 	if strings.Contains(m.View(), "conflict") {
 		t.Fatal("a mergeable PR reported a conflict")
 	}
@@ -2149,10 +2169,10 @@ func TestMergeConflictRendersAndColours(t *testing.T) {
 func TestBellShowsAndClearsOnSelection(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	m.alerts.Add("/tmp/web", alert.Alert{Kind: alert.ChecksFailed, Text: "#1 checks failed"})
+	m.alerts.Add(tmp+"web", alert.Alert{Kind: alert.ChecksFailed, Text: "#1 checks failed"})
 	m.rebuild()
 
-	if !m.hasBell("/tmp/web") {
+	if !m.hasBell(tmp + "web") {
 		t.Fatal("no bell on a space with an unread alert")
 	}
 	if !strings.Contains(m.View(), bellGlyph) {
@@ -2160,10 +2180,10 @@ func TestBellShowsAndClearsOnSelection(t *testing.T) {
 	}
 
 	// Landing on the row is what marks it seen.
-	selectSpace(t, m, "/tmp/web")
+	selectSpace(t, m, tmp+"web")
 	m.selectedBellCleared()
 
-	if m.hasBell("/tmp/web") {
+	if m.hasBell(tmp + "web") {
 		t.Fatal("selecting the row did not clear the bell")
 	}
 }
@@ -2173,9 +2193,9 @@ func TestBellShowsAndClearsOnSelection(t *testing.T) {
 func TestHeaderCountsBells(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("4")) // Done, which starts collapsed
-	m.alerts.Add("/tmp/api", alert.Alert{Kind: alert.Merged, Text: "#2 merged"})
+	m.alerts.Add(tmp+"api", alert.Alert{Kind: alert.Merged, Text: "#2 merged"})
 	m.rebuild()
 
 	if !strings.Contains(m.View(), bellGlyph) {
@@ -2190,9 +2210,9 @@ func TestAlertTextAppearsInDetail(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	m.alerts.Add("/tmp/api", alert.Alert{Kind: alert.Conflicted, Text: "#9 conflicts with base"})
+	m.alerts.Add(tmp+"api", alert.Alert{Kind: alert.Conflicted, Text: "#9 conflicts with base"})
 	m.rebuild()
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	if out := m.View(); !strings.Contains(out, "#9 conflicts with base") {
 		t.Fatalf("the detail view does not say what happened:\n%s", out)
@@ -2204,14 +2224,14 @@ func TestFailingCheckNamesInDetail(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{
+	withPR(m, tmp+"api", gh.PR{
 		Number: 3, State: "OPEN", Checks: gh.ChecksFail,
 		Notable: []gh.Check{
 			{Name: "test (ubuntu-latest)", State: gh.ChecksFail},
 			{Name: "lint", State: gh.ChecksPending},
 		},
 	})
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	out := m.View()
 	for _, want := range []string{"test (ubuntu-latest)", "lint"} {
@@ -2228,7 +2248,7 @@ func TestClickingAPRLineOpensIt(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{
+	withPR(m, tmp+"api", gh.PR{
 		Number: 4, State: "OPEN", Checks: gh.ChecksFail,
 		URL:   "https://github.com/o/r/pull/4",
 		Title: "Fix the thing",
@@ -2236,7 +2256,7 @@ func TestClickingAPRLineOpensIt(t *testing.T) {
 			{Name: "test", State: gh.ChecksFail, URL: "https://github.com/o/r/actions/runs/9"},
 		},
 	})
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	_ = m.View() // regions are recorded during render
 
 	if len(m.links) == 0 {
@@ -2276,8 +2296,8 @@ func TestClickingElsewhereDoesNotOpenAnything(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{Number: 4, State: "OPEN", URL: "https://github.com/o/r/pull/4"})
-	selectSpace(t, m, "/tmp/api")
+	withPR(m, tmp+"api", gh.PR{Number: 4, State: "OPEN", URL: "https://github.com/o/r/pull/4"})
+	selectSpace(t, m, tmp+"api")
 	_ = m.View()
 
 	// The left-hand list, well away from the detail pane.
@@ -2293,8 +2313,8 @@ func TestLinkRegionsResetEachFrame(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 24
 	send(t, m, liveWorkspaces())
-	withPR(m, "/tmp/api", gh.PR{Number: 4, State: "OPEN", URL: "https://github.com/o/r/pull/4"})
-	selectSpace(t, m, "/tmp/api")
+	withPR(m, tmp+"api", gh.PR{Number: 4, State: "OPEN", URL: "https://github.com/o/r/pull/4"})
+	selectSpace(t, m, tmp+"api")
 
 	_ = m.View()
 	first := len(m.links)
@@ -2307,11 +2327,11 @@ func TestLinkRegionsResetEachFrame(t *testing.T) {
 func TestStatusFilterNarrowsEveryView(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting; web stays in Todo
 
 	// Stand on the Waiting group and focus it.
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	m.cursor-- // the group header above the row
 	send(t, m, key("F"))
 
@@ -2319,13 +2339,13 @@ func TestStatusFilterNarrowsEveryView(t *testing.T) {
 		t.Fatalf("statusFilter = %q, want waiting", m.statusFilter)
 	}
 	rows := spaceRows(m)
-	if len(rows) != 1 || rows[0].Key != "/tmp/api" {
+	if len(rows) != 1 || rows[0].Key != tmp+"api" {
 		t.Fatalf("list shows %+v, want only the Waiting space", rows)
 	}
 
 	// The table reads the same filter.
 	send(t, m, key("K"))
-	if len(m.flat) != 1 || m.flat[0].Key != "/tmp/api" {
+	if len(m.flat) != 1 || m.flat[0].Key != tmp+"api" {
 		t.Fatalf("table shows %+v", m.flat)
 	}
 
@@ -2375,7 +2395,7 @@ func TestEscReleasesTheStatusFilterBeforeQuitting(t *testing.T) {
 func TestStatusFilterLandsTheCursor(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3")) // Waiting
 
 	// Stand on Todo's header and filter to it.
@@ -2390,11 +2410,11 @@ func TestStatusFilterLandsTheCursor(t *testing.T) {
 func TestReorderFollowsBoardOrder(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, workspacesMsg{
-		{ID: "w1", Label: "api", Cwd: "/tmp/api"},
-		{ID: "w2", Label: "web", Cwd: "/tmp/web"},
+		{ID: "w1", Label: "api", Cwd: tmp + "api"},
+		{ID: "w2", Label: "web", Cwd: tmp + "web"},
 	})
 	// web to Waiting, api left in Todo: the board shows api above web.
-	selectSpace(t, m, "/tmp/web")
+	selectSpace(t, m, tmp+"web")
 	send(t, m, key("3"))
 
 	var order []string
@@ -2422,21 +2442,21 @@ func TestReorderWithNoLiveSpacesSaysSo(t *testing.T) {
 
 func TestBranchMapSkipsDetachedAndEmpty(t *testing.T) {
 	got := branchMap([]herdr.Worktree{
-		{Branch: "main", Path: "/tmp/repo"},
-		{Branch: "demo", Path: "/tmp/repo-demo", IsLinked: true},
-		{Branch: "abc123", Path: "/tmp/detached", IsDetached: true},
-		{Branch: "", Path: "/tmp/bare"},
+		{Branch: "main", Path: tmp + "repo"},
+		{Branch: "demo", Path: tmp + "repo-demo", IsLinked: true},
+		{Branch: "abc123", Path: tmp + "detached", IsDetached: true},
+		{Branch: "", Path: tmp + "bare"},
 	})
 
-	if got["/tmp/repo"] != "main" || got["/tmp/repo-demo"] != "demo" {
+	if got[tmp+"repo"] != "main" || got[tmp+"repo-demo"] != "demo" {
 		t.Fatalf("branches = %+v", got)
 	}
 	// A detached HEAD has a commit, not a branch; a bare SHA in a branch
 	// column reads as a bug.
-	if _, ok := got["/tmp/detached"]; ok {
+	if _, ok := got[tmp+"detached"]; ok {
 		t.Fatal("a detached checkout was given a branch")
 	}
-	if _, ok := got["/tmp/bare"]; ok {
+	if _, ok := got[tmp+"bare"]; ok {
 		t.Fatal("a checkout with no branch was included")
 	}
 }
@@ -2452,7 +2472,7 @@ func TestBranchShowsInDetailAndTable(t *testing.T) {
 		t.Fatal("the branch column took space with no branches")
 	}
 
-	m.branches["/tmp/api"] = "feature/thing"
+	m.branches[tmp+"api"] = "feature/thing"
 	m.rebuild()
 
 	if m.tableWidths().branch == 0 {
@@ -2465,7 +2485,7 @@ func TestBranchShowsInDetailAndTable(t *testing.T) {
 	// And the detail pane names it too.
 	send(t, m, key("K"))
 	send(t, m, key("K")) // back to the list
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 	if out := m.View(); !strings.Contains(out, "feature/thing") {
 		t.Fatalf("the detail pane does not show the branch:\n%s", out)
 	}
@@ -2475,11 +2495,11 @@ func TestBranchShowsInDetailAndTable(t *testing.T) {
 func TestBranchIsPerSpace(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	m.branches["/tmp/api"] = "main"
+	m.branches[tmp+"api"] = "main"
 	m.rebuild()
 
-	if m.branchFor("/tmp/web") != "" {
-		t.Fatalf("web borrowed a branch: %q", m.branchFor("/tmp/web"))
+	if m.branchFor(tmp+"web") != "" {
+		t.Fatalf("web borrowed a branch: %q", m.branchFor(tmp+"web"))
 	}
 }
 
@@ -2600,7 +2620,7 @@ func TestNarrowRowsKeepTheNameWhenNothingElseFits(t *testing.T) {
 	m.width = 18
 	send(t, m, liveWorkspaces())
 
-	if got := narrowRowFor(t, m, "/tmp/api"); !strings.Contains(got, "api") {
+	if got := narrowRowFor(t, m, tmp+"api"); !strings.Contains(got, "api") {
 		t.Fatalf("narrow row dropped the name: %q", got)
 	}
 }
@@ -2611,11 +2631,11 @@ func TestNarrowRowsKeepTheNameWhenNothingElseFits(t *testing.T) {
 func TestNarrowRowsShowTheNoteBeforeTheBranch(t *testing.T) {
 	m := newTestSidebarModel(t)
 	send(t, m, liveWorkspaces())
-	m.branches["/tmp/api"] = "feature-x"
-	m.board.SetNote("/tmp/api", "waiting on review")
+	m.branches[tmp+"api"] = "feature-x"
+	m.board.SetNote(tmp+"api", "waiting on review")
 	m.rebuild()
 
-	got := narrowRowFor(t, m, "/tmp/api")
+	got := narrowRowFor(t, m, tmp+"api")
 	if !strings.Contains(got, "waiting on review") {
 		t.Fatalf("narrow row dropped the note: %q", got)
 	}
@@ -2629,10 +2649,10 @@ func TestNarrowRowsShowTheNoteBeforeTheBranch(t *testing.T) {
 func TestNarrowRowsFallBackToTheBranch(t *testing.T) {
 	m := newTestSidebarModel(t)
 	send(t, m, liveWorkspaces())
-	m.branches["/tmp/api"] = "feature-x"
+	m.branches[tmp+"api"] = "feature-x"
 	m.rebuild()
 
-	if got := narrowRowFor(t, m, "/tmp/api"); !strings.Contains(got, "feature-x") {
+	if got := narrowRowFor(t, m, tmp+"api"); !strings.Contains(got, "feature-x") {
 		t.Fatalf("narrow row should show the branch when there is no note: %q", got)
 	}
 }
@@ -2643,20 +2663,20 @@ func TestNarrowRowsDropThePullRequestBeforeTheName(t *testing.T) {
 	wide := newTestSidebarModel(t)
 	wide.width = 60
 	send(t, wide, liveWorkspaces())
-	wide.prCache.Put("/tmp/api", gh.PR{Number: 123, State: "OPEN"})
+	wide.prCache.Put(tmp+"api", gh.PR{Number: 123, State: "OPEN"})
 	wide.rebuild()
 
-	if got := narrowRowFor(t, wide, "/tmp/api"); !strings.Contains(got, "#123") {
+	if got := narrowRowFor(t, wide, tmp+"api"); !strings.Contains(got, "#123") {
 		t.Fatalf("a wide dock has room for the PR: %q", got)
 	}
 
 	narrow := newTestSidebarModel(t)
 	narrow.width = 20
 	send(t, narrow, liveWorkspaces())
-	narrow.prCache.Put("/tmp/api", gh.PR{Number: 123, State: "OPEN"})
+	narrow.prCache.Put(tmp+"api", gh.PR{Number: 123, State: "OPEN"})
 	narrow.rebuild()
 
-	got := narrowRowFor(t, narrow, "/tmp/api")
+	got := narrowRowFor(t, narrow, tmp+"api")
 	if strings.Contains(got, "#123") {
 		t.Fatalf("a narrow dock should drop the PR: %q", got)
 	}
@@ -2709,7 +2729,7 @@ func TestSidebarClickLandsOnTheRowUnderThePointer(t *testing.T) {
 	m := newTestSidebarModel(t)
 	send(t, m, liveWorkspaces())
 
-	want := rowIndexOf(t, m, "/tmp/web")
+	want := rowIndexOf(t, m, tmp+"web")
 	send(t, m, click(4, want-m.offset))
 
 	if m.cursor != want {
@@ -2741,7 +2761,7 @@ func TestWheelScrollsWithoutMovingTheCursor(t *testing.T) {
 		many = append(many, herdr.Workspace{
 			ID:    fmt.Sprintf("x%d", i),
 			Label: fmt.Sprintf("s%d", i),
-			Cwd:   fmt.Sprintf("/tmp/s%d", i),
+			Cwd:   fmt.Sprintf(tmp+"s%d", i),
 		})
 	}
 	send(t, m, many)
@@ -2806,7 +2826,7 @@ func TestSidebarClickOnASpaceGoesThere(t *testing.T) {
 	m := newTestSidebarModel(t)
 	send(t, m, liveWorkspaces())
 
-	row := rowIndexOf(t, m, "/tmp/web")
+	row := rowIndexOf(t, m, tmp+"web")
 	send(t, m, click(4, row-m.offset))
 
 	if m.cursor != row {
@@ -2842,7 +2862,7 @@ func TestPopupNeedsASecondClickToJump(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
 
-	row := rowIndexOf(t, m, "/tmp/web")
+	row := rowIndexOf(t, m, tmp+"web")
 	send(t, m, click(4, row+m.firstRow()-m.offset))
 
 	if m.cursor != row {
@@ -2866,7 +2886,7 @@ func TestBoardClosesAfterAJump(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.m(t)
 			send(t, m, liveWorkspaces())
-			selectSpace(t, m, "/tmp/web")
+			selectSpace(t, m, tmp+"web")
 
 			m.openSelected()
 

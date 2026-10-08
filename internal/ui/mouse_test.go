@@ -28,7 +28,7 @@ func findZone(t *testing.T, m *Model, match func(zone) bool) zone {
 func TestPickerOpensInsideTheCard(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 
 	send(t, m, key("s"))
 	out := m.View()
@@ -42,7 +42,7 @@ func TestPickerOpensInsideTheCard(t *testing.T) {
 	send(t, m, key("l")) // -> Waiting
 	send(t, m, key("h")) // -> In Progress
 	send(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := m.board.Entries[store.Key("/tmp/"+target)].Status; got != "in_progress" {
+	if got := m.board.Entries[store.Key(tmp+target)].Status; got != "in_progress" {
 		t.Fatalf("status is %q, want in_progress", got)
 	}
 	if m.mode != modeNormal {
@@ -54,12 +54,12 @@ func TestPickerOpensInsideTheCard(t *testing.T) {
 func TestClickingAChoiceSetsIt(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 	send(t, m, key("s"))
 
 	z := findZone(t, m, func(z zone) bool { return z.kind == zoneStatus && z.status == 2 })
 	send(t, m, click(z.x0+1, z.y))
-	if got := m.board.Entries[store.Key("/tmp/"+target)].Status; got != "waiting" {
+	if got := m.board.Entries[store.Key(tmp+target)].Status; got != "waiting" {
 		t.Fatalf("status is %q, want waiting", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestClickingAChoiceSetsIt(t *testing.T) {
 func TestClickingACardSelectsIt(t *testing.T) {
 	m := kanbanBoard(t)
 	names := labelsIn(m, "todo")
-	selectSpace(t, m, "/tmp/"+names[0])
+	selectSpace(t, m, tmp+names[0])
 
 	z := findZone(t, m, func(z zone) bool { return z.kind == zoneCard && z.row == 2 })
 	send(t, m, click(z.x0+1, z.y))
@@ -81,7 +81,7 @@ func TestClickingACardSelectsIt(t *testing.T) {
 // it closes it.
 func TestFooterButtonsAndModalClose(t *testing.T) {
 	m := kanbanBoard(t)
-	selectSpace(t, m, "/tmp/"+labelsIn(m, "todo")[0])
+	selectSpace(t, m, tmp+labelsIn(m, "todo")[0])
 
 	z := findZone(t, m, func(z zone) bool { return z.kind == zoneButton && z.key == "d" })
 	if z.y != linesIn(m.View()) {
@@ -103,7 +103,7 @@ func TestFooterButtonsAndModalClose(t *testing.T) {
 func TestPickerInsideTheDetailModal(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
+	selectSpace(t, m, tmp+target)
 	send(t, m, key("d"))
 	send(t, m, key("s"))
 	if out := m.View(); m.mode != modeStatusPick || !strings.Contains(out, "set status:") {
@@ -111,7 +111,7 @@ func TestPickerInsideTheDetailModal(t *testing.T) {
 	}
 	z := findZone(t, m, func(z zone) bool { return z.kind == zoneStatus && z.status == 3 })
 	send(t, m, click(z.x0+1, z.y))
-	if got := m.board.Entries[store.Key("/tmp/"+target)].Status; got != "done" {
+	if got := m.board.Entries[store.Key(tmp+target)].Status; got != "done" {
 		t.Fatalf("status is %q, want done", got)
 	}
 	if m.mode != modeDetail {

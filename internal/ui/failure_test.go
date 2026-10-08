@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/ezemacchi/ekanban/internal/gh"
 )
 
@@ -22,6 +24,27 @@ func failingPR() gh.PR {
 	}
 }
 
+// failureFrom runs cmd, and each command of a batch, for the composed message:
+// gf answers with the fetch batched beside the spinner.
+func failureFrom(t *testing.T, cmd tea.Cmd) failureFetchedMsg {
+	t.Helper()
+	switch msg := cmd().(type) {
+	case failureFetchedMsg:
+		return msg
+	case tea.BatchMsg:
+		for _, c := range msg {
+			if c == nil {
+				continue
+			}
+			if got, ok := c().(failureFetchedMsg); ok {
+				return got
+			}
+		}
+	}
+	t.Fatal("gf did not compose a message")
+	return failureFetchedMsg{}
+}
+
 // The message carries the error itself, not a link to go and find it. That is
 // the whole difference between this and pressing gp.
 func TestTheFailureMessageCarriesTheLog(t *testing.T) {
@@ -32,17 +55,14 @@ func TestTheFailureMessageCarriesTheLog(t *testing.T) {
 		},
 	}
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
-	withPR(m, "/tmp/api", failingPR())
+	selectSpace(t, m, tmp+"api")
+	withPR(m, tmp+"api", failingPR())
 
 	cmd := m.sendFailure()
 	if cmd == nil {
 		t.Fatal("gf did nothing on a failing PR")
 	}
-	msg, ok := cmd().(failureFetchedMsg)
-	if !ok {
-		t.Fatalf("got %T, want a composed message", cmd())
-	}
+	msg := failureFrom(t, cmd)
 
 	for _, want := range []string{
 		"#123",            // which PR
@@ -66,8 +86,8 @@ func TestAFailureWithNoLogStillSends(t *testing.T) {
 	m := newTestModel(t)
 	m.gh = gh.New()
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
-	withPR(m, "/tmp/api", gh.PR{
+	selectSpace(t, m, tmp+"api")
+	withPR(m, tmp+"api", gh.PR{
 		Number: 7, State: "OPEN", Checks: gh.ChecksFail,
 		Notable: []gh.Check{{Name: "ci/circleci", State: gh.ChecksFail, URL: "https://circleci.com/gh/o/r/9"}},
 	})
@@ -76,10 +96,7 @@ func TestAFailureWithNoLogStillSends(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("gf did nothing")
 	}
-	msg, ok := cmd().(failureFetchedMsg)
-	if !ok {
-		t.Fatalf("got %T, want a composed message", cmd())
-	}
+	msg := failureFrom(t, cmd)
 	if !strings.Contains(msg.text, "ci/circleci") || !strings.Contains(msg.text, "circleci.com") {
 		t.Fatalf("the message lost the check it is about:\n%s", msg.text)
 	}
@@ -90,8 +107,8 @@ func TestAFailureWithNoLogStillSends(t *testing.T) {
 func TestGFOnAGreenPRExplainsItself(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
-	withPR(m, "/tmp/api", gh.PR{Number: 5, State: "OPEN", Checks: gh.ChecksPass})
+	selectSpace(t, m, tmp+"api")
+	withPR(m, tmp+"api", gh.PR{Number: 5, State: "OPEN", Checks: gh.ChecksPass})
 
 	if cmd := m.sendFailure(); cmd != nil {
 		t.Fatal("gf queued work for a passing PR")
@@ -104,7 +121,7 @@ func TestGFOnAGreenPRExplainsItself(t *testing.T) {
 func TestGFWithoutAPRSaysSo(t *testing.T) {
 	m := newTestModel(t)
 	send(t, m, liveWorkspaces())
-	selectSpace(t, m, "/tmp/api")
+	selectSpace(t, m, tmp+"api")
 
 	if cmd := m.sendFailure(); cmd != nil {
 		t.Fatal("gf queued work for a space with no PR")
@@ -120,8 +137,8 @@ func TestTheChordReachesTheFailurePath(t *testing.T) {
 	for _, mode := range []mode{modeNormal, modeDetail} {
 		m := newTestModel(t)
 		send(t, m, liveWorkspaces())
-		selectSpace(t, m, "/tmp/api")
-		withPR(m, "/tmp/api", gh.PR{Number: 5, State: "OPEN", Checks: gh.ChecksPass})
+		selectSpace(t, m, tmp+"api")
+		withPR(m, tmp+"api", gh.PR{Number: 5, State: "OPEN", Checks: gh.ChecksPass})
 		m.mode = mode
 
 		m.Update(key("g"))

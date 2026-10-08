@@ -117,7 +117,7 @@ func TestOnlyANewSpaceIsWorkedUp(t *testing.T) {
 	settled := len(f.Requests())
 
 	opened := append(liveWorkspaces(), herdr.Workspace{
-		ID: "w3", Label: "docs", Cwd: "/tmp/docs", PaneIDs: []string{"w3:p1"},
+		ID: "w3", Label: "docs", Cwd: tmp + "docs", PaneIDs: []string{"w3:p1"},
 	})
 	pump(t, m, opened)
 
@@ -132,7 +132,7 @@ func TestOnlyANewSpaceIsWorkedUp(t *testing.T) {
 			if !ok {
 				continue
 			}
-			if value != "w3" && value != "w3:p1" && value != "/tmp/docs" {
+			if value != "w3" && value != "w3:p1" && value != tmp+"docs" {
 				t.Fatalf("%s asked about %s = %q, which is not the new space",
 					req.Method, field, value)
 			}
@@ -146,8 +146,8 @@ func TestOnlyANewSpaceIsWorkedUp(t *testing.T) {
 func TestThePanesAreNeverRead(t *testing.T) {
 	m, f := wiredModel(t)
 	pump(t, m, workspacesMsg{
-		{ID: "w1", Label: "api", Cwd: "/tmp/api", PaneIDs: []string{"w1:p1", "w1:p2"}},
-		{ID: "w2", Label: "web", Cwd: "/tmp/web", PaneIDs: []string{"w2:p1"}},
+		{ID: "w1", Label: "api", Cwd: tmp + "api", PaneIDs: []string{"w1:p1", "w1:p2"}},
+		{ID: "w2", Label: "web", Cwd: tmp + "web", PaneIDs: []string{"w2:p1"}},
 	})
 
 	// A forced round, which is what `r` does, on a board with no PRs found yet
@@ -177,8 +177,8 @@ func TestAKnownPRIsLookedUpByURL(t *testing.T) {
 		},
 	}
 
-	withPR(m, "/tmp/api", gh.PR{Number: 4, State: "OPEN", URL: "https://example.test/4"})
-	withPR(m, "/tmp/web", gh.PR{Number: 9, State: "MERGED", URL: "https://example.test/9"})
+	withPR(m, tmp+"api", gh.PR{Number: 4, State: "OPEN", URL: "https://example.test/4"})
+	withPR(m, tmp+"web", gh.PR{Number: 9, State: "MERGED", URL: "https://example.test/9"})
 	for _, msg := range drainCmd(m.loadPRsNow()) {
 		pump(t, m, msg)
 	}
