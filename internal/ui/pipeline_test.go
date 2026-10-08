@@ -67,6 +67,34 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 	}
 }
 
+// A ticket whose workspace was closed stays on the board, dimmed and marked,
+// while a closed checkout that holds no ticket does not appear.
+func TestClosedWorktreeStaysOnTheBoard(t *testing.T) {
+	m := newTestModel(t)
+	m.SetPipeline(pipeline.New("", pipeline.Settings{}, nil))
+	ticketDir, plainDir := t.TempDir(), t.TempDir()
+	m.branches = map[string]string{store.Key(ticketDir): "feat/ABC-2-thing", store.Key(plainDir): "main"}
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{
+		store.Key(ticketDir): {Stage: pipeline.OnReview, Key: "ABC-2", PR: 7},
+		store.Key(plainDir):  {},
+	}})
+	got := m.groups[pipeline.OnReview]
+	if len(got) != 1 || got[0].Key != store.Key(ticketDir) || got[0].Live {
+		t.Fatalf("Reviewing holds %+v, want the closed ticket worktree", got)
+	}
+	for _, st := range m.board.Statuses {
+		for _, sp := range m.groups[st.ID] {
+			if sp.Key == store.Key(plainDir) {
+				t.Fatalf("a closed checkout with no ticket is on the board, in %s", st.ID)
+			}
+		}
+	}
+	m.width = 200
+	if out := m.View(); !strings.Contains(out, "workspace closed") {
+		t.Fatalf("the closed worktree is not marked:\n%s", out)
+	}
+}
+
 // A column renamed in config.toml shows its new name, and the messages that
 // name the ready_qa column follow it.
 func TestConfiguredColumnNamesShow(t *testing.T) {

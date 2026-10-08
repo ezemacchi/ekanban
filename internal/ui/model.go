@@ -500,6 +500,14 @@ func (m *Model) rebuild() {
 		}
 	}
 
+	open := map[string]bool{}
+	for key := range spaces {
+		open[key] = true
+	}
+	for _, key := range m.closedWorktrees(open) {
+		spaces[key] = &space{Key: key}
+	}
+
 	for key, entry := range m.board.Entries {
 		sp, ok := spaces[key]
 		if !ok {

@@ -44,6 +44,7 @@ const (
 	PullReq   = "\uf407"
 	Wifi      = "\uf1eb" // partial data, offline source
 	Archive   = "\uf187"
+	Pause     = "\uf04c" // workspace closed
 	PillLeft  = "\ue0b6" // rounded ends of a title pill
 	PillRight = "\ue0b4"
 )

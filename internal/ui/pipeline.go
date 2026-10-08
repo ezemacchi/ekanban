@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -59,6 +60,28 @@ func (m *Model) SetPipeline(src *pipeline.Source) {
 
 func (m *Model) pipelineOn() bool { return m.pipe != nil }
 
+// closedWorktrees are the repository's checkouts with no workspace open, in
+// pipeline mode: a ticket does not leave the board because its workspace was
+// closed. Herdr's worktree list (branches) knows every checkout; live is the
+// set already on the board.
+func (m *Model) closedWorktrees(open map[string]bool) []string {
+	if m.pipe == nil {
+		return nil
+	}
+	var out []string
+	for key := range m.branches {
+		if open[key] || !m.inScope(key) {
+			continue
+		}
+		if _, err := os.Stat(key); err != nil {
+			continue // pruned since Herdr listed it
+		}
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
 type pipelineMsg struct {
 	infos map[string]pipeline.Info
 	at    time.Time
@@ -81,9 +104,18 @@ func (m *Model) loadPipeline(force bool) tea.Cmd {
 	}
 	refresh := force || time.Since(m.pipeAt) >= pipelineEvery
 	keys := map[string]int{}
+	open := map[string]bool{}
 	for _, ws := range m.live {
 		key := store.Key(ws.Cwd)
 		if key != "" && m.inScope(key) {
+			keys[key] = m.board.Entries[key].PR
+			open[key] = true
+		}
+	}
+	// A closed worktree has no agents to react to: it is classified on the
+	// periodic refresh, or the first time it is seen.
+	for _, key := range m.closedWorktrees(open) {
+		if _, seen := m.pipeInfo[key]; refresh || !seen {
 			keys[key] = m.board.Entries[key].PR
 		}
 	}
@@ -145,10 +177,11 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 	if e, ok := m.board.Entries[sp.Key]; ok && e.Accepted != nil {
 		return "", false
 	}
-	if !sp.Live {
+	info, ok := m.pipeInfo[sp.Key]
+	if !sp.Live && (!ok || info.Key == "") {
+		// A closed worktree shows once it is known to hold a ticket.
 		return "", false
 	}
-	info, ok := m.pipeInfo[sp.Key]
 	if !ok {
 		// Not classified yet: show it rather than flicker it in later.
 		return pipeline.ToDo, true
@@ -166,6 +199,11 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" working it out", width))}
 	}
 	var lines []string
+	if !sp.Live {
+		// No workspace, so no agents: waiting and lost do not apply.
+		info.Waiting, info.Lost = false, false
+		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Pause, "workspace closed Â· "+m.hintKey("jump")+" reopens"), width)))
+	}
 	if info.Waiting {
 		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "asking you something"), width)))
 	}
