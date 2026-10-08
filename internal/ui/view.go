@@ -44,7 +44,13 @@ func (m *Model) viewFrame() string {
 	case modeStatusPick:
 		return m.viewPicker()
 	case modeDetail:
-		return m.viewDetailModal()
+		base := m.viewKanbanBoard()
+		if m.layout == layoutTable {
+			base = m.viewTable()
+		}
+		// The board's own link regions sit under the box; only the box's count.
+		m.resetLinks()
+		return m.viewDetailModal(base)
 	}
 
 	switch m.layout {
@@ -236,7 +242,7 @@ func (m *Model) renderRow(i int) string {
 			arrow = "▸"
 		}
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color(r.status.Color)).Bold(true)
-		line := fmt.Sprintf("%s %s", arrow, r.status.Label)
+		line := fmt.Sprintf("%s %s", arrow, m.statusLabel(r.status))
 		out := " " + style.Render(line) + dimStyle.Render(fmt.Sprintf(" (%d)", r.count))
 		if selected {
 			return cursorStyle.Render("❯") + out[1:]
@@ -255,7 +261,7 @@ func (m *Model) renderRow(i int) string {
 		prefix = cursorStyle.Render(" ❯ ")
 	}
 
-	name := sp.Label
+	name := m.spaceLabel(sp)
 	if b := m.bellFor(sp.Key); b != "" {
 		name = bellGlyph + " " + name
 	}
@@ -332,7 +338,7 @@ func (m *Model) renderNarrowRow(i int) string {
 		if selected {
 			marker = cursorStyle
 		}
-		head := " " + marker.Render(arrow) + " " + style.Render(r.status.Label)
+		head := " " + marker.Render(arrow) + " " + style.Render(m.statusLabel(r.status))
 		count := dimStyle.Render(fmt.Sprintf("%d", r.count)) + narrowMargin
 		return truncateStyled(joinEnds(head, count, width), width)
 	}

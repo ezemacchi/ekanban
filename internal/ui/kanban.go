@@ -104,7 +104,7 @@ func (m *Model) renderColumn(col, width, height int) []string {
 
 	headStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Bold(true)
 	lines := []string{
-		headStyle.Render(truncate(st.Label, inner-4)) + dimStyle.Render(fmt.Sprintf(" %d", len(group))),
+		headStyle.Render(truncate(m.statusLabel(st), inner-4)) + dimStyle.Render(fmt.Sprintf(" %d", len(group))),
 		dimStyle.Render(strings.Repeat("─", inner)),
 	}
 
@@ -146,7 +146,7 @@ func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 		marker = cursorStyle.Render("❯ ")
 	}
 
-	label := sp.Label
+	label := m.spaceLabel(sp)
 	if m.hasBell(sp.Key) {
 		label = bellGlyph + " " + label
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The detail view exists because a row can only show a truncated note. In the
@@ -95,19 +96,30 @@ func (m *Model) detailLines(sp *space, width int) []detailLine {
 	}
 
 	lines := plain(name, dimStyle.Render(strings.Repeat("─", width)))
+	return append(lines, m.detailBody(sp, width)...)
+}
 
+// detailBody is the detail without the name: status, note, alerts, pull
+// request and machine facts. The modal shows the name in its title instead.
+func (m *Model) detailBody(sp *space, width int) []detailLine {
+	var lines []detailLine
 	if st, ok := m.board.StatusByID(sp.StatusID); ok {
-		lines = append(lines, plain(lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Render(truncate(st.Label, width)))...)
+		lines = append(lines, plain(lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Bold(true).Render(truncate(m.statusLabel(st), width)))...)
 	}
 	lines = append(lines, plain("")...)
 
 	// The note is the reason this view exists, so it gets the room it needs.
 	if sp.Note != "" {
-		for _, line := range wrap(sp.Note, width) {
-			lines = append(lines, plain(noteStyle.Render(line))...)
+		noteWidth := width - lipgloss.Width(m.glyph(noteGlyph, ""))
+		for i, line := range wrap(sp.Note, noteWidth) {
+			lead := m.glyph(noteGlyph, "")
+			if i > 0 {
+				lead = strings.Repeat(" ", lipgloss.Width(lead))
+			}
+			lines = append(lines, plain(noteStyle.Render(lead+line))...)
 		}
 	} else {
-		lines = append(lines, plain(dimStyle.Render(truncate("no note — press n to add one", width)))...)
+		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(noteGlyph, "no note — press n to add one"), width)))...)
 	}
 	lines = append(lines, plain("")...)
 
@@ -125,11 +137,15 @@ func (m *Model) detailLines(sp *space, width int) []detailLine {
 		lines = append(lines, plain("")...)
 	}
 
-	for _, line := range wrap(abbreviate(sp.Key), width) {
+	for _, line := range wrap(m.glyph(folderGlyph, abbreviate(sp.Key)), width) {
 		lines = append(lines, plain(dimStyle.Render(line))...)
 	}
 	if branch := m.branchFor(sp.Key); branch != "" {
-		lines = append(lines, plain(branchStyle.Render(truncate("⎇ "+branch, width)))...)
+		mark := "⎇ " + branch
+		if m.icons {
+			mark = worktreeGlyph + " " + branch
+		}
+		lines = append(lines, plain(branchStyle.Render(truncate(mark, width)))...)
 	}
 
 	where := "archived"
@@ -142,43 +158,104 @@ func (m *Model) detailLines(sp *space, width int) []detailLine {
 			where += " · " + sp.AgentStatus
 		}
 	}
-	lines = append(lines, plain(dimStyle.Render(truncate(where, width)))...)
+	lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(agentGlyphIcon, where), width)))...)
 
 	if !sp.UpdatedAt.IsZero() {
-		lines = append(lines, plain(dimStyle.Render(truncate("changed "+humanAge(sp.UpdatedAt), width)))...)
+		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(clockGlyph, "changed "+humanAge(sp.UpdatedAt)), width)))...)
 	}
 	return lines
 }
 
-// viewDetailModal is the kanban form: the same content, centred in a box.
-func (m *Model) viewDetailModal() string {
-	width := min(m.width-8, 54)
-	if width < detailPaneMin {
-		width = detailPaneMin
-	}
+// Bounds for the modal's content width. It takes what its widest line needs
+// between these, so a long note or branch is not wrapped into a narrow strip.
+const (
+	detailModalMin    = 40
+	detailModalMax    = 110
+	detailModalMargin = 8
+)
 
-	// lipgloss counts padding inside Width, so the content gets two fewer
-	// columns than the box -- otherwise the rule wraps onto a second line.
-	inner := width - 2
-	content := m.detailLines(m.selected(), inner)
-	body := strings.Join(texts(content), "\n")
-	body += "\n\n" + detailKeyStyle.Render(truncate("n note · s status · enter jump · esc close", inner))
+// viewDetailModal draws the selected space's detail in a box over the board,
+// which stays visible around it.
+func (m *Model) viewDetailModal(base string) string {
+	sp := m.selected()
+	maxInner := min(m.width-detailModalMargin, detailModalMax) - 4
+	if maxInner < detailModalMin {
+		maxInner = detailModalMin
+	}
+	keys := detailKeyStyle.Render("n note · s status · enter jump · esc close")
+
+	// Lay out at the widest allowed, then shrink to what the content uses and
+	// lay out again so wrapped lines fill the final width.
+	inner := lipgloss.Width(keys)
+	for _, l := range texts(m.modalContent(sp, maxInner)) {
+		inner = max(inner, lipgloss.Width(l))
+	}
+	inner = max(min(inner, maxInner), detailModalMin)
+	content := m.modalContent(sp, inner)
+
+	title := m.modalTitle(sp, inner)
+	body := title + "\n\n" + strings.Join(texts(content), "\n") + "\n\n" + truncate(keys, inner)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(lipgloss.Color("62")).
 		Padding(0, 1).
-		Width(width).
+		Width(inner + 2).
 		Render(body)
 
-	// Record where each line landed so a click can find its URL. The box is
-	// centred, and its border and padding sit inside that.
+	// Record where each line landed so a click can find its URL: past the
+	// border, the title and the blank line under it.
 	boxW, boxH := lipgloss.Width(box), lipgloss.Height(box)
 	originX := max0((m.width - boxW) / 2)
 	originY := max0((m.height - boxH) / 2)
-	m.trackLinks(content, originY+1, originX+2, originX+1+inner)
+	m.trackLinks(content, originY+3, originX+2, originX+2+inner)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	return overlay(base, box, originX, originY, m.width, m.height)
+}
+
+func (m *Model) modalContent(sp *space, width int) []detailLine {
+	if sp == nil {
+		return plain(dimStyle.Render("nothing selected"))
+	}
+	return m.detailBody(sp, width)
+}
+
+// modalTitle is the space's name. With icons on it sits in a pill whose
+// rounded ends are Nerd Font glyphs; without them, plain bold text.
+func (m *Model) modalTitle(sp *space, width int) string {
+	if sp == nil {
+		return titleStyle.Render("detail")
+	}
+	name := truncate(m.spaceLabel(sp), width-4)
+	if !m.icons {
+		return titleStyle.Render(name)
+	}
+	edge := lipgloss.NewStyle().Foreground(pillColor)
+	fill := lipgloss.NewStyle().Background(pillColor).Foreground(lipgloss.Color("231")).Bold(true)
+	return edge.Render(pillLeft) + fill.Render(" "+name+" ") + edge.Render(pillRight)
+}
+
+// overlay draws box over base with its top-left corner at x, y, keeping the
+// base visible on either side of each line it covers.
+func overlay(base, box string, x, y, width, height int) string {
+	lines := strings.Split(base, "\n")
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	for i, bl := range strings.Split(box, "\n") {
+		row := y + i
+		if row < 0 || row >= len(lines) {
+			continue
+		}
+		l := lines[row]
+		left := ansi.Truncate(l, x, "")
+		if gap := x - ansi.StringWidth(left); gap > 0 {
+			left += strings.Repeat(" ", gap)
+		}
+		right := ansi.TruncateLeft(l, x+ansi.StringWidth(bl), "")
+		lines[row] = left + "\x1b[0m" + bl + "\x1b[0m" + right
+	}
+	return strings.Join(lines, "\n")
 }
 
 func humanAge(t time.Time) string {

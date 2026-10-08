@@ -138,6 +138,10 @@ func run(args []string) error {
 	if sidebar {
 		model = ui.NewSidebar(client, board)
 	}
+	model.SetIcons(config.Load().Icons)
+	if cwd, err := os.Getwd(); err == nil {
+		model.SetScope(cwd)
+	}
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = prog.Run()
 	return err

@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/phin-tech/herdr-phin-board/internal/nav"
 	"github.com/phin-tech/herdr-phin-board/internal/store"
 )
 
@@ -369,7 +370,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveGrabbedAcross(delta)
 				return m, m.syncTokens()
 			}
-			m.col += delta
+			// Moving a grabbed card may land in an empty column (above);
+			// the cursor alone skips them.
+			m.col = nav.Step(m.col, delta, len(m.board.Statuses), m.columnCount)
 			m.rowInCol = 0
 			m.clampColumnCursor()
 			return m, nil

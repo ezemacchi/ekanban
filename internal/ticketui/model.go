@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phin-tech/herdr-phin-board/internal/herdr"
+	"github.com/phin-tech/herdr-phin-board/internal/nav"
 	"github.com/phin-tech/herdr-phin-board/internal/ticket"
 )
 
@@ -115,9 +116,9 @@ func (m *Model) key(k string) tea.Cmd {
 	case "q", "ctrl+c":
 		return tea.Quit
 	case "h", "left":
-		m.col--
+		m.stepColumn(-1)
 	case "l", "right":
-		m.col++
+		m.stepColumn(1)
 	case "j", "down":
 		m.row++
 	case "k", "up":
@@ -155,14 +156,17 @@ func (m *Model) cardsIn(col ticket.Column) []ticket.Card {
 	return out
 }
 
+func (m *Model) cardCount(col int) int { return len(m.cardsIn(ticket.Columns[col].Col)) }
+
+func (m *Model) stepColumn(dir int) {
+	m.col = nav.Step(m.col, dir, len(ticket.Columns), m.cardCount)
+	m.row = 0
+}
+
 func (m *Model) clamp() {
-	if m.col < 0 {
-		m.col = 0
-	}
-	if m.col >= len(ticket.Columns) {
-		m.col = len(ticket.Columns) - 1
-	}
-	n := len(m.cardsIn(ticket.Columns[m.col].Col))
+	// A refresh can empty the column under the cursor.
+	m.col = nav.Settle(m.col, len(ticket.Columns), m.cardCount)
+	n := m.cardCount(m.col)
 	if m.row >= n {
 		m.row = n - 1
 	}

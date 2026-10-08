@@ -204,6 +204,12 @@ type Model struct {
 	// sidebar renders for a narrow docked region: grouped list, no detail
 	// pane, and no layout switching. Set by the `sidebar` entrypoint.
 	sidebar bool
+	// icons draws Nerd Font glyphs; see the icons setting.
+	icons bool
+	// scope is the shared .git directory the board is limited to, or empty
+	// for every space; scopeOf caches each space's answer. See scope.go.
+	scope   string
+	scopeOf map[string]string
 }
 
 // New builds the initial model.
@@ -443,7 +449,7 @@ func (m *Model) rebuild() {
 		if sp.Label == "" {
 			sp.Label = baseName(sp.Key)
 		}
-		if m.matches(sp) {
+		if m.inScope(sp.Key) && m.matches(sp) {
 			list = append(list, sp)
 		}
 	}
@@ -559,6 +565,10 @@ func (m *Model) firstOccupiedColumn() (int, bool) {
 	return 0, false
 }
 
+func (m *Model) columnCount(col int) int { return len(m.columnSpaces(col)) }
+
+// clampColumnCursor only keeps the cursor in range: a number key may jump to
+// an empty status on purpose, and an empty column then selects nothing.
 func (m *Model) clampColumnCursor() {
 	if m.col >= len(m.board.Statuses) {
 		m.col = len(m.board.Statuses) - 1

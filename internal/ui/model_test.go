@@ -95,6 +95,9 @@ func spaceRows(m *Model) []*space {
 // layout actually reads.
 func selectSpace(t *testing.T, m *Model, key string) {
 	t.Helper()
+	// Fixtures name spaces by Unix path; the board keys them the way the store
+	// does, which on Windows adds a drive letter.
+	key = store.Key(key)
 	if m.layout == layoutKanban {
 		for col, st := range m.board.Statuses {
 			for i, sp := range m.groups[st.ID] {
@@ -767,22 +770,24 @@ func TestKanbanColumnNavigation(t *testing.T) {
 	m := kanbanBoard(t)
 	target := labelsIn(m, "todo")[0]
 	selectSpace(t, m, "/tmp/"+target)
-	send(t, m, key("3")) // Waiting is column index 2
+	send(t, m, key("3")) // retags the card to Waiting, column index 2
 
+	// h and l skip empty columns: In Progress sits empty between Todo and
+	// Waiting.
 	send(t, m, key("h"))
-	if m.col != 1 {
-		t.Fatalf("h moved to column %d, want 1", m.col)
+	if m.col != 0 {
+		t.Fatalf("h moved to column %d, want 0", m.col)
 	}
 	send(t, m, key("l"))
 	if m.col != 2 {
 		t.Fatalf("l moved to column %d, want 2", m.col)
 	}
-	// Columns stop at the edges rather than wrapping.
+	// Done is empty, so there is nothing further right and the cursor stays.
 	for i := 0; i < 10; i++ {
 		send(t, m, key("l"))
 	}
-	if m.col != len(m.board.Statuses)-1 {
-		t.Fatalf("column cursor escaped: %d", m.col)
+	if m.col != 2 {
+		t.Fatalf("l moved into an empty column: %d", m.col)
 	}
 }
 
@@ -989,12 +994,12 @@ func TestDetailPaneHiddenWhenNarrow(t *testing.T) {
 }
 
 // In kanban the columns already use the width, so detail is a modal instead.
-func TestKanbanDetailIsAModal(t *testing.T) {
+func TestKanbanDetailIsAModalOverTheBoard(t *testing.T) {
 	m := kanbanBoard(t)
-	m.width, m.height = 110, 24
+	m.width, m.height = 140, 30
 	target := labelsIn(m, "todo")[0]
-	selectSpace(t, m, "/tmp/"+target)
-	m.board.SetNote("/tmp/"+target, "modal-note-text")
+	long := "modal-note-text " + strings.Repeat("word ", 14) + "end"
+	m.board.SetNote(store.Key("/tmp/"+target), long)
 	m.rebuild()
 	selectSpace(t, m, "/tmp/"+target)
 
@@ -1007,11 +1012,16 @@ func TestKanbanDetailIsAModal(t *testing.T) {
 		t.Fatal("d did not open the modal")
 	}
 	out := m.View()
-	if !strings.Contains(out, "modal-note-text") {
-		t.Fatalf("modal is missing the note:\n%s", out)
-	}
 	if !strings.Contains(out, "╭") {
 		t.Fatalf("modal is not drawn as a box:\n%s", out)
+	}
+	if !strings.Contains(out, "In Progress") {
+		t.Fatalf("the board must stay visible around the modal:\n%s", out)
+	}
+	// The box takes the width its content needs: the whole note fits on one
+	// line instead of wrapping inside the old 54-column box.
+	if !strings.Contains(out, long) {
+		t.Fatalf("modal did not widen for the note:\n%s", out)
 	}
 
 	send(t, m, key("esc"))
