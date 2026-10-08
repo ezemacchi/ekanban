@@ -27,10 +27,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
-	"github.com/ezemacchi/herdr-phin-board/internal/team"
-	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/store"
+	"github.com/ezemacchi/ekanban/internal/team"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 // Column ids, also used as status ids on the board.
@@ -56,7 +56,7 @@ type Info struct {
 	Stage string
 	Key   string // Jira key, from the run directory or the branch
 	Title string // first line of the run's objective
-	// Phase is where the team is inside In Progress ("Implementer, vuelta 2").
+	// Phase is where the team is inside In Progress ("Implementer, round 2").
 	Phase   string
 	Waiting bool // an agent of the run is asking something
 	Lost    bool // a role was dispatched but has neither agent nor result
@@ -162,7 +162,7 @@ func (s *Source) Refresh(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
-		s.offline = "Jenkins no responde (¿VPN?)"
+		s.offline = "Jenkins is not answering (VPN?)"
 		return
 	}
 	s.offline = ""
@@ -302,7 +302,7 @@ func describeRun(info *Info, run *ticket.Run) {
 	if current != nil {
 		info.Phase = current.Role.Label
 		if current.Rounds > 1 {
-			info.Phase += ", vuelta " + strconv.Itoa(current.Rounds)
+			info.Phase += ", round " + strconv.Itoa(current.Rounds)
 		}
 	}
 }

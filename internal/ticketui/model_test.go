@@ -3,7 +3,7 @@ package ticketui
 import (
 	"testing"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 func boardWith(cols ...ticket.Column) *Model {

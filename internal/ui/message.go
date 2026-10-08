@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/herdr"
 )
 
 // `m` types a message into the agent running in the selected space, without

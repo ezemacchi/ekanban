@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
+	"github.com/ezemacchi/ekanban/internal/look"
 )
 
 var (
@@ -200,13 +200,13 @@ func (m *Model) viewFooter() string {
 	}
 
 	if m.pipelineOn() {
-		hint := "a aceptar (Ready for QA) · A archivo · d detalle · n nota · enter ir · r refrescar · ? ayuda"
+		hint := "a accept (Ready for QA) · A archive · d detail · n note · enter go · r refresh · ? help"
 		if m.status != "" {
 			hint = m.status
 		}
-		state := m.spinner.Frame() + " leyendo Jenkins y git"
+		state := m.spinner.Frame() + " reading Jenkins and git"
 		if !m.pipeAt.IsZero() {
-			state = "Jenkins y git leídos a las " + m.pipeAt.Local().Format("15:04")
+			state = "Jenkins and git read at " + m.pipeAt.Local().Format("15:04")
 			if m.pipeLoading {
 				state += " " + m.spinner.Frame()
 			}
@@ -604,9 +604,9 @@ func (m *Model) viewHelp() string {
 	lines := []string{titleStyle.Render(" Board"), ""}
 	if m.pipelineOn() {
 		lines = append(lines,
-			dimStyle.Render(indent+truncate("Las columnas salen de la corrida, Jenkins y git; no se mueven a mano.", room+keyCol)),
-			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("aceptar un ticket de Ready for QA: pasa al Archivo", room)),
-			indent+keyStyle.Render(pad("A", keyCol))+dimStyle.Render(truncate("Archivo de tickets aceptados (o Jira, p PR, u devolver, / buscar)", room)),
+			dimStyle.Render(indent+truncate("Columns come from the run, Jenkins and git; they are not moved by hand.", room+keyCol)),
+			indent+keyStyle.Render(pad("a", keyCol))+dimStyle.Render(truncate("accept a Ready for QA ticket: it moves to the Archive", room)),
+			indent+keyStyle.Render(pad("A", keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
 			"")
 	}
 	for _, r := range helpRows {

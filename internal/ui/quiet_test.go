@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdrtest"
+	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/herdrtest"
 )
 
 // Herdr emits workspace.updated on every agent status tick, and a busy session

@@ -126,7 +126,7 @@ func DefaultStatuses() []Status {
 }
 
 // PluginID must match herdr-plugin.toml, since Herdr keys plugin state by it.
-const PluginID = "phin-board"
+const PluginID = "ekanban"
 
 // Path returns the board file location.
 //

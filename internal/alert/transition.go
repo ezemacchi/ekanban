@@ -3,7 +3,7 @@ package alert
 import (
 	"fmt"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/gh"
 )
 
 // Transitions compares a PR against what was last known and returns what is

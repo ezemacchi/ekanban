@@ -12,13 +12,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/alert"
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
-	"github.com/ezemacchi/herdr-phin-board/internal/nav"
-	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/nav"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 type mode int

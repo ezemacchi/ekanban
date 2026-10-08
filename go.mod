@@ -1,4 +1,4 @@
-module github.com/ezemacchi/herdr-phin-board
+module github.com/ezemacchi/ekanban
 
 go 1.26.5
 

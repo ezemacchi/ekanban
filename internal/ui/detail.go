@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/links"
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
+	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/look"
 )
 
 // The detail view exists because a row can only show a truncated note. In the

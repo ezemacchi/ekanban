@@ -5,8 +5,8 @@
 # binary CI publishes, so the plugin installs on a machine without a toolchain.
 set -eu
 
-out="bin/herdr-phin-board"
-repo="ezemacchi/herdr-phin-board"
+out="bin/ekanban"
+repo="ezemacchi/ekanban"
 
 mkdir -p bin
 
@@ -16,8 +16,8 @@ if command -v go >/dev/null 2>&1; then
   version=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml 2>/dev/null || true)
   [ -n "$version" ] || version="dev"
   exec go build -trimpath \
-    -ldflags "-X github.com/ezemacchi/herdr-phin-board/internal/version.Version=${version}" \
-    -o "$out" ./cmd/herdr-phin-board
+    -ldflags "-X github.com/ezemacchi/ekanban/internal/version.Version=${version}" \
+    -o "$out" ./cmd/ekanban
 fi
 
 echo "go not found on PATH; downloading a prebuilt binary instead" >&2
@@ -40,7 +40,7 @@ case "$(uname -m)" in
     ;;
 esac
 
-name="herdr-phin-board-${os}-${arch}"
+name="ekanban-${os}-${arch}"
 # The rolling build is a prerelease, and /releases/latest/ skips those, so the
 # tag is named explicitly.
 base="https://github.com/${repo}/releases/download/latest"

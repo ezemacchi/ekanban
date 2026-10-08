@@ -1,8 +1,8 @@
 package ticketui
 
 import (
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
-	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
+	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 // columnGlyph marks the ticket board's columns. Role icons come from the team

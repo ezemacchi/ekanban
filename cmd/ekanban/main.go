@@ -16,17 +16,17 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/config"
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/links"
-	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
-	"github.com/ezemacchi/herdr-phin-board/internal/ticket"
-	"github.com/ezemacchi/herdr-phin-board/internal/ticketui"
-	"github.com/ezemacchi/herdr-phin-board/internal/ui"
-	"github.com/ezemacchi/herdr-phin-board/internal/version"
-	"github.com/ezemacchi/herdr-phin-board/internal/watch"
+	"github.com/ezemacchi/ekanban/internal/config"
+	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/store"
+	"github.com/ezemacchi/ekanban/internal/ticket"
+	"github.com/ezemacchi/ekanban/internal/ticketui"
+	"github.com/ezemacchi/ekanban/internal/ui"
+	"github.com/ezemacchi/ekanban/internal/version"
+	"github.com/ezemacchi/ekanban/internal/watch"
 )
 
 func main() {
@@ -268,7 +268,7 @@ func showConfig(args []string) error {
 	s := config.Load()
 	if _, err := os.Stat(s.Path); err != nil {
 		fmt.Printf("no config file at %s — using defaults\n", s.Path)
-		fmt.Println("create one with: herdr-phin-board config --init")
+		fmt.Println("create one with: ekanban config --init")
 	} else {
 		fmt.Printf("config: %s\n", s.Path)
 	}

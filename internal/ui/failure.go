@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/gh"
 )
 
 // `gf` hands a failing check to the space's agent: the check's name, the end of

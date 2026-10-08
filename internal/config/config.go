@@ -17,7 +17,7 @@ import (
 
 // PluginID must match herdr-plugin.toml, since Herdr keys the config directory
 // by it.
-const PluginID = "phin-board"
+const PluginID = "ekanban"
 
 // Config is the whole settings file.
 type Config struct {
@@ -153,8 +153,8 @@ func Load() Settings {
 	return s
 }
 
-// Example is the commented template written by `herdr-phin-board config --init`.
-const Example = `# herdr-phin-board settings.
+// Example is the commented template written by `ekanban config --init`.
+const Example = `# ekanban settings.
 #
 # Every value is optional; delete a line to go back to its default.
 

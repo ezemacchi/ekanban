@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/alert"
 )
 
 // A bell marks a space something happened to while you were not looking. It

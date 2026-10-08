@@ -2,20 +2,20 @@ package ui
 
 import (
 	"errors"
-	"github.com/ezemacchi/herdr-phin-board/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/alert"
 	"time"
 
 	"fmt"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/gh"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // loadTestBoard gives every UI test the same four statuses, rather than

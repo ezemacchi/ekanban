@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // pipelineBoard is a board in pipeline mode with api classified as a ticket
@@ -59,7 +59,7 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 			t.Fatalf("a line is %d cells wide on a %d-cell board: %q", w, m.width, line)
 		}
 	}
-	for _, want := range []string{"PR #5", "publicado en predev", "Ready for QA"} {
+	for _, want := range []string{"PR #5", "shipped to predev", "Ready for QA"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("board is missing %q:\n%s", want, out)
 		}
@@ -137,7 +137,7 @@ func TestAcceptMovesTicketToArchive(t *testing.T) {
 
 	send(t, m, key("A"))
 	out := m.View()
-	for _, want := range []string{"Archivo", "ABC-1", "Arreglar la grilla", "PR #5"} {
+	for _, want := range []string{"Archive", "ABC-1", "Arreglar la grilla", "PR #5"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("archive is missing %q:\n%s", want, out)
 		}

@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // statusGlyph is the global board's own icon set; the glyphs are in look.

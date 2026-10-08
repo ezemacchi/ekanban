@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
+	"github.com/ezemacchi/ekanban/internal/look"
 )
 
 // g is a chord prefix, vim style: gg jumps to the top, gp opens the pull

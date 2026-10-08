@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdrtest"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/herdrtest"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // version and config must work outside a Herdr session -- that is exactly where

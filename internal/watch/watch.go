@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/alert"
-	"github.com/ezemacchi/herdr-phin-board/internal/config"
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/config"
+	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // Interval is the default cadence, overridden by poll_interval in the config

@@ -9,7 +9,7 @@
 set -eu
 
 bin="${HERDR_BIN_PATH:-herdr}"
-plugin="${HERDR_PLUGIN_ID:-phin-board}"
+plugin="${HERDR_PLUGIN_ID:-ekanban}"
 
 # Whether this runtime has a dock is settled by asking it to dock, not by
 # probing for the command first. `herdr dock --help` on upstream prints the

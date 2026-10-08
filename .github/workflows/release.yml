@@ -3,7 +3,7 @@ name: release
 # Every push to main republishes a rolling "latest" release, so someone without
 # Go on their machine can still install the plugin. A v* tag cuts a permanent
 # release and stamps that version into the binary and the manifest, so
-# `herdr plugin list` and `herdr-phin-board version` cannot disagree.
+# `herdr plugin list` and `ekanban version` cannot disagree.
 on:
   push:
     branches: [main]
@@ -50,10 +50,10 @@ jobs:
           CGO_ENABLED: "0"
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          name="herdr-phin-board-${GOOS}-${GOARCH}"
+          name="ekanban-${GOOS}-${GOARCH}"
           go build -trimpath \
-            -ldflags "-s -w -X github.com/phin-tech/herdr-phin-board/internal/version.Version=${VERSION}" \
-            -o "dist/${name}" ./cmd/herdr-phin-board
+            -ldflags "-s -w -X github.com/phin-tech/ekanban/internal/version.Version=${VERSION}" \
+            -o "dist/${name}" ./cmd/ekanban
           (cd dist && shasum -a 256 "${name}" > "${name}.sha256")
 
       - uses: actions/upload-artifact@v4

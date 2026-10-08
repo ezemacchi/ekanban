@@ -1,6 +1,6 @@
-# herdr-phin-board
+# ekanban
 
-[![ci](https://github.com/ezemacchi/herdr-phin-board/actions/workflows/ci.yml/badge.svg)](https://github.com/ezemacchi/herdr-phin-board/actions/workflows/ci.yml)
+[![ci](https://github.com/ezemacchi/ekanban/actions/workflows/ci.yml/badge.svg)](https://github.com/ezemacchi/ekanban/actions/workflows/ci.yml)
 
 A [Herdr](https://herdr.dev) plugin: a status board over your spaces, in a popup,
 on a key.
@@ -17,7 +17,7 @@ machine.
  ▾ Todo (0)
  ▾ In Progress (2)
    dev-stream             ~/src/github.com/phin-tech/dev-stream                      ·working
-   herdr-phin-board       ~/src/github.com/ezemacchi/herdr-phin-board                   ·idle
+   ekanban       ~/src/github.com/ezemacchi/ekanban                   ·idle
  ▾ Waiting (2)
    🔔 docs-site           vendor SLA response, chased 2026-07-18                     ·blocked
  ❯ api-gateway            waiting on Dave re: API key                                   ·idle
@@ -39,7 +39,7 @@ room for:
  Board                                                                            5 live · archive hidden
    SPACE                ↓STATUS     NOTE                                              AGENT    CHANGED
    dev-stream           In Progress —                                                 idle     just now
-   herdr-phin-board     In Progress —                                                 working  2h ago
+   ekanban     In Progress —                                                 working  2h ago
  ❯ api-gateway          Waiting     waiting on Dave re: API key rotation — he's back  idle     10m ago
    docs-site            Waiting     vendor SLA response, chased 2026-07-18            blocked  1d ago
    billing              Done        —                                                 idle     3d ago
@@ -59,7 +59,7 @@ The **kanban** is columns, one per status:
  —                          dev-stream             ❯ api-gateway              billing
                             ·idle                    waiting on Dave re:      ·idle
                                                      API key rotation
-                            herdr-phin-board         ·idle
+                            ekanban         ·idle
                             ·working
                                                      docs-site
                                                      vendor SLA response,
@@ -203,7 +203,7 @@ looking, so it trickles.
 
 A lockfile means there is only ever one watcher, however many times you open the
 board, and it covers every space across every repo. Run it by hand with
-`herdr-phin-board watch` if you would rather.
+`ekanban watch` if you would rather.
 
 It follows the Herdr session that started it. If you run named sessions
 side by side, spaces in the other one are outside its view.
@@ -211,19 +211,19 @@ side by side, spaces in the other one are outside its view.
 ## Install
 
 ```sh
-herdr plugin install ezemacchi/herdr-phin-board
+herdr plugin install ezemacchi/ekanban
 ```
 
 That runs the build step, which compiles from source if Go is on your `PATH`
 and otherwise downloads the binary CI publishes, checking it against the
-published `.sha256`. Either way you end up with `bin/herdr-phin-board`.
+published `.sha256`. Either way you end up with `bin/ekanban`.
 
 For local development, point Herdr at a working tree instead — no build runs,
 so you compile it yourself:
 
 ```sh
-git clone https://github.com/ezemacchi/herdr-phin-board
-cd herdr-phin-board && go build -o bin/herdr-phin-board ./cmd/herdr-phin-board
+git clone https://github.com/ezemacchi/ekanban
+cd ekanban && go build -o bin/ekanban ./cmd/ekanban
 herdr plugin link .
 ```
 
@@ -233,7 +233,7 @@ Then bind a key in `~/.config/herdr/config.toml`:
 [[keys.command]]
 key = "prefix+d"
 type = "plugin_action"
-command = "phin-board.open"
+command = "ekanban.open"
 description = "Space board"
 ```
 
@@ -257,7 +257,7 @@ there would overwrite the layout the popup remembers.
 One action opens it on either runtime:
 
 ```sh
-herdr plugin action invoke dock --plugin phin-board
+herdr plugin action invoke dock --plugin ekanban
 ```
 
 or bind it, the same way as `open`:
@@ -266,7 +266,7 @@ or bind it, the same way as `open`:
 [[keys.command]]
 key = "prefix+D"
 type = "plugin_action"
-command = "phin-board.dock"
+command = "ekanban.dock"
 description = "Board on the right"
 ```
 
@@ -296,7 +296,7 @@ herdr pane resize --current --direction right --amount 0.25
 The popup entrypoint is unchanged:
 
 ```sh
-herdr plugin pane open --plugin phin-board --entrypoint phin-board
+herdr plugin pane open --plugin ekanban --entrypoint board
 ```
 
 ### What the narrow rows show
@@ -324,13 +324,13 @@ The narrow pane is declared twice, once for each runtime:
 id = "side"
 title = "Board"
 placement = "split"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" sidebar']
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/ekanban" sidebar']
 
 [[hoarder.panes]]
 id = "sidebar"
 title = "Board"
 placement = "sidebar-right"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" sidebar']
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/ekanban" sidebar']
 ```
 
 Both run the same `sidebar` entrypoint. The split is upstream's closest thing
@@ -386,11 +386,11 @@ Everything works without configuration. To change something, Herdr gives the
 plugin its own config directory, which survives reinstalls:
 
 ```sh
-herdr-phin-board config --init   # write a commented template
-herdr-phin-board config          # show what is in force, and from where
+ekanban config --init   # write a commented template
+ekanban config          # show what is in force, and from where
 ```
 
-That lands at `~/.config/herdr/plugins/config/phin-board/config.toml`:
+That lands at `~/.config/herdr/plugins/config/ekanban/config.toml`:
 
 ```toml
 # How often the background watcher asks GitHub about your pull requests.
@@ -517,13 +517,13 @@ Several workspaces open on the same directory share one row, because a status
 belongs to the project rather than the window.
 
 ```sh
-herdr-phin-board sync            # re-apply stored statuses to workspace tokens
-herdr-phin-board startup         # what Herdr's [[startup]] hook runs
-herdr-phin-board watch           # poll PRs and notify (the board starts this for you)
-herdr-phin-board config          # show the settings in force
-herdr-phin-board config --init   # write a commented settings template
-herdr-phin-board version         # which build this is
-herdr-phin-board prune           # forget entries whose directory no longer exists
+ekanban sync            # re-apply stored statuses to workspace tokens
+ekanban startup         # what Herdr's [[startup]] hook runs
+ekanban watch           # poll PRs and notify (the board starts this for you)
+ekanban config          # show the settings in force
+ekanban config --init   # write a commented settings template
+ekanban version         # which build this is
+ekanban prune           # forget entries whose directory no longer exists
 ```
 
 ## Releasing
@@ -545,8 +545,8 @@ apart unnoticed.
 
 ```sh
 go test ./...
-go build -o bin/herdr-phin-board ./cmd/herdr-phin-board
-./bin/herdr-phin-board          # runs against the live session via $HERDR_SOCKET_PATH
+go build -o bin/ekanban ./cmd/ekanban
+./bin/ekanban          # runs against the live session via $HERDR_SOCKET_PATH
 ```
 
 Run the binary directly from any pane inside a Herdr session — it doesn't need

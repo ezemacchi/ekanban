@@ -57,7 +57,7 @@ jobs:
       - name: the binary agrees with the manifest
         run: |
           manifest=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml)
-          binary=$(./bin/herdr-phin-board version)
+          binary=$(./bin/ekanban version)
           echo "manifest=${manifest} binary=${binary}"
           [ "$manifest" = "$binary" ] || {
             echo "the built binary reports a different version from the manifest" >&2

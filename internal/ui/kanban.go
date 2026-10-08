@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
+	"github.com/ezemacchi/ekanban/internal/look"
 )
 
 // Kanban lays the same spaces out as columns, one per status. Because a column

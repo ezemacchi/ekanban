@@ -16,9 +16,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/links"
-	"github.com/ezemacchi/herdr-phin-board/internal/team"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/team"
 )
 
 // Column is a kanban column.
@@ -36,10 +36,10 @@ var Columns = []struct {
 	Col   Column
 	Label string
 }{
-	{Pending, "Pendiente"},
-	{Working, "Trabajando"},
-	{Waiting, "Esperándote"},
-	{Done, "Terminado"},
+	{Pending, "Pending"},
+	{Working, "Working"},
+	{Waiting, "Waiting on you"},
+	{Done, "Done"},
 }
 
 // done reports whether role left its result: the team definition says how.
@@ -296,24 +296,24 @@ func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[
 		switch {
 		case live != nil && live.AgentStatus == "blocked":
 			c.Column = Waiting
-			c.Note = "te está preguntando algo"
+			c.Note = "asking you something"
 		case live != nil && live.AgentStatus == "working":
 			c.Column = Working
 			if c.Rounds > 1 {
-				c.Note = "vuelta " + itoa(c.Rounds)
+				c.Note = "round " + itoa(c.Rounds)
 			}
 		case done:
 			c.Column = Done
 			if c.Rounds > 1 {
-				c.Note = itoa(c.Rounds) + " vueltas"
+				c.Note = itoa(c.Rounds) + " rounds"
 			}
 		case live != nil:
 			c.Column = Working
-			c.Note = "quieto, sin resultado todavía"
+			c.Note = "idle, no result yet"
 		case c.Rounds > 0:
 			c.Column = Pending
 			c.Stuck = true
-			c.Note = "se despachó, pero no hay agente ni resultado"
+			c.Note = "dispatched, but no agent and no result"
 		default:
 			c.Column = Pending
 		}

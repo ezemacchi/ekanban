@@ -1,5 +1,5 @@
-id = "phin-board"
-name = "Phin Board"
+id = "ekanban"
+name = "eKanban"
 version = "0.5.0"
 min_herdr_version = "0.7.5"
 description = "A status board over your spaces: todo, in progress, waiting on someone, done - plus any status you invent."
@@ -9,25 +9,25 @@ description = "A status board over your spaces: todo, in progress, waiting on so
 platforms = ["windows"]
 
 [[build]]
-command = ["cmd", "/c", "go build -trimpath -o bin\\herdr-phin-board.exe .\\cmd\\herdr-phin-board"]
+command = ["cmd", "/c", "go build -trimpath -o bin\\ekanban.exe .\\cmd\\ekanban"]
 
 [[actions]]
 id = "open"
-title = "Open Phin Board"
+title = "Open eKanban"
 contexts = ["global", "workspace"]
-command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "phin-board"]
+command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "board"]
 
 [[panes]]
-id = "phin-board"
+id = "board"
 title = "Board"
 placement = "popup"
 width = "80%"
 height = "85%"
-command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe"]
 
 [[actions]]
 id = "dock"
-title = "Dock Phin Board to the right"
+title = "Dock eKanban to the right"
 contexts = ["global", "workspace"]
 command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "side", "--placement", "split", "--direction", "right"]
 
@@ -35,7 +35,7 @@ command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin"
 id = "side"
 title = "Board"
 placement = "split"
-command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sidebar"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "sidebar"]
 
 # One Big Team or Full Team run as a kanban of its roles. Open it as a tab
 # with --cwd set to the run's worktree; it reads .runs/<KEY>/STATE.md there.
@@ -43,11 +43,11 @@ command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sideb
 id = "ticket"
 title = "Ticket"
 placement = "tab"
-command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "ticket"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "ticket"]
 
 [[startup]]
-command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "startup"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "startup"]
 
 [[events]]
 on = "workspace.created"
-command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sync"]
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "sync"]

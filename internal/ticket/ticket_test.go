@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/herdr"
 )
 
 func write(t *testing.T, path, text string) {
@@ -81,7 +81,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 		if w, ok := want[c.Role.ID]; ok && c.Column != w {
 			t.Errorf("%s: column %d, want %d (%s)", c.Role.ID, c.Column, w, c.Note)
 		}
-		if c.Role.ID == "implementer" && (c.Note != "vuelta 2" || c.PaneID != "w:p3") {
+		if c.Role.ID == "implementer" && (c.Note != "round 2" || c.PaneID != "w:p3") {
 			t.Errorf("implementer: %+v", c)
 		}
 	}

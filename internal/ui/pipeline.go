@@ -10,10 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/links"
-	"github.com/ezemacchi/herdr-phin-board/internal/look"
-	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
-	"github.com/ezemacchi/herdr-phin-board/internal/store"
+	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/store"
 )
 
 // Pipeline mode: the board's columns are delivery stages computed from each
@@ -138,14 +138,14 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 func (m *Model) pipelineLines(sp *space, width int) []string {
 	info, ok := m.pipeInfo[sp.Key]
 	if !ok {
-		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" calculando", width))}
+		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" working it out", width))}
 	}
 	var lines []string
 	if info.Waiting {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "te está preguntando algo"), width)))
+		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "asking you something"), width)))
 	}
 	if info.Lost {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Warning, "se perdieron agentes"), width)))
+		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Warning, "agents were lost"), width)))
 	}
 	if info.Phase != "" && info.Stage == pipeline.InProgress {
 		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Team, info.Phase), width)))
@@ -155,22 +155,22 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 		style := dimStyle
 		switch info.Build {
 		case "SUCCESS":
-			pr += " · Jenkins verde"
+			pr += " · Jenkins green"
 			style = prPassStyle
 		case "FAILURE", "UNSTABLE":
 			pr += " · Jenkins " + strings.ToLower(info.Build)
 			style = prFailStyle
 		case "RUNNING":
-			pr += " · Jenkins corriendo"
+			pr += " · Jenkins running"
 			style = prPendingStyle
 		}
 		if info.MergedTo != "" {
-			pr += " · en " + info.MergedTo
+			pr += " · in " + info.MergedTo
 		}
 		lines = append(lines, style.Render(truncate(m.glyph(look.PullReq, pr), width)))
 	}
 	if info.Deployed != "" {
-		lines = append(lines, prPassStyle.Render(truncate(m.glyph(look.Rocket, "publicado en "+info.Deployed), width)))
+		lines = append(lines, prPassStyle.Render(truncate(m.glyph(look.Rocket, "shipped to "+info.Deployed), width)))
 	}
 	if info.Unknown != "" {
 		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Wifi, info.Unknown), width)))
@@ -178,7 +178,7 @@ func (m *Model) pipelineLines(sp *space, width int) []string {
 	return lines
 }
 
-const computedColumns = "las columnas se calculan solas desde la corrida, Jenkins y git"
+const computedColumns = "columns are computed from the run, Jenkins and git"
 
 // handlePipelineKey takes the keys whose meaning changes in pipeline mode:
 // everything that would set a column by hand is refused, a accepts, A opens
@@ -219,7 +219,7 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 	}
 	info := m.pipeInfo[sp.Key]
 	if info.Stage != pipeline.ReadyQA {
-		m.status = "solo se aceptan tickets en Ready for QA"
+		m.status = "only Ready for QA tickets can be accepted"
 		return m, nil
 	}
 	m.board.Accept(sp.Key, store.Accepted{
@@ -234,7 +234,7 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 		Repo:     m.scope,
 	})
 	m.save()
-	m.status = info.Key + " aceptado: está en el Archivo (A)"
+	m.status = info.Key + " accepted: it is in the Archive (A)"
 	m.rebuild()
 	return m, nil
 }
@@ -300,20 +300,20 @@ func (m *Model) handleArchiveKey(key string) (tea.Model, tea.Cmd) {
 			if url := links.Issue(a.rec.Ticket); url != "" {
 				return m, openURLCmd(url)
 			}
-			m.status = "falta issue_url en config.toml"
+			m.status = "issue_url is missing from config.toml"
 		}
 	case "p":
 		if a, ok := m.archivedAt(items); ok {
 			if url := links.PullRequest(a.rec.PR); url != "" {
 				return m, openURLCmd(url)
 			}
-			m.status = "sin pull request, o falta pipeline.pr_url en config.toml"
+			m.status = "no pull request, or pipeline.pr_url is missing from config.toml"
 		}
 	case "u":
 		if a, ok := m.archivedAt(items); ok {
 			m.board.Unaccept(a.key)
 			m.save()
-			m.status = a.rec.Ticket + " volvió al tablero"
+			m.status = a.rec.Ticket + " is back on the board"
 		}
 	}
 	m.archiveIdx = max(0, min(m.archiveIdx, len(m.archive())-1))
@@ -335,15 +335,15 @@ func openURLCmd(url string) tea.Cmd {
 func (m *Model) viewArchive() string {
 	items := m.archive()
 	var b strings.Builder
-	title := m.glyph(look.Archive, "Archivo")
-	head := " " + titleStyle.Render(title) + dimStyle.Render(fmt.Sprintf("  %d aceptados", len(items)))
+	title := m.glyph(look.Archive, "Archive")
+	head := " " + titleStyle.Render(title) + dimStyle.Render(fmt.Sprintf("  %d accepted", len(items)))
 	if m.filter != "" {
 		head += dimStyle.Render("  /" + m.filter)
 	}
 	b.WriteString(head + "\n\n")
 
 	if len(items) == 0 {
-		b.WriteString(dimStyle.Render("  Todavía no aceptaste ningún ticket. En el tablero, a sobre una tarjeta de Ready for QA.") + "\n")
+		b.WriteString(dimStyle.Render("  No accepted tickets yet. On the board, press a on a Ready for QA card.") + "\n")
 	}
 	width := max(m.width-4, 40)
 	for i, a := range items {
@@ -357,12 +357,12 @@ func (m *Model) viewArchive() string {
 		}
 		line := fmt.Sprintf("%-10s %-10s %s", a.rec.Ticket, a.rec.At.Local().Format("2006-01-02"), a.rec.Title)
 		b.WriteString(prefix + labelStyle.Render(truncate(line, width)) + "\n")
-		facts := strings.Join(nonEmpty(pr, prefixed("en ", a.rec.MergedTo), prefixed("publicado en ", a.rec.Deployed), a.rec.Branch), " · ")
+		facts := strings.Join(nonEmpty(pr, prefixed("in ", a.rec.MergedTo), prefixed("shipped to ", a.rec.Deployed), a.rec.Branch), " · ")
 		if facts != "" {
 			b.WriteString("     " + dimStyle.Render(truncate(facts, width-2)) + "\n")
 		}
 	}
-	b.WriteString("\n" + dimStyle.Render(" j/k mover · o Jira · p pull request · u devolver al tablero · / buscar · A o esc volver"))
+	b.WriteString("\n" + dimStyle.Render(" j/k move · o Jira · p pull request · u back to the board · / search · A or esc back"))
 	return lipgloss.NewStyle().MaxHeight(max(m.height, 1)).Render(b.String())
 }
 

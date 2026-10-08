@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ezemacchi/herdr-phin-board/internal/config"
-	"github.com/ezemacchi/herdr-phin-board/internal/gh"
-	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
-	"github.com/ezemacchi/herdr-phin-board/internal/links"
-	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
-	"github.com/ezemacchi/herdr-phin-board/internal/team"
+	"github.com/ezemacchi/ekanban/internal/config"
+	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/links"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/team"
 )
 
 func dumpPipeline(client *herdr.Client, repo string) error {
