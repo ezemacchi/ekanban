@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
@@ -49,6 +51,14 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 
 	m.width = 200
 	out := m.View()
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╰") {
+		t.Fatalf("cards are not boxed:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Fatalf("a line is %d cells wide on a %d-cell board: %q", w, m.width, line)
+		}
+	}
 	for _, want := range []string{"PR #5", "publicado en predev", "Ready for QA"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("board is missing %q:\n%s", want, out)

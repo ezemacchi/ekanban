@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/ezemacchi/herdr-phin-board/internal/look"
 )
 
 // Kanban lays the same spaces out as columns, one per status. Because a column
@@ -112,19 +114,18 @@ func (m *Model) renderColumn(col, width, height int) []string {
 		lines = append(lines, dimStyle.Render(truncate("—", inner)))
 	}
 
-	// Track where the selected card starts so the column can be scrolled to it.
-	selectedLine := -1
+	// Track where the selected card ends so the column can be scrolled to it.
+	selectedEnd := -1
 	for i, sp := range group {
-		if col == m.col && i == m.rowInCol {
-			selectedLine = len(lines)
-		}
 		lines = append(lines, m.renderCard(sp, col == m.col && i == m.rowInCol, inner)...)
-		lines = append(lines, "")
+		if col == m.col && i == m.rowInCol {
+			selectedEnd = len(lines)
+		}
 	}
 
-	if selectedLine >= 0 && len(lines) > height {
+	if selectedEnd >= 0 && len(lines) > height {
 		// Keep the header visible where possible, otherwise follow the card.
-		if overflow := selectedLine + 4 - height; overflow > 0 {
+		if overflow := selectedEnd - height; overflow > 0 {
 			keep := append([]string{}, lines[:2]...)
 			lines = append(keep, lines[2+overflow:]...)
 		}
@@ -135,50 +136,53 @@ func (m *Model) renderColumn(col, width, height int) []string {
 	return lines
 }
 
+// renderCard draws a space as a boxed card width cells wide. The border, not
+// a marker, shows the cursor and a card picked up to move.
 func (m *Model) renderCard(sp *space, selected bool, width int) []string {
 	held := sp.Key == m.grabbed
-
-	marker := "  "
-	switch {
-	case held:
-		marker = grabStyle.Render("▌ ")
-	case selected:
-		marker = cursorStyle.Render("❯ ")
-	}
+	text := look.CardInner(width)
 
 	label := m.spaceLabel(sp)
 	if m.hasBell(sp.Key) {
 		label = bellGlyph + " " + label
 	}
-	name := truncate(label, width-2)
+	name := truncate(label, text)
 	switch {
 	case held:
 		name = grabStyle.Render(name)
+	case selected:
+		name = cursorStyle.Render(name)
 	case !sp.Live:
 		name = archivedStyle.Render(name)
 	case sp.Focused:
 		name = focusStyle.Render(name)
 	}
-	lines := []string{marker + name}
+	lines := []string{name}
 
 	if sp.Note != "" {
-		for _, line := range wrap(sp.Note, width-2) {
-			lines = append(lines, "  "+noteStyle.Render(line))
+		for _, line := range wrap(sp.Note, text) {
+			lines = append(lines, noteStyle.Render(line))
 		}
 	}
 	if m.pipelineOn() {
-		for _, l := range m.pipelineLines(sp, width-2) {
-			lines = append(lines, "  "+l)
+		lines = append(lines, m.pipelineLines(sp, text)...)
+	} else {
+		if pr, ok := m.prFor(sp.Key); ok {
+			lines = append(lines, prStyled(pr, text))
 		}
-		return lines
+		if hint := agentHint(sp); hint != "" {
+			lines = append(lines, dimStyle.Render(truncate(hint, text)))
+		}
 	}
-	if pr, ok := m.prFor(sp.Key); ok {
-		lines = append(lines, "  "+prStyled(pr, width-2))
+
+	border := look.CardBorder
+	switch {
+	case held:
+		border = look.CardGrabbed
+	case selected:
+		border = look.CardSelected
 	}
-	if hint := agentHint(sp); hint != "" {
-		lines = append(lines, "  "+dimStyle.Render(truncate(hint, width-2)))
-	}
-	return lines
+	return look.Card(lines, width, border)
 }
 
 // padCell pads a rendered cell to width, ignoring ANSI escapes.

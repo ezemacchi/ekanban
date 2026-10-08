@@ -253,28 +253,32 @@ func (m *Model) View() string {
 		var cb strings.Builder
 		cards := m.cardsIn(c.Col)
 		cb.WriteString(headStyle.Render(ic.With(columnGlyph[c.Col], fmt.Sprintf("%s (%d)", c.Label, len(cards)))) + "\n")
+		cardWidth := colWidth - 1
+		text := look.CardInner(cardWidth)
 		for j, card := range cards {
-			line := ic.With(roleGlyph[card.Role.ID], card.Role.Label)
+			selected := i == m.col && j == m.row
 			style := lipgloss.NewStyle()
-			switch c.Col {
-			case ticket.Waiting:
+			switch {
+			case selected:
+				style = cursorStyle
+			case c.Col == ticket.Waiting:
 				style = waitStyle
-			case ticket.Done:
+			case c.Col == ticket.Done:
 				style = doneStyle
 			}
-			prefix := "  "
-			if i == m.col && j == m.row {
-				prefix = cursorStyle.Render("❯ ")
-				style = cursorStyle
-			}
-			cb.WriteString(prefix + style.Render(look.Truncate(line, colWidth-2)) + "\n")
+			lines := []string{style.Render(look.Truncate(ic.With(roleGlyph[card.Role.ID], card.Role.Label), text))}
 			if card.Note != "" {
-				note, style := card.Note, dimStyle
+				note, noteStyle := card.Note, dimStyle
 				if card.Stuck {
-					note, style = ic.With(look.Warning, note), waitStyle
+					note, noteStyle = ic.With(look.Warning, note), waitStyle
 				}
-				cb.WriteString("    " + style.Render(look.Truncate(note, colWidth-4)) + "\n")
+				lines = append(lines, noteStyle.Render(look.Truncate(note, text)))
 			}
+			border := look.CardBorder
+			if selected {
+				border = look.CardSelected
+			}
+			cb.WriteString(strings.Join(look.Card(lines, cardWidth, border), "\n") + "\n")
 		}
 		cols[i] = lipgloss.NewStyle().Width(colWidth).Render(cb.String())
 	}
