@@ -208,26 +208,62 @@ board, and it covers every space across every repo. Run it by hand with
 It follows the Herdr session that started it. If you run named sessions
 side by side, spaces in the other one are outside its view.
 
-## Install
+## Inside a repository
 
-```sh
-herdr plugin install ezemacchi/ekanban
+Open the board in a repository and its columns stop being statuses you set: they
+are where each ticket is in delivery, read from git and the build server.
+
+```
+ To Do 1          Working 2           Reviewing 3          Shipping 0   To QA 2
+ ABC-12           ABC-7               ABC-9                —            ABC-3
+ workspace clo…   Sticky header       PR #184 · build ok                PR #136
+                  Implementer                                           shipped to dev
 ```
 
-That runs the build step, which compiles from source if Go is on your `PATH`
-and otherwise downloads the binary CI publishes, checking it against the
-published `.sha256`. Either way you end up with `bin/ekanban`.
+A card is a ticket worktree, named by its ticket key. Its column comes from a
+chain of rules: deployed, merged, not started, working, landed. The first rule
+that decides wins. `[pipeline]` in the settings names the build server, the
+branches pull requests merge into, and the publish job that deploys each one.
+A card also shows the loudest agent of its run (the one that needs you, or the
+one that just finished) and the board's footer notes each change.
 
-For local development, point Herdr at a working tree instead — no build runs,
+### The ticket board
+
+A team run keeps a folder in its worktree, `.runs/<KEY>/STATE.md` by default.
+The ticket board opens as a tab of the ticket's workspace and shows one card per
+role of the run's team: pending, working, waiting on you, done. Under it are the
+run's objective, current step and open questions, and a list of what the agents
+did. `enter` goes to a role's tab, and `o` goes to the agent running the team
+(its lead), or starts one with a prompt to resume the run.
+
+Teams are TOML files. One example team ships with the binary; yours go in the
+`teams` folder beside `config.toml`. Where runs live and how their state file
+reads is `[run]` in the settings, so another team's layout needs no code.
+
+Both boards take the mouse: click a card to select it, click again to go there,
+and click the buttons along the bottom.
+
+## Install
+
+This fork runs on Windows, and installing it compiles it, so Go must be on
+`PATH`:
+
+```powershell
+herdr plugin install ezemacchi/ekanban --ref windows -y
+```
+
+For local development, point Herdr at a working tree instead. No build runs,
 so you compile it yourself:
 
-```sh
-git clone https://github.com/ezemacchi/ekanban
-cd ekanban && go build -o bin/ekanban ./cmd/ekanban
+```powershell
+git clone -b windows https://github.com/ezemacchi/ekanban
+cd ekanban; go build -trimpath -o bin\ekanban.exe .\cmd\ekanban
 herdr plugin link .
 ```
 
-Then bind a key in `~/.config/herdr/config.toml`:
+`AGENTS.md` walks a coding agent through installing and setting it up.
+
+Then bind a key in `%APPDATA%\herdr\config.toml`:
 
 ```toml
 [[keys.command]]
@@ -244,8 +280,7 @@ shadows a built-in, so check the config reference before picking another —
 `prefix+b` is `toggle_sidebar` and `prefix+k` is `focus_pane_up`, both easy to
 lose by accident.
 
-Requires Herdr 0.7.5+. Go is optional: without it the install falls back to a
-prebuilt macOS or Linux binary.
+Requires Herdr 0.7.5+ and Go.
 
 ## The board beside your panes
 
@@ -254,9 +289,9 @@ window: the grouped list only, with no detail pane and no layout switching — a
 narrow board has no room for the table and kanban arrangements, and switching
 there would overwrite the layout the popup remembers.
 
-One action opens it on either runtime:
+One action opens it:
 
-```sh
+```powershell
 herdr plugin action invoke dock --plugin ekanban
 ```
 
@@ -270,34 +305,9 @@ command = "ekanban.dock"
 description = "Board on the right"
 ```
 
-On upstream Herdr that is a tiled split to the right of the focused pane. On
-[hoarder](https://github.com/phin-tech/herdr) — a fork of Herdr — it goes into
-the real right-hand dock instead: a persistent, resizable region that survives
-layout changes and does not take a slot from the panes you are working in.
-
-`action-dock.sh` picks between them by *running* `dock` and falling back when
-it fails, rather than probing for it first. `herdr dock --help` on upstream
-prints the general help and exits 0 — `--help` short-circuits before the
-unknown command is reached — so a probe reports a dock that is not there. Its
-output is held back until it has worked, so upstream's "unknown command" never
-reaches the terminal.
-
-The split is then narrowed to a quarter of the window. A board this narrow is a
-strip you glance at, and a fresh split is an even one — half the window is far
-more than it needs. There is no width to ask for at open time: not a manifest
-field, and no flag on `plugin pane open`. Narrowing afterwards needs no
-measuring, though, since `--amount` is a fraction of the window and a new split
-is always half of it:
-
-```sh
-herdr pane resize --current --direction right --amount 0.25
-```
-
-The popup entrypoint is unchanged:
-
-```sh
-herdr plugin pane open --plugin ekanban --entrypoint board
-```
+It opens as a split to the right of the focused pane. (Upstream's
+`action-dock.sh`, which also reaches hoarder's right-hand dock, needs `sh` and
+is not used by this fork's manifest.)
 
 ### What the narrow rows show
 
@@ -314,39 +324,6 @@ markers, and each thing beside it earns its room:
 | `◐ ◆ ✓ · ○` | the agent: working, blocked, done, idle, offline |
 
 A filter has no header to live in here, so it shows along the bottom instead.
-
-### Why there are two pane entries
-
-The narrow pane is declared twice, once for each runtime:
-
-```toml
-[[panes]]
-id = "side"
-title = "Board"
-placement = "split"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/ekanban" sidebar']
-
-[[hoarder.panes]]
-id = "sidebar"
-title = "Board"
-placement = "sidebar-right"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/ekanban" sidebar']
-```
-
-Both run the same `sidebar` entrypoint. The split is upstream's closest thing
-to a right-hand region and the only one it will accept: a manifest naming a
-placement it does not know fails to parse there in *full*, taking every action
-and hook with it. Upstream silently ignores unknown keys, so everything under
-`[hoarder]` is invisible to it.
-
-Two details that also fail the whole manifest, and are easy to reintroduce:
-
-- **The ids must differ.** hoarder sees both entries, and two panes sharing an
-  id is as fatal there as an unknown placement.
-- **No `width` on the split.** It is a popup-only field.
-
-Which side the split lands on is not a manifest field either, which is why the
-action is a script rather than a plain `plugin pane open`.
 
 ## Status in the Spaces sidebar
 
@@ -390,7 +367,8 @@ ekanban config --init   # write a commented template
 ekanban config          # show what is in force, and from where
 ```
 
-That lands at `~/.config/herdr/plugins/config/ekanban/config.toml`:
+That lands at `%APPDATA%\herdr\plugins\config\ekanban\config.toml`
+(`herdr plugin config-dir ekanban` prints the folder):
 
 ```toml
 # How often the background watcher asks GitHub about your pull requests.
@@ -409,6 +387,20 @@ typo. A broken file never stops the board.
 
 This is deliberately separate from `board.json`: that is state the board writes
 for itself, this is what you tell the board, and it is never overwritten.
+
+### A repository's own settings
+
+A repository can keep a `.ekanban.toml` at its root with any of the same
+settings. It is read over `config.toml` whenever a board opens in that
+repository or one of its worktrees, so the project's process lives with the
+project: tracker and pull request links, build server, target branches, the
+`[run]` layout, the prompt a new lead starts with. A value there replaces the
+personal one, and a list replaces the whole list. `[lead] kind` and `args` are
+read from `config.toml` only, since they choose a program to start.
+
+Commit it to share it with the team, or list it in `.git/info/exclude` to keep
+it to one clone. An uncommitted file is only in the main checkout, and boards in
+linked worktrees look for it there.
 
 ## Keys
 
@@ -438,6 +430,11 @@ for itself, this is what you tell the board, and it is never overwritten.
 | `x` | forget the selected space |
 | `r` | refresh |
 | `q` | quit |
+
+In a repository the board adds its own: `a` accepts a ticket in the last column
+and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
+lead (so sorting the table moves to `ctrl+o`). `ekanban keys` lists every
+screen's keys, and `[keys]` in the settings rebinds any of them.
 
 ## Mouse
 
@@ -520,8 +517,11 @@ belongs to the project rather than the window.
 ekanban sync            # re-apply stored statuses to workspace tokens
 ekanban startup         # what Herdr's [[startup]] hook runs
 ekanban watch           # poll PRs and notify (the board starts this for you)
-ekanban config          # show the settings in force
+ekanban ticket [dir]    # the ticket board of the run in a worktree
+ekanban pipeline [repo] # where each worktree of a repository lands, as JSON
+ekanban config          # show the settings in force, and the repository file
 ekanban config --init   # write a commented settings template
+ekanban keys            # every action and the keys bound to it
 ekanban version         # which build this is
 ekanban prune           # forget entries whose directory no longer exists
 ```
@@ -537,17 +537,19 @@ installed, so a stale one would claim the wrong version for ever.
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-CI builds through `build.sh` — the same path `herdr plugin install` takes — and
-fails if the built binary disagrees with the manifest, so the two cannot drift
-apart unnoticed.
+CI builds through `build.sh` and fails if the built binary disagrees with the
+manifest, so the two cannot drift apart unnoticed.
 
 ## Development
 
-```sh
+```powershell
 go test ./...
-go build -o bin/ekanban ./cmd/ekanban
-./bin/ekanban          # runs against the live session via $HERDR_SOCKET_PATH
+go build -trimpath -o bin\ekanban.exe .\cmd\ekanban
+.\bin\ekanban.exe      # runs against the live session via $env:HERDR_SOCKET_PATH
 ```
+
+`AGENTS.md` has the checks a change must pass and the rules for this
+repository.
 
 Run the binary directly from any pane inside a Herdr session — it doesn't need
 to be installed as a plugin to work, which makes for a fast inner loop.
