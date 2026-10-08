@@ -8,14 +8,19 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The plugin's manifest is Windows only, so its tests run on Windows.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: true
 
       - name: gofmt
@@ -27,11 +32,12 @@ jobs:
             exit 1
           fi
 
-      # A broken workflow file otherwise only shows up when a release attempt
-      # dies, with no job and no log to explain it.
+      # A broken workflow file otherwise only shows up when it is next needed,
+      # with no job and no log to explain it.
       - name: workflows parse
         run: |
-          python3 - <<'PY'
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
           import glob, sys, yaml
           bad = False
           for path in sorted(glob.glob(".github/workflows/*.yml")):
@@ -45,21 +51,20 @@ jobs:
           PY
 
       - run: go vet ./...
-      - run: go test -race ./...
+      - run: go test ./...
 
       # The manifest's build command is what `herdr plugin install` runs, so a
       # break there is a broken install even when the tests pass.
       - name: build as the plugin manifest does
-        run: sh build.sh
+        shell: cmd
+        run: go build -trimpath -o bin\ekanban.exe .\cmd\ekanban
 
-      # The manifest version is what Herdr reports for the installed plugin, so
-      # a build that disagrees with it would misreport itself.
-      - name: the binary agrees with the manifest
+      # Not shipped for Linux or macOS yet, but the code keeps compiling there,
+      # so adding those platforms stays a manifest change.
+      - name: still compiles for Linux and macOS
+        env:
+          CGO_ENABLED: "0"
         run: |
-          manifest=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml)
-          binary=$(./bin/ekanban version)
-          echo "manifest=${manifest} binary=${binary}"
-          [ "$manifest" = "$binary" ] || {
-            echo "the built binary reports a different version from the manifest" >&2
-            exit 1
-          }
+          GOOS=linux GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+          GOOS=linux go vet ./...

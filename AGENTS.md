@@ -25,7 +25,7 @@ asking.
 ### 2. Install
 
 ```powershell
-herdr plugin install ezemacchi/ekanban --ref windows -y
+herdr plugin install ezemacchi/ekanban -y
 herdr plugin list
 ```
 

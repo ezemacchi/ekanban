@@ -5,6 +5,9 @@
 A [Herdr](https://herdr.dev) plugin: a status board over your spaces, in a popup,
 on a key.
 
+ekanban started as a fork of [herdr-phin-board](https://github.com/phin-tech/herdr-phin-board)
+by Phin Technologies, under the MIT license (see `LICENSE`).
+
 Herdr's own space list tells you what Herdr knows — label, panes, agent state.
 This adds the part only you know: what you've actually started, what's finished,
 and what's parked because you're waiting on a person or something outside the
@@ -324,11 +327,11 @@ Read only; it never writes to Bitbucket.
 
 ## Install
 
-This fork runs on Windows, and installing it compiles it, so Go must be on
+ekanban runs on Windows, and installing it compiles it, so Go must be on
 `PATH`:
 
 ```powershell
-herdr plugin install ezemacchi/ekanban --ref windows -y
+herdr plugin install ezemacchi/ekanban -y
 ```
 
 For local development, point Herdr at a working tree instead. No build runs,
@@ -648,17 +651,13 @@ ekanban prune           # forget entries whose directory no longer exists
 
 ## Releasing
 
-A push to `main` republishes the rolling `latest` prerelease. A `v*` tag cuts a
-permanent one, stamps that version into the binary, and commits the matching
-`version` back to `herdr-plugin.toml` — Herdr reads that file to report what is
-installed, so a stale one would claim the wrong version for ever.
+There are no published binaries: `herdr plugin install` compiles from `main`.
+Raise `version` in `herdr-plugin.toml` when a change is worth telling apart, since
+that is what `herdr plugin list` reports.
 
-```sh
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-CI builds through `build.sh` and fails if the built binary disagrees with the
-manifest, so the two cannot drift apart unnoticed.
+CI runs on Windows: gofmt, vet, the tests and the manifest's build command. It
+also compiles for Linux and macOS, so the code keeps building there even though
+the manifest only declares Windows.
 
 ## Development
 
