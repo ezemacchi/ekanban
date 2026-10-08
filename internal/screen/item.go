@@ -111,13 +111,19 @@ func Buttons(z *Zones, y, x int, hints []Hint, width int) string {
 // ButtonRows draws hints as buttons in as many rows as they need within
 // width, recording zones from row y at column x.
 func ButtonRows(z *Zones, y, x int, hints []Hint, width int) []string {
+	return ItemRows(z, y, x, ButtonItems(hints), 1, width)
+}
+
+// ItemRows lays items out in as many rows as they need within width, gap
+// cells apart, recording zones from row y at column x.
+func ItemRows(z *Zones, y, x int, items []Item, gap, width int) []string {
 	var rows []string
-	for rest := hints; len(rest) > 0; {
+	for rest := items; len(rest) > 0; {
 		fit := 1
-		for fit < len(rest) && lipgloss.Width(Buttons(nil, 0, 0, rest[:fit+1], 1<<20)) <= width {
+		for fit < len(rest) && lipgloss.Width(Row(nil, 0, 0, rest[:fit+1], gap, 1<<20)) <= width {
 			fit++
 		}
-		rows = append(rows, Buttons(z, y+len(rows), x, rest[:fit], width))
+		rows = append(rows, Row(z, y+len(rows), x, rest[:fit], gap, width))
 		rest = rest[fit:]
 	}
 	return rows
@@ -128,6 +134,22 @@ func ButtonRows(z *Zones, y, x int, hints []Hint, width int) []string {
 func Chip(label, color, id string) Item {
 	style := lipgloss.NewStyle().Background(look.ButtonBg).Foreground(lipgloss.Color(color)).Bold(true)
 	return Control(style.Render(" "+label+" ")+look.Button.Render("✕ "), id)
+}
+
+// Badge is a quick choice with how many it stands for, "Open PR 3", in
+// color; on, it is drawn filled, so the choice in force reads at a glance. A
+// click on it is the control id.
+func Badge(label string, count int, color string, on bool, id string) Item {
+	text := " " + label
+	if count >= 0 {
+		text += " " + strconv.Itoa(count)
+	}
+	text += " "
+	style := lipgloss.NewStyle().Background(look.ButtonBg).Foreground(lipgloss.Color(color))
+	if on {
+		style = lipgloss.NewStyle().Background(lipgloss.Color(color)).Foreground(lipgloss.Color("232")).Bold(true)
+	}
+	return Control(style.Render(text), id)
 }
 
 // SearchWidth is how wide the search field is drawn.

@@ -27,9 +27,13 @@ import (
 // Keeping the target branches up to date (U) is here too: both are about the
 // board's tickets as a whole rather than one card.
 
-// recipient is one orchestrator the broadcast can reach.
+// recipient is one orchestrator the broadcast can reach, with what the
+// quick choices pick it by: its ticket's column and whether it has a pull
+// request still open.
 type recipient struct {
 	key, pane, status, target string
+	stage                     string
+	openPR                    bool
 	on                        bool
 }
 
@@ -55,6 +59,7 @@ type broadcastMsg struct{ sent, failed []string }
 // tickets the board shows, a search or a column filter narrowing them.
 func (m *Model) startBroadcast() tea.Cmd {
 	var worktrees []string
+	cards := map[string]pipeline.Info{}
 	for _, st := range m.board.Statuses {
 		if m.statusFilter != "" && st.ID != m.statusFilter {
 			continue
@@ -64,6 +69,7 @@ func (m *Model) startBroadcast() tea.Cmd {
 				continue
 			}
 			worktrees = append(worktrees, sp.Key)
+			cards[sp.Key] = m.pipeInfo[sp.Key]
 		}
 	}
 	m.bc.to, m.bc.loading, m.bc.list, m.bc.idx = nil, true, false, 0
@@ -85,7 +91,9 @@ func (m *Model) startBroadcast() tea.Cmd {
 			if err != nil || run.OrchestratorPane == "" {
 				continue
 			}
-			to = append(to, recipient{key: run.Key, pane: run.OrchestratorPane, status: run.OrchestratorStatus, target: run.Target, on: true})
+			info := cards[wt]
+			to = append(to, recipient{key: run.Key, pane: run.OrchestratorPane, status: run.OrchestratorStatus, target: run.Target,
+				stage: info.Stage, openPR: info.PR > 0 && info.MergedTo == "", on: true})
 		}
 		sort.Slice(to, func(i, j int) bool { return to[i].key < to[j].key })
 		return recipientsMsg{to: to}
@@ -174,6 +182,65 @@ func (m *Model) broadcastListKey(k string) {
 		}
 	}
 	m.bc.idx = max(0, min(m.bc.idx, n-1))
+}
+
+// pick is a quick choice of orchestrators: which it ticks.
+type pick struct {
+	label, color string
+	match        func(recipient) bool
+}
+
+// picks are the quick choices that would tick someone: everyone, nobody,
+// the ones with a pull request open, by what the orchestrator is doing, and
+// by the column of its ticket.
+func (m *Model) picks() []pick {
+	out := []pick{
+		{"All", "252", func(recipient) bool { return true }},
+		{"None", "245", func(recipient) bool { return false }},
+		{"Open PR", "78", func(r recipient) bool { return r.openPR }},
+		{"Idle", "245", func(r recipient) bool { return r.status == "idle" }},
+		{"Working", "214", func(r recipient) bool { return r.status == "working" }},
+		{"Needs you", "203", func(r recipient) bool { return r.status == "blocked" }},
+	}
+	for _, c := range m.columns {
+		id := c.ID
+		out = append(out, pick{c.Label, c.Color, func(r recipient) bool { return r.stage == id }})
+	}
+	var shown []pick
+	for i, p := range out {
+		if i < 2 || m.picked(p) > 0 {
+			shown = append(shown, p)
+		}
+	}
+	return shown
+}
+
+// picked is how many orchestrators p ticks.
+func (m *Model) picked(p pick) int {
+	n := 0
+	for _, r := range m.bc.to {
+		if p.match(r) {
+			n++
+		}
+	}
+	return n
+}
+
+// inForce is whether the ticks are exactly p's.
+func (m *Model) inForce(p pick) bool {
+	for _, r := range m.bc.to {
+		if r.on != p.match(r) {
+			return false
+		}
+	}
+	return len(m.bc.to) > 0
+}
+
+// choose ticks exactly the orchestrators p picks.
+func (m *Model) choose(p pick) {
+	for i := range m.bc.to {
+		m.bc.to[i].on = p.match(m.bc.to[i])
+	}
 }
 
 func (m *Model) usePreset(i int) {
@@ -276,6 +343,21 @@ func (m *Model) viewBroadcast(base string) string {
 	}
 
 	lines = append(lines, "", look.Label.Render("TO")+dimStyle.Render(fmt.Sprintf("  %d of %d", len(m.chosen()), len(m.bc.to))))
+	// The quick choices, laid out at 0, 0 and moved under the heading.
+	var picks screen.Zones
+	if len(m.bc.to) > 0 {
+		var items []screen.Item
+		for i, p := range m.picks() {
+			count := m.picked(p)
+			if p.label == "None" {
+				count = -1
+			}
+			items = append(items, screen.Badge(p.label, count, p.color, m.inForce(p), "pick:"+strconv.Itoa(i)))
+		}
+		rows := screen.ItemRows(&picks, 0, 0, items, 1, inner)
+		picks.Shift(0, 0, len(lines))
+		lines = append(lines, rows...)
+	}
 	switch {
 	case m.bc.loading:
 		lines = append(lines, dimStyle.Render("  finding the orchestrators…"))
@@ -312,6 +394,11 @@ func (m *Model) viewBroadcast(base string) string {
 	x, y := screen.Center(lipgloss.Width(box), lipgloss.Height(box), m.width, m.height)
 
 	m.addZone(zone{Kind: zoneModal, Y: y, H: lipgloss.Height(box), X0: x, X1: x + lipgloss.Width(box)})
+	for _, z := range picks {
+		z.Y += y + screen.ModalBody
+		z.X0, z.X1 = z.X0+x+2, z.X1+x+2
+		m.addZone(z)
+	}
 	for _, z := range zones {
 		z.Y += y + screen.ModalBody
 		z.X0, z.X1 = z.X0+x+2, z.X1+x+2
@@ -336,6 +423,10 @@ func (m *Model) clickBroadcast(x, y int) (tea.Model, tea.Cmd) {
 		m.bc.list, m.bc.idx = true, z.Choice
 	case z.Kind == screen.OnControl && z.ID == "bc-message":
 		m.bc.list = false
+	case z.Kind == screen.OnControl && strings.HasPrefix(z.ID, "pick:"):
+		if i, err := strconv.Atoi(strings.TrimPrefix(z.ID, "pick:")); err == nil && i < len(m.picks()) {
+			m.choose(m.picks()[i])
+		}
 	case z.Kind == screen.OnControl && strings.HasPrefix(z.ID, "preset:"):
 		if i, err := strconv.Atoi(strings.TrimPrefix(z.ID, "preset:")); err == nil && i < len(m.bc.presets) {
 			m.usePreset(i)

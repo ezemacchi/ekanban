@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ezemacchi/ekanban/internal/gh"
+	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
@@ -310,5 +312,44 @@ func TestTheBroadcastAsksBeforeItSends(t *testing.T) {
 	_, cmd := m.Update(key("y"))
 	if m.mode != modeNormal || cmd == nil {
 		t.Fatalf("yes did not send; mode %v", m.mode)
+	}
+}
+
+// A quick choice ticks exactly the orchestrators it names -- the ones with a
+// pull request open, say -- and only choices that would tick someone show.
+func TestBroadcastQuickChoices(t *testing.T) {
+	m := pipelineBoard(t)
+	m.width, m.height = 140, 40
+	send(t, m, key("B"))
+	send(t, m, recipientsMsg{to: []recipient{
+		{key: "ABC-1", status: "idle", stage: pipeline.ReadyQA, openPR: true, on: true},
+		{key: "ABC-2", status: "working", stage: pipeline.InProgress, on: true},
+		{key: "ABC-3", status: "idle", stage: pipeline.InProgress, openPR: true, on: true},
+	}})
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"All 3", "None", "Open PR 2", "Idle 2", "Working 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing the quick choice %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Needs you") {
+		t.Fatal("a quick choice that ticks nobody is shown")
+	}
+	pr := -1
+	for i, p := range m.picks() {
+		if p.label == "Open PR" {
+			pr = i
+		}
+	}
+	clickZoneOf(t, m, isControl("pick:"+strconv.Itoa(pr)))
+	var on []string
+	for _, r := range m.chosen() {
+		on = append(on, r.key)
+	}
+	if strings.Join(on, ",") != "ABC-1,ABC-3" {
+		t.Fatalf("Open PR ticked %v", on)
+	}
+	if !m.inForce(m.picks()[pr]) {
+		t.Fatal("the choice in force is not marked")
 	}
 }

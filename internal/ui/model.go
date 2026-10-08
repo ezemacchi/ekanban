@@ -288,6 +288,13 @@ func New(client *herdr.Client, board *store.Board) *Model {
 	in := textinput.New()
 	in.Prompt = ""
 	in.CharLimit = 240
+	// The input is drawn inside fields on a shaded ground (screen.Input):
+	// its text and its cursor take that ground too, or what is typed sits in
+	// a black hole in the middle of the field.
+	in.TextStyle = look.Button
+	in.PlaceholderStyle = look.Button
+	in.Cursor.TextStyle = look.Button
+	in.Cursor.Style = look.Button.Reverse(true)
 
 	// The cache lives beside the board file. PR state is derived, so a missing
 	// or unreadable cache costs one refetch rather than any of the user's work.
