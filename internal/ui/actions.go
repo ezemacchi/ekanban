@@ -51,7 +51,7 @@ var (
 	PipelineActions = append(withKeys(commonActions, "sort", "ctrl+o"),
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
-		keys.Action{Name: "lead", Keys: []string{"o"}, Canon: "lead", Help: "go to the ticket's lead (the agent running its team), or open one", Short: "lead"})
+		keys.Action{Name: "lead", Keys: []string{"o"}, Canon: "lead", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"})
 
 	// ArchiveActions are the archive list's.
 	ArchiveActions = []keys.Action{
