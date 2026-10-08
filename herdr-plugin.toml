@@ -37,8 +37,8 @@ title = "Board"
 placement = "split"
 command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\ekanban.exe", "sidebar"]
 
-# One Big Team or Full Team run as a kanban of its roles. Open it as a tab
-# with --cwd set to the run's worktree; it reads .runs/<KEY>/STATE.md there.
+# One team run as a kanban of its roles. Open it as a tab with --cwd set to
+# the run's worktree; it reads the run there ([run] in config.toml says where).
 [[panes]]
 id = "ticket"
 title = "Ticket"

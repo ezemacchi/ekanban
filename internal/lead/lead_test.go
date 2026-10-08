@@ -45,7 +45,7 @@ func run(t *testing.T) *ticket.Run {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	return &ticket.Run{Key: "ABC-1", Dir: dir, Worktree: filepath.Dir(dir), TeamName: "Full Team", Lead: l, Workspace: "w"}
+	return &ticket.Run{Key: "ABC-1", Dir: dir, Worktree: filepath.Dir(dir), TeamName: "Example", Lead: l, Workspace: "w"}
 }
 
 func TestGoFocusesAnOpenLead(t *testing.T) {
@@ -79,7 +79,7 @@ func TestGoOpensANewLead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Lead Orchestrator of ABC-1 (Full Team): read " + filepath.ToSlash(filepath.Join(r.Dir, "STATE.md")) + ".\n"
+	want := "Lead Orchestrator of ABC-1 (Example): read " + filepath.ToSlash(filepath.Join(r.Dir, "STATE.md")) + ".\n"
 	if string(data) != want {
 		t.Fatalf("prompt file %q, want %q", data, want)
 	}

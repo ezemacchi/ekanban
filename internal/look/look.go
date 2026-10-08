@@ -38,7 +38,7 @@ const (
 	Play      = "\uf04b" // current step
 	Rocket    = "\uf135" // landed, published
 	Warning   = "\uf071" // stuck, lost
-	Sitemap   = "\uf0e8" // orchestrator
+	Sitemap   = "\uf0e8" // a team's lead
 	Brush     = "\uf1fc" // prototype
 	Team      = "\uf0c0" // phase of the team
 	PullReq   = "\uf407"

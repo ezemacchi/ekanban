@@ -379,8 +379,7 @@ icons = false
 # id = "waiting"
 # label = "Waiting on you"
 
-# The agent that runs a ticket: the team's [lead] (the orchestrator, for the
-# built-in teams). o on the boards goes to it, or opens one in a new tab of the
+# The agent that runs a ticket: the team's [lead]. o on the boards goes to it, or opens one in a new tab of the
 # ticket's workspace when none is open. kind is the Herdr agent kind to start
 # (cursor, claude, ...); without it the boards only go to an open one. prompt
 # is written to the run folder and the new agent is told to read it.

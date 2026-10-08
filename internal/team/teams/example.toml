@@ -1,0 +1,68 @@
+# A team is the roles a run goes through. The ticket board shows one card per
+# role and places it from what the run leaves on disk and the live agents.
+#
+# This built-in team is an example to copy. Put your own teams in the teams
+# folder beside config.toml (`ekanban config` prints where): a file named
+# example.toml there replaces this one, and any other file adds a team.
+#
+# name     shown on the board.
+# match    regex on the run's team field that picks this team.
+# default  used when no team matches (a team of yours wins over this one).
+#
+# Each [[role]]:
+# id                stable key.
+# label             shown on the card.
+# icon              optional Nerd Font glyph.
+# match             regex on dispatch file names, agent names and tab labels.
+# done_file         the role is done when this file exists in the run folder,
+# done_field        or when this header field of the state file has a value,
+# done_when_landed  or when the run has landed.
+#
+# [lead] is the agent that runs the team (o on the boards goes to it, or opens
+# one when there is none):
+# label   shown on the board.
+# match   regex on agent names and tab labels. An agent named after the
+#         ticket, or one in the ticket's workspace that matches no role, also
+#         counts.
+# tab     label of the tab a new lead opens in.
+# kind    Herdr agent kind to start (cursor, claude, ...); without it the
+#         board cannot open one. Usually set once in config.toml's [lead].
+# args    passed to the agent.
+# prompt  sent to a new lead; see config.toml's [lead] for the placeholders.
+
+name = "Example"
+match = '(?i)example'
+default = true
+
+[lead]
+label = "Lead"
+match = '(^|[^a-z])lead([^a-z]|$)'
+tab = "lead"
+
+[[role]]
+id = "planner"
+label = "Planner"
+icon = "\uf0ae"
+match = 'plan'
+done_file = "PLAN.md"
+
+[[role]]
+id = "implementer"
+label = "Implementer"
+icon = "\uf121"
+match = 'implement'
+done_file = "IMPL.md"
+
+[[role]]
+id = "reviewer"
+label = "Reviewer"
+icon = "\uf06e"
+match = 'review'
+done_file = "REVIEW.md"
+
+[[role]]
+id = "qa"
+label = "QA"
+icon = "\uf188"
+match = '(^|[^a-z])qa([^a-z]|$)'
+done_when_landed = true

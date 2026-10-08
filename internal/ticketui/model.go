@@ -1,4 +1,4 @@
-// Package ticketui is the per-ticket board: one Big Team or Full Team run
+// Package ticketui is the per-ticket board: one team run
 // as a kanban of its roles, meant to be the first tab of the run's workspace.
 package ticketui
 
@@ -137,7 +137,7 @@ var Actions = []keys.Action{
 	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
 	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
 	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
-	{Name: "lead", Keys: []string{"o"}, Help: "go to the orchestrator (the team's lead), or open one"},
+	{Name: "lead", Keys: []string{"o"}, Help: "go to the lead (the agent running the team), or open one"},
 	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},

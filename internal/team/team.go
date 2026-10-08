@@ -120,14 +120,16 @@ type Team struct {
 	Lead    Lead   `toml:"lead"`
 	Roles   []Role `toml:"role"`
 
-	file string
-	re   *regexp.Regexp
+	file    string
+	builtin bool
+	re      *regexp.Regexp
 }
 
 // Load reads the built-in teams and those in dir (which may be "" or
 // missing). A broken file is skipped and reported; the rest still load.
 func Load(dir string) ([]Team, []string) {
 	files := map[string][]byte{}
+	own := map[string]bool{}
 	var problems []string
 	entries, _ := fs.ReadDir(builtin, "teams")
 	for _, e := range entries {
@@ -135,14 +137,15 @@ func Load(dir string) ([]Team, []string) {
 		files[e.Name()] = data
 	}
 	if dir != "" {
-		own, _ := filepath.Glob(filepath.Join(dir, "*.toml"))
-		for _, path := range own {
+		paths, _ := filepath.Glob(filepath.Join(dir, "*.toml"))
+		for _, path := range paths {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("team %s: %v", path, err))
 				continue
 			}
 			files[filepath.Base(path)] = data
+			own[filepath.Base(path)] = true
 		}
 	}
 
@@ -158,6 +161,7 @@ func Load(dir string) ([]Team, []string) {
 			problems = append(problems, fmt.Sprintf("team %s: %v", n, err))
 			continue
 		}
+		t.builtin = !own[n]
 		teams = append(teams, t)
 	}
 	return teams, problems
@@ -202,17 +206,19 @@ func parse(file string, data []byte) (Team, error) {
 	return t, nil
 }
 
-// Pick is the team a run's "Team:" field names: the first whose match fits,
-// else the default one, else the first.
+// Pick is the team a run's team field names: the first whose match fits,
+// else the default one (a user's before a built-in), else the first.
 func Pick(teams []Team, field string) (Team, bool) {
 	for _, t := range teams {
 		if t.re != nil && t.re.MatchString(field) {
 			return t, true
 		}
 	}
-	for _, t := range teams {
-		if t.Default {
-			return t, true
+	for _, builtin := range []bool{false, true} {
+		for _, t := range teams {
+			if t.Default && t.builtin == builtin {
+				return t, true
+			}
 		}
 	}
 	if len(teams) > 0 {

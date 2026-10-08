@@ -327,7 +327,7 @@ func (m *Model) goLead() tea.Cmd {
 		m.status = sp.Label + " has no ticket run"
 		return nil
 	}
-	start := m.working("looking for the orchestrator of " + m.spaceName(sp) + "…")
+	start := m.working("looking for the lead of " + m.spaceName(sp) + "…")
 	src, client, worktree := m.pipe, m.client, sp.Key
 	return tea.Batch(start, func() tea.Msg {
 		live, err := ticket.ReadLive(client)

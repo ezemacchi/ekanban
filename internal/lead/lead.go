@@ -1,5 +1,5 @@
-// Package lead takes the user to the agent running a ticket (the team's lead,
-// the orchestrator for the built-in teams), opening one when none is open: a
+// Package lead takes the user to the agent running a ticket (the team's lead),
+// opening one when none is open: a
 // tab in the ticket's workspace, the agent the configuration names, and its
 // prompt written to the run folder.
 package lead
