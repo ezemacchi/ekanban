@@ -38,6 +38,7 @@ const (
 	modeDetail
 	modeHelp
 	modeHandoff
+	modeConfirm
 )
 
 // space is one row of the board: a directory, whatever the user recorded about
@@ -196,9 +197,10 @@ type Model struct {
 	// links are the clickable regions drawn on the last frame.
 	links []linkRegion
 
-	// The title doubles as a view switcher dropdown.
-	menuOpen bool
-	menuIdx  int
+	// menu is the menu open over the board, nil for none (menu.go).
+	menu *popup
+	// ask is the yes-or-no question open over the board (confirm.go).
+	ask *question
 
 	landed bool   // the cursor has been placed on a space at least once
 	status string // transient message shown in the footer
@@ -703,8 +705,10 @@ func (m *Model) clampColumnCursor() {
 	if m.col < 0 {
 		m.col = 0
 	}
-	if m.pipelineOn() {
-		if col := nav.Settle(m.col, len(m.board.Statuses), m.columnCount); col != m.col {
+	// A folded column hides its cards: the cursor leaves it, as it leaves an
+	// empty column on the computed board.
+	if m.pipelineOn() || m.folded(m.col) && m.columnCount(m.col) > 0 {
+		if col := nav.Settle(m.col, len(m.board.Statuses), m.navCount); col != m.col {
 			m.col, m.rowInCol = col, 0
 		}
 	}

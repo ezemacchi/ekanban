@@ -200,35 +200,6 @@ func (m *Model) jiraStage(key string) (string, bool) {
 	return col, show
 }
 
-// jiraLines are a Jira card's facts: its status, and that it has no worktree.
-func (m *Model) jiraLines(key string, width int) []string {
-	lines := []string{}
-	if i, ok := m.jr.issues[key]; ok {
-		if i.Summary != "" {
-			lines = append(lines, labelStyle.Render(truncate(i.Summary, width)))
-		}
-		lines = append(lines, m.jiraStatusLine(key, width))
-	}
-	// Short enough for a card: "no worktree — press H".
-	text := "no worktree" + strings.TrimRight(pressWith(m.hintKey("handoff"), ""), " ")
-	lines = append(lines, screen.Say(m.glyph(look.Pause, text), dimStyle, width))
-	return lines
-}
-
-// jiraStatusLine is "Jira: In Implementation" for a ticket on the list, or ""
-// when Jira is off or the ticket is not on it.
-func (m *Model) jiraStatusLine(key string, width int) string {
-	i, ok := m.jr.issues[key]
-	if !m.jiraOn() || !ok {
-		return ""
-	}
-	text := "Jira: " + i.Status
-	if i.Type != "" {
-		text += " · " + i.Type
-	}
-	return jiraStatusStyle(i.Category).Render(truncate(m.glyph(look.Jira, text), width))
-}
-
 func jiraStatusStyle(category string) lipgloss.Style {
 	switch category {
 	case "indeterminate":
@@ -283,38 +254,48 @@ func (m *Model) applyDetail(msg jiraDetailMsg) {
 // detailLimit is how many lines of the latest comment the detail shows.
 const detailLimit = 12
 
-// jiraDetailLines are the detail's Jira section: the linked tests and the
-// latest comment.
-func (m *Model) jiraDetailLines(key string, width int) []detailLine {
+// jiraTests are the detail's tests linked to the ticket, each opening on
+// click; while the ticket is read, a line that says so.
+func (m *Model) jiraTests(key string, width int) []detailLine {
 	if !m.jiraOn() || key == "" {
 		return nil
 	}
-	var lines []detailLine
 	d, ok := m.jr.detail[key]
 	if !ok {
 		if m.jr.fetching[key] {
-			lines = append(lines, plain(dimStyle.Render(truncate(m.spinner.Frame()+" reading "+key+" in Jira", width)))...)
+			return plain(dimStyle.Render(truncate(m.spinner.Frame()+" reading "+key+" in Jira", width)))
 		}
-		return lines
+		return nil
 	}
+	var lines []detailLine
 	if len(d.Tests) > 0 {
 		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Flask, fmt.Sprintf("%d linked tests", len(d.Tests))), width)))...)
 		for _, t := range d.Tests {
 			lines = append(lines, detailLine{text: dimStyle.Render(truncate("  "+t.Key+" "+t.Summary+" · "+t.Status, width)), url: links.Issue(t.Key)})
 		}
 	}
-	if c, ok := d.Latest(); ok {
-		head := fmt.Sprintf("latest comment · %s · %s", c.Author, humanAge(c.At))
-		lines = append(lines, plain("", noteStyle.Render(truncate(m.glyph(look.Comment, head), width)))...)
-		body := screen.Wrap(c.Body, width-2)
-		for i, l := range body {
-			if i == detailLimit {
-				more := fmt.Sprintf("  … %d more lines", len(body)-detailLimit) + pressWith(m.hintKey("yank"), "to copy all of it")
-				lines = append(lines, plain(screen.Say(more, dimStyle, width))...)
-				break
-			}
-			lines = append(lines, plain("  "+l)...)
+	return lines
+}
+
+// jiraComment is the ticket's latest comment, which is where QA writes what
+// failed.
+func (m *Model) jiraComment(key string, width int) []detailLine {
+	if !m.jiraOn() || key == "" {
+		return nil
+	}
+	c, ok := m.jr.detail[key].Latest()
+	if !ok {
+		return nil
+	}
+	lines := plain(noteStyle.Render(truncate(m.glyph(look.Comment, c.Author+" · "+humanAge(c.At)), width)))
+	body := screen.Wrap(c.Body, width)
+	for i, l := range body {
+		if i == detailLimit {
+			more := fmt.Sprintf("… %d more lines", len(body)-detailLimit) + pressWith(m.hintKey("yank"), "to copy all of it")
+			lines = append(lines, plain(screen.Say(more, dimStyle, width))...)
+			break
 		}
+		lines = append(lines, plain(l)...)
 	}
 	return lines
 }
@@ -734,10 +715,13 @@ func (m *Model) viewHandoff(base string) string {
 	lines = append(lines, "")
 	for _, done := range [][2]string{{"target", h.target}, {"team", h.team}} {
 		if done[1] != "" {
-			lines = append(lines, dimStyle.Render(done[0]+": ")+done[1])
+			lines = append(lines, screen.Field(done[0], []string{done[1]})...)
 		}
 	}
-	var help string
+	// The choices are clickable, and so are the buttons and the ✕; the
+	// zones are placed once the box is.
+	var choices []zone
+	var hints []hint
 	switch h.step {
 	case 0, 1:
 		ask := "Target branch"
@@ -750,21 +734,51 @@ func (m *Model) viewHandoff(base string) string {
 			if i == h.idx {
 				prefix = cursorStyle.Render(" ❯ ")
 			}
+			choices = append(choices, zone{Kind: zoneStatus, Y: len(lines), X0: 0, X1: inner, Choice: i})
 			lines = append(lines, prefix+fmt.Sprintf("%d %s", i+1, c))
 		}
-		help = screen.Key("j") + "/" + screen.Key("k") + " move · " + screen.Key("enter") + " choose · " + screen.Key("esc") + " cancel"
+		lines = append(lines, "", screen.Say(screen.Key("j")+"/"+screen.Key("k")+" move · or click one", dimStyle, inner))
+		hints = []hint{{Key: "enter", Label: "Choose"}, {Key: "esc", Label: "Cancel"}}
 	default:
 		lines = append(lines, labelStyle.Bold(true).Render("Runs"))
 		for _, l := range screen.Wrap(strings.Join(m.jr.cfg.Handoff.Args(m.handoffValues()), " "), inner-2) {
 			lines = append(lines, dimStyle.Render("  "+l))
 		}
 		lines = append(lines, "", "It creates the branch and worktree and starts the work.")
-		help = screen.Key("enter") + " hand it off · " + screen.Key("esc") + " cancel"
+		hints = []hint{{Key: "enter", Label: "Hand it off"}, {Key: "esc", Label: "Cancel"}}
 	}
-	body := title + "\n\n" + strings.Join(lines, "\n") + "\n\n" + screen.Say(help, dimStyle, inner)
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62")).
-		Padding(0, 1).Width(inner + 2).Render(body)
-	x := max0((m.width - lipgloss.Width(box)) / 2)
-	y := max0((m.height - lipgloss.Height(box)) / 2)
-	return overlay(base, box, x, y, m.width, m.height)
+	var buttons screen.Zones
+	bottom := screen.ButtonRows(&buttons, 0, 0, hints, inner)
+	box := screen.Modal(screen.Closable(title, inner), lines, bottom, inner)
+	x, y := screen.Center(lipgloss.Width(box), lipgloss.Height(box), m.width, m.height)
+
+	m.addZone(zone{Kind: zoneModal, Y: y, H: lipgloss.Height(box), X0: x, X1: x + lipgloss.Width(box)})
+	for _, z := range choices {
+		z.Y += y + screen.ModalBody
+		z.X0, z.X1 = z.X0+x+2, z.X1+x+2
+		m.addZone(z)
+	}
+	mark := len(m.zones)
+	m.zones = append(m.zones, buttons...)
+	m.zones.Shift(mark, x+2, y+screen.ModalBody+len(lines)+1)
+	m.addZone(screen.CloseZone(x, y, inner, "esc"))
+	return screen.Overlay(base, box, x, y, m.height)
+}
+
+// clickHandoff acts on a click while the handoff box is open: a choice picks
+// it, a button presses its key, and anything else is ignored, so a stray
+// click does not lose the steps taken.
+func (m *Model) clickHandoff(x, y int) (tea.Model, tea.Cmd) {
+	z, ok := m.zoneAt(x, y)
+	switch {
+	case !ok:
+	case z.Kind == zoneStatus:
+		if choices := m.handoffChoices(); z.Choice < len(choices) {
+			m.handoffPick(choices[z.Choice])
+			m.handoffSkip()
+		}
+	case z.Kind == zoneButton:
+		return m.handleKey(screen.KeyMsg(z.Key))
+	}
+	return m, nil
 }

@@ -159,6 +159,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			delta = -1
 		}
 		switch {
+		case m.menu != nil:
+			m.menu.Move(delta)
 		case m.mode == modeStatusPick:
 			m.pickerStep(delta)
 		case m.mode == modeNormal && m.layout == layoutKanban:
@@ -174,7 +176,14 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.mode == modeHandoff {
-		return m, nil // the box takes keys only
+		return m.clickHandoff(msg.X, msg.Y)
+	}
+	if m.mode == modeConfirm {
+		// Only its answers and its ✕ act: a stray click must not answer.
+		if z, ok := m.zoneAt(msg.X, msg.Y); ok && z.Kind == zoneButton {
+			return m.answer(z.Key)
+		}
+		return m, nil
 	}
 
 	if m.mode == modeHelp {
@@ -182,30 +191,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.titleHit(msg.X, msg.Y) {
-		if m.menuOpen {
-			m.menuOpen = false
-		} else {
-			m.openMenu()
-		}
-		return m, nil
-	}
-
 	// A link beats everything below it: clicking a PR or a check should open
-	// it, not move the cursor to that row.
-	if cmd, hit := m.openLinkAt(msg.X, msg.Y); hit {
-		return m, cmd
-	}
-
-	if m.menuOpen {
-		// A click inside the dropdown chooses; anywhere else dismisses it,
-		// which is what people expect of an open menu.
-		if i := m.menuItemAt(msg.X, msg.Y); i >= 0 {
-			m.chooseMenu(i)
-		} else {
-			m.menuOpen = false
+	// it, not move the cursor to that row. An open menu sits over both.
+	if m.menu == nil {
+		if model, cmd, hit := m.openLinkAt(msg.X, msg.Y); hit {
+			return model, cmd
 		}
-		return m, nil
 	}
 
 	if done, model, cmd := m.clickZone(msg.X, msg.Y); done {
@@ -236,8 +227,11 @@ func (m *Model) scroll(delta int) {
 // firstRow is the terminal row the list starts on. A docked board draws no
 // title, so its list starts at the top of the pane.
 func (m *Model) firstRow() int {
-	if m.sidebar {
+	switch {
+	case m.sidebar:
 		return 0
+	case m.layout == layoutTable:
+		return tableTop + 1 // and the table's headings
 	}
 	return 2 // the title, then the blank line under it
 }
@@ -301,27 +295,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 	}
 
-	// The dropdown swallows navigation while it is open, so the keyboard can
-	// drive it exactly like the mouse.
-	if m.menuOpen {
-		switch msg.String() {
-		case "esc", "q":
-			m.menuOpen = false
-		case "j", "down":
-			if m.menuIdx < len(menuLayouts)-1 {
-				m.menuIdx++
-			}
-		case "k", "up":
-			if m.menuIdx > 0 {
-				m.menuIdx--
-			}
-		case "enter", " ":
-			m.chooseMenu(m.menuIdx)
-		case "K":
-			m.menuOpen = false
-			m.toggleLayout()
-		}
-		return m, nil
+	// An open menu takes the keys, so the keyboard drives it exactly like
+	// the mouse.
+	if m.menu != nil {
+		return m.handleMenuKey(msg.String())
 	}
 
 	if handled, cmd := m.handleChord(msg); handled {
@@ -339,6 +316,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDetailKey(msg)
 	case modeHandoff:
 		return m.handleHandoffKey(msg)
+	case modeConfirm:
+		return m.answer(msg.String())
 	case modeNote, modeRename, modeMessage, modeFilter, modeManageAdd, modeManageRename:
 		return m.handleInputKey(msg)
 	case modeHelp:
@@ -388,6 +367,14 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.statusFilter != "" {
 			m.toggleStatusFilter()
+			return m, nil
+		}
+		// Esc backs out of things; it never closes the board, which is too
+		// easy to do by accident. Only the quit key does.
+		if msg.String() == "esc" {
+			if k := m.hintKey("quit"); k != "esc" {
+				m.status = "esc closes nothing here" + m.press("quit", "to close the board")
+			}
 			return m, nil
 		}
 		return m.quit()
@@ -466,7 +453,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			// Moving a grabbed card may land in an empty column (above);
 			// the cursor alone skips them.
-			m.col = nav.Step(m.col, delta, len(m.board.Statuses), m.columnCount)
+			m.col = nav.Step(m.col, delta, len(m.board.Statuses), m.navCount)
 			m.rowInCol = 0
 			m.clampColumnCursor()
 			return m, nil
@@ -477,11 +464,20 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleCurrentGroup()
 
 	case " ", "tab":
-		// Only the list has groups to fold.
-		if m.layout != layoutList {
-			return m, nil
+		// The list folds its groups, the kanban its columns.
+		switch m.layout {
+		case layoutKanban:
+			m.toggleFold(m.col)
+		case layoutList:
+			return m.toggleCurrentGroup()
 		}
-		return m.toggleCurrentGroup()
+		return m, nil
+
+	case ".":
+		m.openCardMenu(-1, -1)
+
+	case "!":
+		m.nextNeedingYou()
 
 	case "s":
 		if !m.requireSpace() {
@@ -519,10 +515,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 
 	case "/":
-		m.mode = modeFilter
-		m.input.SetValue(m.filter)
-		m.input.CursorEnd()
-		m.input.Focus()
+		m.startSearch()
 
 	case "F":
 		m.toggleStatusFilter()
@@ -739,6 +732,16 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.applyStatus(m.board.Statuses[idx])
 			}
 		}
+		// The rest of the card's actions are the detail's buttons too: they
+		// close it and do what they do on the board.
+		if sp := m.selected(); sp != nil {
+			for _, a := range m.cardActions(sp) {
+				if k := m.hintKey(a.action); k != "" && m.keyMap().Resolve(k) == key {
+					m.mode = modeNormal
+					return m.handleNormalKey(msg)
+				}
+			}
+		}
 	}
 	return m, nil
 }
@@ -926,11 +929,29 @@ func (m *Model) openSelected() (tea.Model, tea.Cmd) {
 
 // forgetSelected drops a space's stored status. Live spaces reappear
 // immediately with the default status; archived ones vanish for good.
+// forgetSelected asks before forgetting the selected space: what the board
+// remembers of it cannot be brought back.
 func (m *Model) forgetSelected() (tea.Model, tea.Cmd) {
 	sp := m.selected()
 	if sp == nil || !m.requireWorktree() {
 		return m, nil
 	}
+	var lines []string
+	if m.pipelineOn() {
+		lines = []string{"Its note, its place in the column and the pull request the board found are lost. The card stays where its column puts it."}
+	} else {
+		st, _ := m.board.StatusByID(m.board.DefaultStatusID())
+		lines = []string{"Its status, note and place in its group are lost: it goes back to " + st.Label + "."}
+		if !sp.Live {
+			lines = append(lines, "It is archived, so it leaves the board.")
+		}
+	}
+	m.confirm("Forget "+m.spaceName(sp)+"?", lines, func() (tea.Model, tea.Cmd) { return m.forget(sp) })
+	return m, nil
+}
+
+// forget drops what the board remembers of sp.
+func (m *Model) forget(sp *space) (tea.Model, tea.Cmd) {
 	delete(m.board.Entries, sp.Key)
 	m.save()
 
@@ -1003,9 +1024,14 @@ func (m *Model) cycleSort() {
 		m.status = "sorting is a table thing" + m.press("layout", "to get there")
 		return
 	}
+	m.setSort(m.sort.next())
+}
+
+// setSort orders the table by s, keeping the selection.
+func (m *Model) setSort(s tableSort) {
 	selected := m.selectedKey()
 
-	m.sort = m.sort.next()
+	m.sort = s
 	m.board.TableSort = m.sort.String()
 	m.grabbed = ""
 	m.save()

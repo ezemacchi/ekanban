@@ -263,23 +263,29 @@ func prCell(pr gh.PR) string {
 	return strings.Join(parts, " ")
 }
 
-// prStyled colours the cell by whatever most needs attention: a failing check
-// first, then a changes-requested review.
+// prStyled colours the cell by whatever most needs attention; see prStyle.
 func prStyled(pr gh.PR, width int) string {
-	text := truncate(prCell(pr), width)
+	return prStyle(pr).Render(truncate(prCell(pr), width))
+}
+
+// prBad is a pull request that cannot land as it stands: a failing check, a
+// conflict, or changes asked for.
+func prBad(pr gh.PR) bool {
+	return pr.Checks == gh.ChecksFail || pr.Merge == gh.MergeConflict || pr.Review == "CHANGES_REQUESTED"
+}
+
+// prStyle is the colour of whatever most needs attention: what stops it
+// first, then an approval, then checks still running.
+func prStyle(pr gh.PR) lipgloss.Style {
 	switch {
-	case pr.Checks == gh.ChecksFail:
-		return prFailStyle.Render(text)
-	case pr.Merge == gh.MergeConflict:
-		return prFailStyle.Render(text)
-	case pr.Review == "CHANGES_REQUESTED":
-		return prFailStyle.Render(text)
+	case prBad(pr):
+		return prFailStyle
 	case pr.Review == "APPROVED" && pr.Checks != gh.ChecksPending:
-		return prPassStyle.Render(text)
+		return prPassStyle
 	case pr.Checks == gh.ChecksPending:
-		return prPendingStyle.Render(text)
+		return prPendingStyle
 	default:
-		return prDimStyle.Render(text)
+		return prDimStyle
 	}
 }
 

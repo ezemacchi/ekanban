@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -87,14 +88,24 @@ func TestJiraTicketsAreCardsPlacedByStatus(t *testing.T) {
 
 // A card says what Jira says, so an In Implementation ticket is never
 // mistaken for one that was not started.
+//
+// At rest a ticket with no worktree says how to start it; selected, a card
+// shows its Jira status too.
 func TestCardsShowTheJiraStatus(t *testing.T) {
 	m := jiraBoard(t)
 	m.width = 220
-	out := ansi.Strip(m.View())
-	for _, want := range []string{"Jira: Ready", "Jira: In Implementation", "Jira: In Quality Review", "no worktree — press H"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("board is missing %q:\n%s", want, out)
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "no worktree — press H") {
+		t.Fatalf("board is missing how to start a ticket:\n%s", out)
+	}
+	for _, c := range []struct{ key, want string }{{"ABC-2", "Jira: Ready"}, {"ABC-3", "Jira: In Implementation"}} {
+		selectJiraCard(t, m, c.key)
+		if out := ansi.Strip(m.View()); !strings.Contains(out, c.want) {
+			t.Fatalf("selected %s is missing %q:\n%s", c.key, c.want, out)
 		}
+	}
+	selectSpace(t, m, tmp+"api")
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "Jira: In Quality Review") {
+		t.Fatalf("the worktree's card is missing its Jira status:\n%s", out)
 	}
 }
 
@@ -143,7 +154,7 @@ func TestHandoffAsksTargetThenTeamThenConfirms(t *testing.T) {
 		t.Fatalf("target step:\n%s", out)
 	}
 	send(t, m, key("2"))
-	if out := ansi.Strip(m.View()); !strings.Contains(out, "target: master") || !strings.Contains(out, "standalone") {
+	if out := ansi.Strip(m.View()); !regexp.MustCompile(`TARGET +master`).MatchString(out) || !strings.Contains(out, "standalone") {
 		t.Fatalf("team step:\n%s", out)
 	}
 	send(t, m, key("enter")) // first team: standalone
@@ -221,7 +232,7 @@ func TestPullRequestKeyOpensTheCardsPullRequest(t *testing.T) {
 	}
 	m.layout = layoutKanban
 	m.width = 200
-	if out := ansi.Strip(m.View()); !strings.Contains(out, "P pull request") {
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "P PR") {
 		t.Fatalf("no button for it:\n%s", out)
 	}
 
@@ -309,7 +320,7 @@ func TestYankIsOnTheHelpAndRebinds(t *testing.T) {
 	selectSpace(t, m, tmp+"api")
 	m.layout = layoutKanban
 	m.width = 220
-	if out := ansi.Strip(m.View()); !strings.Contains(out, "Y copy") {
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "Y Copy") {
 		t.Fatalf("footer does not name the rebound key:\n%s", out)
 	}
 	if k := m.keyMap().Resolve("y"); k != "" {
@@ -380,11 +391,8 @@ func TestTicketAndPrototypeKeysWorkInTheDetail(t *testing.T) {
 		t.Fatalf("t in the detail: %q", m.status)
 	}
 	m.width = 200
-	out := ansi.Strip(m.View())
-	for _, want := range []string{"t ticket", "p prototype"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("detail is missing the hint %q:\n%s", want, out)
-		}
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "t Ticket") {
+		t.Fatalf("detail is missing the ticket button:\n%s", out)
 	}
 	send(t, m, key("p"))
 	if !strings.Contains(m.status, "ABC-2 has no worktree yet") {
@@ -430,11 +438,16 @@ func TestTicketAndPrototypeAreOnTheFooterAndHelp(t *testing.T) {
 	m.layout = layoutKanban
 	m.width = 240
 	out := ansi.Strip(m.View())
-	for _, want := range []string{"t ticket", "X prototype", "P pull request"} {
+	for _, want := range []string{"t Ticket", "P PR"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("footer is missing %q:\n%s", want, out)
+			t.Fatalf("the card is missing %q:\n%s", want, out)
 		}
 	}
+	send(t, m, key("."))
+	if menu := ansi.Strip(m.View()); !regexp.MustCompile(`Open the prototype +X`).MatchString(menu) {
+		t.Fatalf("the card's menu does not offer the prototype on X:\n%s", menu)
+	}
+	send(t, m, key("esc"))
 	if k := m.keyMap().Resolve("p"); k != "" {
 		t.Fatalf("p still answers after being rebound: %q", k)
 	}

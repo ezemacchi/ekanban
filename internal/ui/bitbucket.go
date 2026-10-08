@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -11,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ezemacchi/ekanban/internal/bitbucket"
-	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
 )
@@ -143,36 +141,6 @@ func (m *Model) judge(info pipeline.Info) (bitbucket.Review, bitbucket.Judgement
 	return r, j, j.Verdict != bitbucket.NoVerdict
 }
 
-// bitbucketLine is the card's one line of verdict, "" when there is nothing
-// to say.
-func (m *Model) bitbucketLine(info pipeline.Info, width int) string {
-	if !m.bbOn() || info.PR <= 0 || info.MergedTo != "" {
-		return ""
-	}
-	_, j, ok := m.judge(info)
-	if !ok {
-		if msg, failed := m.bb.errs[info.PR]; failed {
-			return dimStyle.Render(truncate(m.glyph(look.Wifi, "Bitbucket: "+msg), width))
-		}
-		if _, asked := m.bb.at[info.PR]; !asked && m.bb.loading {
-			return dimStyle.Render(truncate(m.spinner.Frame()+" reading Bitbucket", width))
-		}
-		return ""
-	}
-	first := j.Why
-	more := ""
-	if len(first) > 1 {
-		more = fmt.Sprintf(" +%d", len(first)-1)
-	}
-	switch j.Verdict {
-	case bitbucket.Fit:
-		return prPassStyle.Render(truncate(m.glyph(look.Check, "ready to merge"), width))
-	case bitbucket.Waiting:
-		return prPendingStyle.Render(truncate(m.glyph(look.Clock, "waiting: "+first[0]+more), width))
-	}
-	return prFailStyle.Render(truncate(m.glyph(look.Warning, "blocked: "+first[0]+more), width))
-}
-
 // bitbucketDetailLines is the detail's section: every reason, each report
 // with its own words and figures, and who said what.
 func (m *Model) bitbucketDetailLines(info pipeline.Info, width int) []detailLine {
@@ -180,45 +148,48 @@ func (m *Model) bitbucketDetailLines(info pipeline.Info, width int) []detailLine
 	if !ok {
 		return nil
 	}
-	head := "Bitbucket"
-	if r.Target != "" {
-		head += " · into " + r.Target
-	}
-	lines := plain("", labelStyle.Render(truncate(head, width)))
-
-	for _, v := range r.Vetoes {
-		lines = append(lines, plain(prFailStyle.Render(truncate("  "+nonBlank(v.Summary, "refused by Bitbucket"), width)))...)
-		for _, l := range bitbucket.Lines(v.Detail) {
-			lines = append(lines, plain(dimStyle.Render(truncate("    "+l, width)))...)
+	var lines []detailLine
+	// Under a line, what explains it: dim and indented, cut to the width.
+	explain := func(texts ...string) {
+		for _, t := range texts {
+			for _, l := range screen.Wrap(t, width-2) {
+				lines = append(lines, plain(dimStyle.Render("  "+l))...)
+			}
 		}
+	}
+	for _, v := range r.Vetoes {
+		lines = append(lines, plain(prFailStyle.Render(truncate("✗ "+nonBlank(v.Summary, "refused by Bitbucket"), width)))...)
+		explain(bitbucket.Lines(v.Detail)...)
 	}
 	if r.Conflicted {
-		lines = append(lines, plain(prFailStyle.Render(truncate("  has merge conflicts", width)))...)
+		lines = append(lines, plain(prFailStyle.Render(truncate("✗ has merge conflicts", width)))...)
 	}
+	// A report that passed is one line; one that failed, or has not
+	// finished, says why and with what figures, since that is what you will
+	// be asked about.
 	for _, c := range r.Checks {
-		style, word := prPendingStyle, "not finished"
+		style, mark, word := prPendingStyle, "◌", "not finished"
 		switch c.Result {
 		case "PASS":
-			style, word = prPassStyle, "passed"
+			style, mark, word = prPassStyle, "✓", "passed"
 		case "FAIL":
-			style, word = prFailStyle, "failed"
+			style, mark, word = prFailStyle, "✗", "failed"
 		}
-		line := detailLine{text: style.Render(truncate("  "+c.Title+" "+word, width))}
+		line := detailLine{text: style.Render(truncate(mark+" "+c.Title+" "+word, width))}
 		if strings.HasPrefix(c.Link, "https://") {
 			line.url = c.Link // the report's own page, SonarQube's dashboard for one
 		}
 		lines = append(lines, line)
-		for _, l := range bitbucket.Lines(c.Details) {
-			lines = append(lines, plain(dimStyle.Render(truncate("    "+l, width)))...)
+		if c.Result == "PASS" {
+			continue
 		}
+		explain(bitbucket.Lines(c.Details)...)
 		if len(c.Metrics) > 0 {
 			var parts []string
 			for _, mt := range c.Metrics {
 				parts = append(parts, mt.Title+" "+mt.Value)
 			}
-			for _, l := range screen.Wrap(strings.Join(parts, " · "), width-4) {
-				lines = append(lines, plain(dimStyle.Render("    "+l))...)
-			}
+			explain(strings.Join(parts, " · "))
 		}
 	}
 	if len(r.Reviewers) > 0 {
@@ -226,12 +197,12 @@ func (m *Model) bitbucketDetailLines(info pipeline.Info, width int) []detailLine
 		for _, rv := range r.Reviewers {
 			who = append(who, rv.Name+" "+reviewerWord(rv.Status))
 		}
-		for _, l := range screen.Wrap("reviewers: "+strings.Join(who, " · "), width-2) {
-			lines = append(lines, plain(dimStyle.Render("  "+l))...)
+		for _, l := range screen.Wrap("reviewers: "+strings.Join(who, " · "), width) {
+			lines = append(lines, plain(dimStyle.Render(l))...)
 		}
 	}
 	if j.Verdict == bitbucket.Fit && len(r.Checks) == 0 && len(r.Vetoes) == 0 {
-		lines = append(lines, plain(dimStyle.Render("  no checks stand in the way"))...)
+		lines = append(lines, plain(dimStyle.Render("no checks stand in the way"))...)
 	}
 	return lines
 }

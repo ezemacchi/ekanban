@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,11 +37,8 @@ var (
 	dimStyle    = look.Dim
 	cursorStyle = look.Cursor
 	errStyle    = look.Err
-	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
 	waitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	doneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
-	// linkStyle marks a line a click opens.
-	linkStyle = look.Dim.Underline(true)
 )
 
 // Model is the bubbletea model for one ticket.
@@ -87,12 +83,22 @@ type Model struct {
 	scroll    int
 	follow    bool
 	colOffset int // the first column drawn when they do not all fit
+
+	// folded are the columns ("col:<id>") and sections ("section:<title>")
+	// folded by a click or the fold key.
+	folded map[string]bool
+	// helping is whether the help is open over the board.
+	helping bool
 }
 
 // click selects the card under the pointer; a second click on it goes to its
 // tab, like enter. A click on a column's header selects the column, and one on
 // a key's line or button presses that key.
 func (m *Model) click(x, y int) tea.Cmd {
+	if m.helping {
+		m.helping = false // a click anywhere closes the help
+		return nil
+	}
 	z, ok := m.zones.At(x, y)
 	if !ok {
 		return nil
@@ -101,6 +107,13 @@ func (m *Model) click(x, y int) tea.Cmd {
 	switch z.Kind {
 	case screen.OnButton:
 		return m.key(z.Key)
+	case screen.OnControl:
+		switch {
+		case z.ID == "fold":
+			m.toggle(m.columnFold(z.Col))
+		case strings.HasPrefix(z.ID, "section:"):
+			m.toggle(z.ID)
+		}
 	case screen.OnColumn:
 		if m.cardCount(z.Col) > 0 {
 			m.col, m.row = z.Col, 0
@@ -129,11 +142,27 @@ var Actions = []keys.Action{
 	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
 	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
 	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
+	{Name: "fold", Keys: []string{" ", "tab"}, Help: "fold or unfold the column"},
 	{Name: "orchestrator", Keys: []string{"o"}, Help: "go to the orchestrator (the agent running the team), or open one"},
 	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
+	{Name: "help", Keys: []string{"?"}, Help: "this help"},
 	{Name: "quit", Keys: []string{"q"}, Help: "quit"},
+}
+
+// helpLayout is how the help groups the actions; the words are each
+// action's own help, above.
+var helpLayout = []screen.HelpSection{
+	{Title: "Move", Rows: [][]string{{"left", "right"}, {"down", "up"}, {"top", "bottom"}}},
+	{Title: "The selected role", Rows: [][]string{{"jump"}}},
+	{Title: "The run", Rows: [][]string{{"orchestrator"}, {"open-issue"}, {"prototype"}, {"fold"}, {"refresh"}, {"help"}, {"quit"}}},
+}
+
+// helpNotes explain the board rather than drive it.
+var helpNotes = []string{
+	"mouse: click selects · click again goes to the role's tab · every button does what its key does",
+	"a column's ▾ folds it, and so does a section's: Now, Activity, Open questions",
 }
 
 // Settings is what config.toml says about the ticket board.
@@ -362,6 +391,10 @@ func (m *Model) note(agents []ticket.Agent, at time.Time) {
 
 func (m *Model) key(k string) tea.Cmd {
 	m.follow = true
+	if m.helping {
+		m.helping = false // any key closes the help
+		return nil
+	}
 	if m.chord == "g" {
 		m.chord = ""
 		if k == "g" {
@@ -416,6 +449,10 @@ func (m *Model) key(k string) tea.Cmd {
 		return func() tea.Msg { _ = look.OpenURL(page); return nil }
 	case "enter":
 		return m.focusSelected()
+	case " ":
+		m.toggle(m.columnFold(m.col))
+	case "?":
+		m.helping = true
 	}
 	m.clamp()
 	return nil
@@ -436,17 +473,26 @@ func (m *Model) cardsIn(col ticket.Column) []ticket.Card {
 
 func (m *Model) cardCount(col int) int { return len(m.cardsIn(m.columnAt(col))) }
 
+// navCount is the cards the cursor can reach in a column: none in a folded
+// one.
+func (m *Model) navCount(col int) int {
+	if m.isFolded(m.columnFold(col)) {
+		return 0
+	}
+	return m.cardCount(col)
+}
+
 func (m *Model) stepColumn(dir int) {
-	m.col = nav.Step(m.col, dir, len(m.columns()), m.cardCount)
+	m.col = nav.Step(m.col, dir, len(m.columns()), m.navCount)
 	m.row = 0
 }
 
 func (m *Model) clamp() {
 	// A refresh can empty the column under the cursor.
-	if col := nav.Settle(m.col, len(m.columns()), m.cardCount); col != m.col {
+	if col := nav.Settle(m.col, len(m.columns()), m.navCount); col != m.col {
 		m.col, m.row = col, 0
 	}
-	n := m.cardCount(m.col)
+	n := m.navCount(m.col)
 	if m.row >= n {
 		m.row = n - 1
 	}
@@ -558,6 +604,10 @@ func (m *Model) View() string {
 	footer := m.footer(width, len(lines)-end)
 	m.zones.PlaceFooter(screen.LinesIn(b.String()))
 	b.WriteString(footer)
+	if m.helping {
+		groups := screen.HelpFor(m.keyMap(), helpLayout, nil)
+		return screen.HelpOver(b.String(), groups, helpNotes, width, max(m.height, screen.LinesIn(b.String())+1))
+	}
 	return b.String()
 }
 
@@ -604,42 +654,42 @@ func (m *Model) body(width, top int) string {
 	r := m.run
 	ic := m.icons
 	text := width - 2
+	k := m.keyMap().Key
 	var b strings.Builder
-	// line writes one line; a click on it presses the key of action, if any.
-	line := func(s, action string) {
-		if action != "" {
-			y := top + screen.LinesIn(b.String())
-			m.zones.Add(screen.Zone{Kind: screen.OnButton, Y: y, X0: 1, X1: 1 + lipgloss.Width(s), Key: m.keyMap().Key(action)})
-		}
-		b.WriteString(" " + s + "\n")
-	}
+	y := func() int { return top + screen.LinesIn(b.String()) }
+	line := func(s string) { b.WriteString(" " + s + "\n") }
+	items := func(left, right []screen.Item) { line(screen.Ends(&m.zones, y(), 1, left, right, text)) }
 
-	line(linkStyle.Render(look.Truncate(ic.With(look.Jira, r.JiraURL), text)), "open-issue")
+	// What the ticket is, then where to read more about it.
+	for _, l := range r.Objective {
+		for _, w := range screen.Wrap(l, text) {
+			line(screen.Inline(w, lipgloss.NewStyle(), text))
+		}
+	}
+	links := []screen.Item{screen.Button(screen.Hint{Key: k("open-issue"), Label: ic.With(look.Jira, "Ticket "+r.Key+" ↗")})}
 	switch {
 	case r.Prototype != "":
-		line(linkStyle.Render(look.Truncate(ic.With(look.Brush, "Prototype "+r.Spec+": "+filepath.Base(r.Prototype)), text)), "prototype")
+		links = append(links, screen.Button(screen.Hint{Key: k("prototype"), Label: ic.With(look.Brush, "Prototype "+orDash(r.Spec)+" ↗")}))
 	case r.Spec != "":
-		line(dimStyle.Render(look.Truncate(ic.With(look.Brush, "No prototype for "+r.Spec), text)), "")
+		links = append(links, screen.Text(dimStyle.Render(ic.With(look.Brush, "no prototype for "+r.Spec))))
 	}
-	for _, l := range r.Objective {
-		line(look.Truncate(l, text), "")
-	}
-	orchestratorName := strings.ToLower(r.Orchestrator.Label)
-	orchestratorKey := m.keyMap().Key("orchestrator")
-	orch := "no " + orchestratorName + " open" + keyHint(orchestratorKey, "opens one")
-	orchStyle := dimStyle
+	items(links, nil)
+	b.WriteString("\n")
+
+	// Who runs the team, and the way to them.
+	state, style, button := "not open", dimStyle, "Open one"
 	if r.OrchestratorPane != "" {
 		al := look.Agent(r.OrchestratorStatus)
-		orch = orchestratorName + ": " + orDash(al.Word)
+		state, button = orDash(al.Word), "Go there"
 		if r.OrchestratorTitle != "" {
-			orch += " · " + r.OrchestratorTitle
+			state += " · " + r.OrchestratorTitle
 		}
-		orch += keyHint(orchestratorKey, "goes there")
 		if r.OrchestratorStatus != "idle" {
-			orchStyle = al.Style
+			style = al.Style
 		}
 	}
-	line(screen.Say(ic.With(look.Sitemap, orch), orchStyle, text), "orchestrator")
+	orch := titleStyle.Render(ic.With(look.Sitemap, orDash(r.Orchestrator.Label))) + "  " + style.Render(state)
+	items([]screen.Item{screen.Text(orch)}, []screen.Item{screen.Button(screen.Hint{Key: k("orchestrator"), Label: button})})
 	b.WriteString("\n")
 
 	cols := m.kanbanColumns()
@@ -647,52 +697,84 @@ func (m *Model) body(width, top int) string {
 	from, end := screen.ScrollColumns(widths, m.colOffset, m.col, width)
 	m.colOffset = from
 	for i := from; i < end; i++ {
-		if widths[i] == 0 {
+		if widths[i] == 0 || cols[i].Folded {
 			continue
 		}
 		col := m.columnAt(i)
 		for j, card := range m.cardsIn(col) {
-			lines := m.renderCard(card, col, i == m.col && j == m.row, widths[i]-screen.Gutter)
-			cols[i].Cards = append(cols[i].Cards, screen.Card{Lines: lines, Choices: -1})
+			cols[i].Cards = append(cols[i].Cards, m.roleCard(card, col, i == m.col && j == m.row))
 		}
 	}
-	b.WriteString(screen.Draw(&m.zones, cols, widths, from, end, top+screen.LinesIn(b.String()), screen.Tallest(cols)))
+	b.WriteString(screen.Draw(&m.zones, cols, widths, from, end, y(), screen.Tallest(cols)))
 
-	heading := func(glyph, s string) { b.WriteString("\n"); line(headStyle.Render(ic.With(glyph, s)), "") }
-	if len(r.CurrentStep) > 0 {
-		heading(look.Play, "Now")
-		for _, l := range r.CurrentStep {
-			line(look.Truncate(l, text), "")
+	// What the run says it is doing and asking, each a section that folds.
+	section := func(title string, count int, lines []string) {
+		id := "section:" + title
+		b.WriteString("\n")
+		items([]screen.Item{screen.Section(title, count, m.isFolded(id), id)}, nil)
+		if m.isFolded(id) {
+			return
 		}
+		for _, l := range lines {
+			line("  " + l)
+		}
+	}
+	inline := func(s string, style lipgloss.Style) string { return screen.Inline(s, style, text-2) }
+	if len(r.CurrentStep) > 0 {
+		var now []string
+		for _, l := range r.CurrentStep {
+			now = append(now, inline(l, lipgloss.NewStyle()))
+		}
+		section("Now", -1, now)
 	}
 	if len(m.activity) > 0 {
-		heading(look.Clock, "Activity")
+		var act []string
 		for i, l := range m.activity {
 			style := lipgloss.NewStyle()
 			if i > 0 {
 				style = dimStyle
 			}
-			line(style.Render(look.Truncate(l, text)), "")
+			act = append(act, style.Render(look.Truncate(l, text-2)))
 		}
+		section("Activity", len(m.activity), act)
 	}
-	heading(look.Question, fmt.Sprintf("Open questions %d", len(r.Questions)))
+	var qs []string
 	if len(r.Questions) == 0 {
-		line(dimStyle.Render("none in "+r.Layout().State), "")
+		qs = append(qs, dimStyle.Render("none in "+r.Layout().State))
 	}
-	limit := 8
 	for i, q := range r.Questions {
-		if i == limit {
-			line(dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-limit, r.Layout().State)), "")
+		if i == questionsShown {
+			qs = append(qs, dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-questionsShown, r.Layout().State)))
 			break
 		}
-		line("- "+look.Truncate(q, text-2), "")
+		qs = append(qs, "- "+screen.Inline(q, lipgloss.NewStyle(), text-4))
 	}
+	section("Open questions", len(r.Questions), qs)
 	if r.Landed {
 		b.WriteString("\n")
-		line(doneStyle.Render(ic.With(look.Rocket, "Landed: the pull request is ready for review")), "")
+		line(doneStyle.Render(ic.With(look.Rocket, "Landed: the pull request is ready for review")))
 	}
 	return b.String()
 }
+
+// questionsShown is how many open questions the board lists.
+const questionsShown = 8
+
+// isFolded is whether a column ("col:<id>") or a section ("section:<title>")
+// is folded.
+func (m *Model) isFolded(id string) bool { return m.folded[id] }
+
+// toggle folds or unfolds a column or a section.
+func (m *Model) toggle(id string) {
+	if m.folded == nil {
+		m.folded = map[string]bool{}
+	}
+	m.folded[id] = !m.folded[id]
+	m.clamp()
+}
+
+// columnFold is the fold id of the column shown in position i.
+func (m *Model) columnFold(i int) string { return "col:" + m.columns()[i].ID }
 
 // kanbanColumns are the run's columns, without their cards yet.
 func (m *Model) kanbanColumns() []screen.Column {
@@ -703,7 +785,8 @@ func (m *Model) kanbanColumns() []screen.Column {
 		if color == "" {
 			color = defaultColumnColor
 		}
-		cols[i] = screen.Column{Label: m.icons.With(def.Icon, def.Label), Color: color, Count: m.cardCount(i), Selected: -1}
+		cols[i] = screen.Column{Label: m.icons.With(def.Icon, def.Label), Color: color, Count: m.cardCount(i),
+			Folded: m.isFolded(m.columnFold(i)), Selected: -1}
 		if i == m.col {
 			cols[i].Selected = m.row
 		}
@@ -714,41 +797,41 @@ func (m *Model) kanbanColumns() []screen.Column {
 // defaultColumnColor is a column header's colour when the column sets none.
 const defaultColumnColor = "111"
 
-// renderCard draws a role as a boxed card width cells wide; the border shows
-// the cursor.
-func (m *Model) renderCard(card ticket.Card, col ticket.Column, selected bool, width int) []string {
+// roleCard is a role as a card. A finished role has nothing more to say than
+// that it finished, so it takes one line unless it is selected; a role
+// waiting on you, or stuck, asks for you.
+func (m *Model) roleCard(card ticket.Card, col ticket.Column, selected bool) screen.Card {
 	ic := m.icons
-	text := look.CardInner(width)
-	style := lipgloss.NewStyle()
-	switch {
-	case selected:
-		style = cursorStyle
-	case col == ticket.Waiting:
-		style = waitStyle
-	case col == ticket.Done:
-		style = doneStyle
+	c := screen.Card{
+		Title:     ic.With(card.Role.Icon, card.Role.Label),
+		Selected:  selected,
+		Attention: col == ticket.Waiting || card.Stuck,
+		Flat:      col == ticket.Done && !selected,
 	}
-	lines := []string{style.Render(look.Truncate(ic.With(card.Role.Icon, card.Role.Label), text))}
+	if c.Flat {
+		c.Badge = doneStyle.Render("✓")
+		if card.Note != "" {
+			c.Body = []string{dimStyle.Render(card.Note)}
+		}
+		return c
+	}
 	if card.PaneID != "" {
 		al := look.Agent(card.Status)
 		state := orDash(al.Word)
 		if card.Title != "" {
 			state += " · " + card.Title
 		}
-		lines = append(lines, al.Style.Render(look.Truncate(ic.With(al.Glyph, state), text)))
+		c.Body = append(c.Body, al.Style.Render(ic.With(al.Glyph, state)))
+		c.Actions = []screen.Hint{{Key: m.keyMap().Key("jump"), Label: "Go to its tab"}}
 	}
 	if card.Note != "" {
-		note, noteStyle := card.Note, dimStyle
+		note, style := card.Note, dimStyle
 		if card.Stuck {
-			note, noteStyle = ic.With(look.Warning, note), waitStyle
+			note, style = ic.With(look.Warning, note), waitStyle
 		}
-		lines = append(lines, noteStyle.Render(look.Truncate(note, text)))
+		c.Body = append(c.Body, style.Render(note))
 	}
-	border := look.CardBorder
-	if selected {
-		border = look.CardSelected
-	}
-	return look.Card(lines, width, border)
+	return c
 }
 
 // footer is the state line (when the run was read, what scrolled out of view,
@@ -771,11 +854,12 @@ func (m *Model) footer(width, below int) string {
 	}
 	k := m.keyMap().Key
 	hints := []screen.Hint{
-		{Key: k("jump"), Label: "go"}, {Key: k("orchestrator"), Label: "orchestrator"},
-		{Key: k("open-issue"), Label: "tracker"}, {Key: k("prototype"), Label: "prototype"},
-		{Key: k("refresh"), Label: "refresh"}, {Key: k("quit"), Label: "quit"},
+		{Key: k("jump"), Label: "Go"}, {Key: k("orchestrator"), Label: "Orchestrator"},
+		{Key: k("open-issue"), Label: "Ticket"}, {Key: k("prototype"), Label: "Prototype"},
+		{Key: k("refresh"), Label: "Refresh"},
 	}
-	return first + "\n " + screen.Buttons(&m.zones, 1, 1, hints, width-2)
+	right := []screen.Item{screen.Button(screen.Hint{Key: k("help"), Label: "Help"}), screen.Button(screen.Hint{Key: k("quit"), Label: "Quit"})}
+	return screen.Footer(&m.zones, first, hints, right, width)
 }
 
 // keyHint is " · <key> <what>" with the key marked for screen.Say, or ""

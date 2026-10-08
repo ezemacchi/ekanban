@@ -34,20 +34,32 @@ func (m *Model) zoneAt(x, y int) (zone, bool) { return m.zones.At(x, y) }
 var linesIn = screen.LinesIn
 
 // hint is one clickable key hint: what to press and what it does.
-type hint struct{ key, label string }
+type hint = screen.Hint
 
 // buttons draws hints as footer buttons on footer row line, from column x.
 func (m *Model) buttons(line, x int, hints []hint, width int) string {
-	out := make([]screen.Hint, len(hints))
-	for i, h := range hints {
-		out[i] = screen.Hint{Key: h.key, Label: h.label}
-	}
-	return screen.Buttons(&m.zones, line, x, out, width)
+	mark := len(m.zones)
+	out := screen.Buttons(&m.zones, line, x, hints, width)
+	m.zones.MarkFooter(mark)
+	return out
 }
 
 // clickZone acts on a click that landed on a zone; false when there was none.
 func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 	z, ok := m.zoneAt(x, y)
+	if m.menu != nil {
+		// A menu takes the click: a choice chooses, anywhere else closes it,
+		// as an open menu does.
+		switch {
+		case ok && z.Kind == zoneStatus:
+			model, cmd := m.chooseMenu(z.Choice)
+			return true, model, cmd
+		case ok && z.Kind == zoneModal:
+		default:
+			m.menu = nil
+		}
+		return true, m, nil
+	}
 	if !ok {
 		if m.mode == modeStatusPick {
 			// A click away from the choices puts the picker down.
@@ -62,7 +74,10 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 	}
 	switch z.Kind {
 	case zoneButton:
-		model, cmd := m.handleKey(screen.KeyMsg(z.Key))
+		model, cmd := m.pressKey(z.Key)
+		return true, model, cmd
+	case screen.OnControl:
+		model, cmd := m.control(z)
 		return true, model, cmd
 	case zoneStatus:
 		if z.Choice >= 0 && z.Choice < len(m.board.Statuses) {
@@ -74,7 +89,10 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 		if m.mode != modeNormal {
 			return true, m, nil
 		}
+		// A column's name narrows the board to it; the chip it leaves in
+		// the top bar, or a second click, brings the rest back.
 		m.col, m.rowInCol = z.Col, 0
+		m.toggleStatusFilter()
 		m.clampColumnCursor()
 		return true, m, nil
 	case zoneCard:
@@ -94,6 +112,37 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 		return true, m, nil // inside the box, on nothing clickable
 	}
 	return true, m, nil
+}
+
+// control does what a click on one of the board's own controls means.
+func (m *Model) control(z zone) (tea.Model, tea.Cmd) {
+	switch z.ID {
+	case "views":
+		if m.menu != nil {
+			m.menu = nil
+		} else {
+			m.openMenu()
+		}
+	case "search":
+		m.startSearch()
+	case "clear-search":
+		m.filter = ""
+		m.archiveIdx = 0
+		m.rebuild()
+	case "clear-only":
+		if m.statusFilter != "" {
+			m.toggleStatusFilter()
+		}
+	case "fold":
+		if m.mode == modeNormal {
+			m.toggleFold(z.Col)
+		}
+	default:
+		if by, ok := strings.CutPrefix(z.ID, "sort:"); ok && m.mode == modeNormal {
+			m.setSort(parseSort(by))
+		}
+	}
+	return m, nil
 }
 
 // pickerStep moves the inline status picker's highlight, wrapping around, so

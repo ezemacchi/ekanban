@@ -11,7 +11,7 @@ import (
 // what update.go switches on; config.toml's [keys] binds others by name.
 var (
 	commonActions = []keys.Action{
-		{Name: "quit", Keys: []string{"q", "esc"}, Help: "quit", Short: "quit"},
+		{Name: "quit", Keys: []string{"q", "esc"}, Help: "quit (esc only backs out: it closes a box, a search or a filter, never the board)", Short: "quit"},
 		{Name: "layout", Keys: []string{"K"}, Help: "cycle the view: list → table → kanban"},
 		{Name: "sort", Keys: []string{"o"}, Help: "table only: sort by status, name, or when it last changed"},
 		{Name: "detail", Keys: []string{"d"}, Help: "list: show or hide the detail pane · elsewhere: detail modal"},
@@ -32,12 +32,14 @@ var (
 		{Name: "note", Keys: []string{"n"}, Help: "edit note — who or what you are waiting on", Short: "edit note"},
 		{Name: "rename", Keys: []string{"R"}, Help: "rename the space — renames the Herdr workspace too", Short: "rename space"},
 		{Name: "message", Keys: []string{"m"}, Help: "type a message into that space's agent, then go there to send it", Short: "message agent"},
-		{Name: "fold", Keys: []string{" ", "tab"}, Help: "collapse / expand group", Short: "fold group"},
+		{Name: "fold", Keys: []string{" ", "tab"}, Help: "fold or unfold the group, or the column on the kanban", Short: "fold"},
+		{Name: "menu", Keys: []string{"."}, Help: "everything you can do with the selected card, in a menu (its ⋯ button)", Short: "card menu"},
+		{Name: "attention", Keys: []string{"!"}, Help: "go to the next card that needs you", Short: "needs you"},
 		{Name: "status-only", Keys: []string{"F"}, Help: "show only the status under the cursor; again for all", Short: "this status only"},
 		{Name: "reorder-spaces", Keys: []string{"O"}, Help: "reorder Herdr's own Spaces sidebar to match this board", Short: "reorder Spaces"},
 		{Name: "filter", Keys: []string{"/"}, Help: "filter by name, path or note", Short: "filter"},
 		{Name: "statuses", Keys: []string{"S"}, Help: "manage statuses (add, rename, reorder, delete)", Short: "statuses"},
-		{Name: "forget", Keys: []string{"x"}, Help: "forget the selected space", Short: "forget space"},
+		{Name: "forget", Keys: []string{"x"}, Help: "forget the selected space: its note, order and status (asks (Y)es/(N)o first)", Short: "forget space"},
 		{Name: "yank", Keys: []string{"y"}, Help: "copy the card's context (ticket, spec, branch, pull request, QA's comment) to the clipboard, to start another session from it", Short: "copy context"},
 		{Name: "refresh", Keys: []string{"r"}, Help: "refresh", Short: "refresh"},
 		{Name: "help", Keys: []string{"?"}, Help: "this help", Short: "help"},

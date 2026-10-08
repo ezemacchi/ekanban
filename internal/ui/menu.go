@@ -3,141 +3,138 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
-// The title is the view switcher: it names the view you are in and opens a
-// dropdown, by click or by key. K still cycles for anyone who never reaches for
-// the mouse.
+// Menus open over the board: the view switcher, from the title, and the
+// selected card's actions, from its ⋯ button or the menu key. Both are a
+// screen.Menu; a choice in the view switcher changes the layout, one in a
+// card's menu presses the key it names, so the menu does exactly what the
+// key would.
 
-// menuRow is the terminal row the title sits on, and menuFirstItemRow is where
-// the dropdown's first entry lands -- directly beneath it.
-const (
-	menuRow          = 0
-	menuFirstItemRow = 1
-	menuIndent       = 1
-)
-
-var (
-	menuBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	menuSelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-)
+// popup is the open menu.
+type popup struct {
+	screen.Menu
+	x, y  int
+	views bool // the view switcher
+}
 
 var menuLayouts = []layout{layoutList, layoutTable, layoutKanban}
 
-// title is the clickable label: a caret plus the current view's name.
+// title is the view switcher's label: a caret and the current view's name.
 func (m *Model) title() string {
 	caret := "▾"
-	if m.menuOpen {
+	if m.menu != nil && m.menu.views {
 		caret = "▴"
 	}
 	return caret + " " + titleCase(m.layout.String())
 }
 
-// titleHit reports whether a click landed on the title.
-func (m *Model) titleHit(x, y int) bool {
-	// A docked board draws no title, so row 0 there is the first list row --
-	// clicking it must not open a switcher for views a dock cannot show.
-	if m.sidebar {
-		return false
-	}
-	if y != menuRow {
-		return false
-	}
-	start := menuIndent
-	return x >= start && x < start+lipgloss.Width(m.title())
-}
+func (m *Model) menuOpen() bool { return m.menu != nil }
 
-// menuItemAt maps a click to a dropdown entry, or -1.
-func (m *Model) menuItemAt(x, y int) int {
-	if !m.menuOpen {
-		return -1
-	}
-	i := y - menuFirstItemRow
-	if i < 0 || i >= len(menuLayouts) {
-		return -1
-	}
-	if x < menuIndent || x >= menuIndent+m.menuWidth() {
-		return -1
-	}
-	return i
-}
-
-func (m *Model) menuWidth() int {
-	w := 0
-	for _, l := range menuLayouts {
-		if n := lipgloss.Width(titleCase(l.String())); n > w {
-			w = n
-		}
-	}
-	return w + 4 // caret column, padding, and a little breathing room
-}
-
-// openMenu drops the switcher open with the current view highlighted.
+// openMenu drops the view switcher open under the title, the current view
+// highlighted.
 func (m *Model) openMenu() {
-	m.menuOpen = true
+	mn := popup{x: 1, y: 1, views: true}
 	for i, l := range menuLayouts {
+		mn.Items = append(mn.Items, screen.MenuItem{Label: titleCase(l.String())})
 		if l == m.layout {
-			m.menuIdx = i
+			mn.Sel = i
 		}
 	}
+	m.menu = &mn
 }
 
-// chooseMenu switches to the highlighted view and closes the dropdown.
-func (m *Model) chooseMenu(i int) {
-	if i < 0 || i >= len(menuLayouts) {
+// openCardMenu opens the selected card's actions at x, y; below the card
+// when x and y are negative.
+func (m *Model) openCardMenu(x, y int) {
+	sp := m.selected()
+	if sp == nil {
+		m.status = "no space selected"
 		return
 	}
-	m.menuOpen = false
-	if menuLayouts[i] == m.layout {
+	mn := popup{Menu: screen.Menu{Title: m.spaceName(sp)}}
+	for _, a := range m.cardActions(sp) {
+		if k := m.hintKey(a.action); k != "" {
+			mn.Items = append(mn.Items, screen.MenuItem{Label: a.menu, Key: k})
+		}
+	}
+	if len(mn.Items) == 0 {
 		return
 	}
-	m.setLayout(menuLayouts[i])
-}
-
-// menuLines renders the dropdown. It is drawn over the board rather than
-// composited into it, because a dropdown obscures what sits behind it anyway.
-func (m *Model) menuLines() []string {
-	width := m.menuWidth()
-	pad := strings.Repeat(" ", menuIndent)
-
-	lines := make([]string, 0, len(menuLayouts))
-	for i, l := range menuLayouts {
-		name := titleCase(l.String())
-		mark := "  "
-		if l == m.layout {
-			mark = "· "
-		}
-		row := mark + pad2(name, width-2)
-		if i == m.menuIdx {
-			row = menuSelStyle.Render(row)
-		}
-		lines = append(lines, pad+menuBorderStyle.Render("│")+row)
+	if x < 0 || y < 0 {
+		x, y = m.cardCorner()
 	}
-	lines = append(lines, pad+menuBorderStyle.Render("└"+strings.Repeat("─", width)))
-	return lines
+	mn.x, mn.y = x, y
+	m.menu = &mn
 }
 
-// overlayMenu draws the dropdown onto a rendered frame, replacing whole lines.
+// cardCorner is where a card's menu opens from the keyboard: over the
+// selected card's last line, indented, or the middle of the screen when the
+// layout draws no cards.
+func (m *Model) cardCorner() (int, int) {
+	x, y := -1, -1
+	for _, z := range m.zones {
+		if z.Kind == screen.OnCard && z.Col == m.col && z.Row == m.rowInCol {
+			if x < 0 || z.X0 < x {
+				x = z.X0
+			}
+			y = max(y, z.Y)
+		}
+	}
+	if x < 0 {
+		return m.width / 3, m.height / 3
+	}
+	return x + 2, y
+}
+
+// chooseMenu does what entry i of the open menu stands for, and closes it.
+func (m *Model) chooseMenu(i int) (tea.Model, tea.Cmd) {
+	mn := m.menu
+	m.menu = nil
+	if mn == nil || i < 0 || i >= len(mn.Items) {
+		return m, nil
+	}
+	if mn.views {
+		if l := menuLayouts[i]; l != m.layout {
+			m.setLayout(l)
+		}
+		return m, nil
+	}
+	return m.pressKey(mn.Items[i].Key)
+}
+
+// pressKey does what pressing k does, k being a key or a chord such as gp,
+// which is its keys one after the other.
+func (m *Model) pressKey(k string) (tea.Model, tea.Cmd) {
+	if len(k) == 2 && k[0] == 'g' {
+		m.handleKey(screen.KeyMsg("g"))
+		k = k[1:]
+	}
+	return m.handleKey(screen.KeyMsg(k))
+}
+
+// handleMenuKey drives the open menu from the keyboard.
+func (m *Model) handleMenuKey(k string) (tea.Model, tea.Cmd) {
+	chosen, done := m.menu.Key(k)
+	if !done {
+		return m, nil
+	}
+	if chosen < 0 {
+		m.menu = nil
+		return m, nil
+	}
+	return m.chooseMenu(chosen)
+}
+
+// overlayMenu draws the open menu over a rendered frame.
 func (m *Model) overlayMenu(frame string) string {
-	if !m.menuOpen {
+	if m.menu == nil {
 		return frame
 	}
-	lines := strings.Split(frame, "\n")
-	for i, menuLine := range m.menuLines() {
-		row := menuFirstItemRow + i
-		if row < len(lines) {
-			lines[row] = menuLine
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func pad2(s string, n int) string {
-	if n < 1 {
-		n = 1
-	}
-	return pad(s, n)
+	return m.menu.Over(&m.zones, frame, m.menu.x, m.menu.y, m.width, m.height)
 }
 
 func titleCase(s string) string {

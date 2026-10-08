@@ -227,8 +227,15 @@ A card is a ticket worktree, named by its ticket key. Its column comes from a
 chain of rules: deployed, merged, not started, working, landed. The first rule
 that decides wins. `[pipeline]` in the settings names the build server, the
 branches pull requests merge into, and the publish job that deploys each one.
-A card also shows the loudest agent of its run (the one that needs you, or the
-one that just finished) and the board's footer notes each change.
+A card reads in three steps. Its key sits in the top border with the ticket's
+type, and its title under it. A card that asks for you (an agent waiting on you,
+a failed build, a pull request Bitbucket blocks) has a red border and a red dot,
+and the top bar counts them: click the count, or press `!`, to go to the next.
+Under the title is the one fact that matters most, such as the loudest agent of
+the run or the pull request and its build. The selected card opens up to show
+every fact, with buttons for what it can do (go there, the ticket, the pull
+request) and `⋯` (or `.`) for a menu of everything else. The board's footer
+notes each agent change.
 
 ### The ticket board
 
@@ -238,6 +245,12 @@ role of the run's team: pending, working, waiting on you, done. Under it are the
 run's objective, current step and open questions, and a list of what the agents
 did. `enter` goes to a role's tab, and `o` goes to the agent running the team
 (its orchestrator), or starts one with a prompt to resume the run.
+
+The ticket and the prototype are buttons under the objective, and the
+orchestrator's line has a button that goes to it. A finished role takes one
+line; a role waiting on you has a red border. The columns and the Now, Activity
+and Open questions sections fold with a click on their arrow, and the run's
+`**bold**` and `` `code` `` are drawn rather than shown as marks.
 
 The title line and the buttons stay put; everything between them scrolls with
 the wheel when the run is taller than the pane, and moving the selection keeps
@@ -249,9 +262,9 @@ its orchestrator is recognised and started. Where runs live and how their
 state file reads is `[run]` in the settings, so another team's layout needs no
 code.
 
-Both boards look the same — the same columns, cards and buttons — and take the
-mouse: click a card to select it, click again to go there, and click the
-buttons along the bottom.
+Both boards are drawn from the same pieces — columns, cards, buttons, menus,
+fields — and take the mouse: click a card to select it, click again to go
+there, and click any button; each one shows the key that does the same.
 
 ### Jira
 
@@ -264,8 +277,8 @@ never writes to Jira.
   a done one is left off. `[jira.columns]` maps a status name or category to any
   column, so a ticket waiting on QA can sit in To QA. A ticket in
   implementation is therefore never shown as not started.
-- Every card shows its ticket's Jira status, and the status line opens the
-  ticket on click.
+- The selected card and the detail show the ticket's Jira status, and in the
+  detail the status line opens the ticket on click.
 - The detail (`d`) adds the ticket's linked test cases, with their states, and
   the latest comment, which is where QA writes what failed.
 - `H` on a card with no worktree asks for the target branch and the team, shows
@@ -279,7 +292,8 @@ never writes to Jira.
 - `t` opens the card's Jira ticket in the browser, from `issue_url`, on a card
   with no worktree too. `p` opens the ticket's HTML prototype (the one its
   spec names; a card with no worktree has none). Both work in the card's
-  detail (`d`) as well, and the footer and the detail name them.
+  detail (`d`) as well, and the selected card, its menu and the detail name
+  them.
 - `P` opens the card's pull request in the browser, from `pipeline.pr_url`;
   `gp` does the same. It used to be `p`, which is now the prototype.
 
@@ -524,15 +538,17 @@ linked worktrees look for it there.
 | `n` | edit the note — who or what you're waiting on |
 | `R` | rename the space — renames the Herdr workspace too |
 | `m` | type a message into that space's agent, then go there to send it |
-| `space` | collapse / expand a group |
+| `space` | fold or unfold a group, or the column on the kanban |
+| `.` | the selected card's menu: everything you can do with it (its `⋯` button) |
+| `!` | go to the next card that needs you |
 | `F` | show only the status under the cursor — `F` or `esc` for all |
 | `O` | reorder Herdr's own Spaces sidebar to match this board |
 | `a` | show or hide archived spaces |
-| `/` | filter by name, path, or note |
+| `/` | search by name, path, or note (or click the search field) |
 | `S` | manage statuses: add, rename, reorder, delete, set the default |
-| `x` | forget the selected space |
+| `x` | forget the selected space: its note, order and status — it asks (Y)es/(N)o first |
 | `r` | refresh |
-| `q` | quit |
+| `q` | quit — `esc` only backs out (a box, a search, a filter) and never closes the board |
 
 In a repository the board adds its own: `a` accepts a ticket in the last column
 and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
@@ -562,11 +578,21 @@ pointer can do here, the board does itself.
 | | |
 |---|---|
 | wheel | scroll the list, leaving the cursor where it is |
+| click a button | what its key does; every button shows its key |
+| click the search field | search; its `✕` clears the search |
+| click a column's name | show that column alone; the chip it leaves in the top bar, or its `✕`, brings the rest back |
+| click a column's `▾` | fold it to its header; `▸` opens it again |
 | click a group header | collapse or expand it |
+| click a table heading | sort by it (name, status, or when it last changed) |
+| click `⋯` on the selected card | its menu |
+| click "● N need you" | go to the next card that needs you |
 | click a PR or a check | open it in a browser |
 | click the title | open the view switcher (popup only) |
 | click a space | **docked:** go there · **popup:** select it |
 | click it again | popup: go there |
+
+There is no right click: Herdr's pane owns the terminal, so every menu opens
+from a button you can see.
 
 Clicking a space does different things on the two boards on purpose. The dock
 is a strip you glance at on your way somewhere, so one click goes there —
@@ -593,8 +619,10 @@ shift held.
 
 `F` narrows the board to whichever status the cursor is on — no picker, since
 you are already standing on the group you want. `F` again, or `esc`, restores
-everything. It applies to all three views, and the header says so, because an
-empty board that does not explain itself just looks broken.
+everything. On the kanban, a click on a column's name does the same. It
+applies to all three views, and the top bar says so with a chip whose `✕`
+lifts it, because an empty board that does not explain itself just looks
+broken.
 
 `O` pushes the board's order onto Herdr: the Spaces sidebar is reordered to
 match, statuses first and then however you arranged them by hand.

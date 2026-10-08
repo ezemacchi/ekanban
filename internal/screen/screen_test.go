@@ -24,26 +24,6 @@ func TestScrollShiftsAndDrops(t *testing.T) {
 	}
 }
 
-// Buttons stop at the width rather than wrap, skip unbound keys, and land on
-// their row once the footer is placed.
-func TestButtonsFitAndPlace(t *testing.T) {
-	var z Zones
-	out := Buttons(&z, 1, 1, []Hint{{Key: "a", Label: "alpha"}, {Key: "", Label: "unbound"}, {Key: "b", Label: "beta"}, {Key: "c", Label: "gamma"}}, 18)
-	if w := lipgloss.Width(out); w > 18 {
-		t.Fatalf("buttons %d wide in 18", w)
-	}
-	if strings.Contains(out, "unbound") || strings.Contains(out, "gamma") {
-		t.Fatalf("drew %q", out)
-	}
-	z.PlaceFooter(10)
-	if len(z) != 2 || z[0].Y != 11 || z[1].Key != "b" {
-		t.Fatalf("zones %+v", z)
-	}
-	if hit, ok := z.At(z[1].X0, 11); !ok || hit.Key != "b" {
-		t.Fatalf("no b button under its own start: %+v", hit)
-	}
-}
-
 // An empty column takes only its header; the ones with cards share the rest.
 func TestWidthsShrinkEmptyColumns(t *testing.T) {
 	cols := []Column{{Label: "Empty"}, {Label: "Full", Count: 2}, {Label: "Gone", Count: 1, Hidden: true}}

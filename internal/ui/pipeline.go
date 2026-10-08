@@ -217,76 +217,6 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 	return info.Stage, true
 }
 
-// pipelineLines are the facts under a card's name.
-func (m *Model) pipelineLines(sp *space, width int) []string {
-	if k, ok := jiraCardKey(sp.Key); ok {
-		return m.jiraLines(k, width)
-	}
-	info, ok := m.pipeInfo[sp.Key]
-	if !ok {
-		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" working it out", width))}
-	}
-	var lines []string
-	if l := m.jiraStatusLine(info.Key, width); l != "" {
-		lines = append(lines, l)
-	}
-	if !sp.Live {
-		// No workspace, so no agents: waiting and lost do not apply.
-		info.Waiting, info.Lost = false, false
-		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Pause, "workspace closed · "+m.hintKey("jump")+" reopens"), width)))
-	}
-	if a, ok := ticket.Loudest(info.Agents); ok && sp.Live {
-		al := look.Agent(a.Status)
-		text := a.Who + " " + al.Word
-		if a.Title != "" {
-			text += " · " + a.Title
-		}
-		lines = append(lines, al.Style.Render(truncate(m.glyph(al.Glyph, text), width)))
-		if a.Status == "blocked" {
-			info.Waiting = false
-		}
-	}
-	if info.Waiting {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Question, "asking you something"), width)))
-	}
-	if info.Lost {
-		lines = append(lines, prPendingStyle.Render(truncate(m.glyph(look.Warning, "agents were lost"), width)))
-	}
-	if info.Phase != "" && info.Stage == pipeline.InProgress {
-		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Team, info.Phase), width)))
-	}
-	if info.PR > 0 {
-		pr := fmt.Sprintf("PR #%d", info.PR)
-		style := dimStyle
-		switch info.Build {
-		case "SUCCESS":
-			pr += " · " + m.pipe.CIName() + " green"
-			style = prPassStyle
-		case "FAILURE", "UNSTABLE":
-			pr += " · " + m.pipe.CIName() + " " + strings.ToLower(info.Build)
-			style = prFailStyle
-		case "RUNNING":
-			pr += " · " + m.pipe.CIName() + " running"
-			style = prPendingStyle
-		}
-		if info.MergedTo != "" {
-			pr += " · in " + info.MergedTo
-		}
-		lines = append(lines, style.Render(truncate(m.glyph(look.PullReq, pr), width)))
-		// Whether Bitbucket would let it in, which a green build does not say.
-		if l := m.bitbucketLine(info, width); l != "" {
-			lines = append(lines, l)
-		}
-	}
-	if info.Deployed != "" {
-		lines = append(lines, prPassStyle.Render(truncate(m.glyph(look.Rocket, "shipped to "+info.Deployed), width)))
-	}
-	if info.Unknown != "" {
-		lines = append(lines, dimStyle.Render(truncate(m.glyph(look.Wifi, info.Unknown), width)))
-	}
-	return lines
-}
-
 // computedColumns is the answer to a key that would move a card by hand.
 func (m *Model) computedColumns() string {
 	return "columns are computed from the run, " + m.pipe.CIName() + " and git"
@@ -537,10 +467,7 @@ func (m *Model) handleArchiveKey(key string) (tea.Model, tea.Cmd) {
 	case "G":
 		m.archiveIdx = len(items) - 1
 	case "/":
-		m.mode = modeFilter
-		m.input.SetValue(m.filter)
-		m.input.CursorEnd()
-		m.input.Focus()
+		m.startSearch()
 	case "o", "enter":
 		if a, ok := m.archivedAt(items); ok {
 			if url := links.Issue(a.rec.Ticket); url != "" {
@@ -609,8 +536,8 @@ func (m *Model) viewArchive() string {
 		}
 	}
 	k := m.hintKey
-	hints := []hint{{k("open-issue"), "tracker"}, {k("open-pull-request"), "pull request"},
-		{k("restore"), "back to the board"}, {k("filter"), "search"}, {k("archive"), "back"}}
+	hints := []hint{{Key: k("open-issue"), Label: "Ticket"}, {Key: k("open-pull-request"), Label: "PR"},
+		{Key: k("restore"), Label: "Back to the board"}, {Key: k("filter"), Label: "Search"}, {Key: k("archive"), Label: "Close"}}
 	b.WriteString("\n")
 	footer := " " + m.buttons(0, 1, hints, m.width-2)
 	m.placeFooter(linesIn(b.String()))

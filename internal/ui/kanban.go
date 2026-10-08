@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/nav"
 	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
@@ -21,20 +21,24 @@ func (m *Model) viewKanbanBoard() string {
 	from, end := screen.ScrollColumns(widths, m.colOffset, m.col, m.width)
 	m.colOffset = from
 	for col := from; col < end; col++ {
-		if widths[col] == 0 {
+		if widths[col] == 0 || cols[col].Folded {
 			continue
 		}
 		inner := widths[col] - screen.Gutter
 		for i, sp := range m.columnSpaces(col) {
-			card, choices := m.renderCard(sp, col == m.col && i == m.rowInCol, inner)
-			c := screen.Card{Lines: card, Choices: choices}
-			if choices >= 0 {
-				c.NChoices = len(m.board.Statuses)
-			}
-			cols[col].Cards = append(cols[col].Cards, c)
+			cols[col].Cards = append(cols[col].Cards, m.card(sp, col == m.col && i == m.rowInCol, inner))
 		}
 	}
-	b.WriteString(screen.Draw(&m.zones, cols, widths, from, end, linesIn(b.String()), m.listHeight()))
+	drawn := screen.Draw(&m.zones, cols, widths, from, end, linesIn(b.String()), m.listHeight())
+	if m.found() == 0 && m.filter != "" {
+		// Under the headings, where the cards would be.
+		rows := strings.Split(drawn, "\n")
+		if len(rows) > 3 {
+			rows[3] = m.noMatch(m.width)
+		}
+		drawn = strings.Join(rows, "\n")
+	}
+	b.WriteString(drawn)
 
 	footer := m.viewFooter()
 	m.placeFooter(linesIn(b.String()))
@@ -51,6 +55,7 @@ func (m *Model) kanbanColumns() []screen.Column {
 			Color:    st.Color,
 			Count:    m.columnCount(col),
 			Hidden:   m.statusFilter != "" && st.ID != m.statusFilter,
+			Folded:   m.board.IsCollapsed(st.ID),
 			Selected: -1,
 		}
 		if col == m.col {
@@ -60,64 +65,31 @@ func (m *Model) kanbanColumns() []screen.Column {
 	return cols
 }
 
-// renderCard draws a space as a boxed card width cells wide. The border, not
-// a marker, shows the cursor and a card picked up to move. While the status
-// picker is open the selected card expands to hold its choices; choices is
-// the card line of the first one, -1 when there are none.
-func (m *Model) renderCard(sp *space, selected bool, width int) (card []string, choices int) {
-	held := sp.Key == m.grabbed
-	text := look.CardInner(width)
+// folded is whether a kanban column is folded: it shows its header alone.
+func (m *Model) folded(col int) bool {
+	return col >= 0 && col < len(m.board.Statuses) && m.board.IsCollapsed(m.board.Statuses[col].ID)
+}
 
-	label := m.spaceLabel(sp)
-	if m.hasBell(sp.Key) {
-		label = bellGlyph + " " + label
+// navCount is the cards the cursor can reach in a column: none in a folded
+// one.
+func (m *Model) navCount(col int) int {
+	if m.folded(col) {
+		return 0
 	}
-	name := truncate(label, text)
-	switch {
-	case held:
-		name = grabStyle.Render(name)
-	case selected:
-		name = cursorStyle.Render(name)
-	case !sp.Live:
-		name = archivedStyle.Render(name)
-	case sp.Focused:
-		name = focusStyle.Render(name)
-	}
-	lines := []string{name}
-	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Title != "" {
-		lines = append(lines, dimStyle.Render(truncate(info.Title, text)))
-	}
+	return m.columnCount(col)
+}
 
-	if sp.Note != "" {
-		for _, line := range screen.Wrap(sp.Note, text) {
-			lines = append(lines, noteStyle.Render(line))
-		}
+// toggleFold folds or unfolds a kanban column, keeping the cursor on a card
+// that can be seen.
+func (m *Model) toggleFold(col int) {
+	if col < 0 || col >= len(m.board.Statuses) {
+		return
 	}
-	if m.pipelineOn() {
-		lines = append(lines, m.pipelineLines(sp, text)...)
-	} else {
-		if pr, ok := m.prFor(sp.Key); ok {
-			lines = append(lines, prStyled(pr, text))
-		}
-		if hint := agentHint(sp); hint != "" {
-			lines = append(lines, dimStyle.Render(truncate(hint, text)))
-		}
+	m.board.ToggleCollapsed(m.board.Statuses[col].ID)
+	m.save()
+	if m.folded(m.col) {
+		m.col = nav.Settle(m.col, len(m.board.Statuses), m.navCount)
+		m.rowInCol = 0
 	}
-
-	choices = -1
-	if selected && m.mode == modeStatusPick {
-		picker := m.pickerLines(text)
-		// Past the top border and the lines above, after the caption.
-		choices = 1 + len(lines) + 1
-		lines = append(lines, picker...)
-	}
-
-	border := look.CardBorder
-	switch {
-	case held:
-		border = look.CardGrabbed
-	case selected:
-		border = look.CardSelected
-	}
-	return look.Card(lines, width, border), choices
+	m.clampColumnCursor()
 }

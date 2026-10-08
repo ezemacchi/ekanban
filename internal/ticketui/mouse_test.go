@@ -93,7 +93,7 @@ func TestTallBoardScrollsAndKeepsTheFooter(t *testing.T) {
 	if !strings.Contains(lines[0], "KEY-1") {
 		t.Fatalf("the header scrolled away: %q", lines[0])
 	}
-	if !strings.Contains(lines[len(lines)-1], "quit") {
+	if !strings.Contains(lines[len(lines)-1], "Quit") {
 		t.Fatalf("the buttons are not on the last line: %q", lines[len(lines)-1])
 	}
 	if m.scroll == 0 {
@@ -113,5 +113,28 @@ func TestTallBoardScrollsAndKeepsTheFooter(t *testing.T) {
 		if z.Kind == screen.OnCard && (z.Y < headerLines || z.Y >= m.height-footerLines) {
 			t.Fatalf("a card zone outside the body: %+v", z)
 		}
+	}
+}
+
+// ? opens the help over the board, with the board's keys in sections, and
+// any key or a click closes it.
+func TestHelpOpensOverTheBoard(t *testing.T) {
+	m := boardWith(ticket.Pending)
+	m.width, m.height = 120, 30
+	m.key("?")
+	out := m.View()
+	for _, want := range []string{"Help", "The selected role", "go to the role's tab", "╭"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help is missing %q:\n%s", want, out)
+		}
+	}
+	m.key("x")
+	if m.helping {
+		t.Fatal("a key did not close the help")
+	}
+	m.key("?")
+	m.Update(press(1, 1))
+	if m.helping {
+		t.Fatal("a click did not close the help")
 	}
 }

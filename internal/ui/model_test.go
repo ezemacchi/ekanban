@@ -155,8 +155,8 @@ func TestIdleAgentHintSurvives(t *testing.T) {
 	if len(rows) != 1 || rows[0].AgentStatus != "idle" {
 		t.Fatalf("idle hint lost: %+v", rows)
 	}
-	if got := agentHint(rows[0]); got != "·idle" {
-		t.Fatalf("agentHint = %q, want ·idle", got)
+	if f, ok := m.heaviest(rows[0]); !ok || f.text != "agent idle" {
+		t.Fatalf("the row's fact is %+v, want agent idle", f)
 	}
 }
 
@@ -388,6 +388,10 @@ func TestForgetRemovesEntry(t *testing.T) {
 	selectSpace(t, m, tmp+"api")
 	send(t, m, key("3"))
 	send(t, m, key("x"))
+	if _, ok := m.board.Entries[store.Key(tmp+"api")]; !ok || m.mode != modeConfirm {
+		t.Fatal("x forgot without asking")
+	}
+	send(t, m, key("y"))
 
 	if _, ok := m.board.Entries[store.Key(tmp+"api")]; ok {
 		t.Fatal("entry was not forgotten")
@@ -1004,7 +1008,8 @@ func TestKanbanDetailIsAModalOverTheBoard(t *testing.T) {
 	m := kanbanBoard(t)
 	m.width, m.height = 140, 30
 	target := labelsIn(m, "todo")[0]
-	long := "modal-note-text " + strings.Repeat("word ", 14) + "end"
+	// Longer than the old 54-column box, within the reading width it stops at.
+	long := "modal-note-text " + strings.Repeat("word ", 8) + "end"
 	m.board.SetNote(store.Key(tmp+target), long)
 	m.rebuild()
 	selectSpace(t, m, tmp+target)
@@ -1327,11 +1332,38 @@ func TestTitleNamesTheView(t *testing.T) {
 	}
 }
 
+// zoneWhere draws the board and returns the first zone match accepts.
+func zoneWhere(t *testing.T, m *Model, match func(screen.Zone) bool) screen.Zone {
+	t.Helper()
+	m.View()
+	for _, z := range m.zones {
+		if match(z) {
+			return z
+		}
+	}
+	t.Fatalf("no such zone on screen: %+v", m.zones)
+	return screen.Zone{}
+}
+
+func clickZoneOf(t *testing.T, m *Model, match func(screen.Zone) bool) {
+	t.Helper()
+	z := zoneWhere(t, m, match)
+	send(t, m, click(z.X0, z.Y))
+}
+
+func isControl(id string) func(screen.Zone) bool {
+	return func(z screen.Zone) bool { return z.Kind == screen.OnControl && z.ID == id }
+}
+
+func isChoice(i int) func(screen.Zone) bool {
+	return func(z screen.Zone) bool { return z.Kind == screen.OnChoice && z.Choice == i }
+}
+
 func TestClickingTitleOpensAndClosesMenu(t *testing.T) {
 	m := threeInTodo(t)
 
-	send(t, m, click(menuIndent+1, menuRow))
-	if !m.menuOpen {
+	clickZoneOf(t, m, isControl("views"))
+	if !m.menuOpen() {
 		t.Fatal("clicking the title did not open the menu")
 	}
 	if !strings.Contains(m.View(), "▴ List") {
@@ -1344,8 +1376,9 @@ func TestClickingTitleOpensAndClosesMenu(t *testing.T) {
 		}
 	}
 
-	send(t, m, click(menuIndent+1, menuRow))
-	if m.menuOpen {
+	// The title is under nothing of the menu's, so a second click closes it.
+	send(t, m, click(2, 0))
+	if m.menuOpen() {
 		t.Fatal("clicking the title again did not close the menu")
 	}
 }
@@ -1355,11 +1388,11 @@ func TestClickingMenuItemSwitchesView(t *testing.T) {
 	m.openMenu()
 
 	// The third entry is kanban.
-	send(t, m, click(menuIndent+2, menuFirstItemRow+2))
+	clickZoneOf(t, m, isChoice(2))
 	if m.layout != layoutKanban {
 		t.Fatalf("layout is %v, want kanban", m.layout)
 	}
-	if m.menuOpen {
+	if m.menuOpen() {
 		t.Fatal("choosing did not close the menu")
 	}
 	if m.board.Layout != "kanban" {
@@ -1371,10 +1404,11 @@ func TestClickingMenuItemSwitchesView(t *testing.T) {
 func TestClickingOutsideDismissesMenu(t *testing.T) {
 	m := threeInTodo(t)
 	m.openMenu()
+	m.View()
 	before := m.layout
 
 	send(t, m, click(60, 9))
-	if m.menuOpen {
+	if m.menuOpen() {
 		t.Fatal("the menu stayed open")
 	}
 	if m.layout != before {
@@ -1394,7 +1428,7 @@ func TestMenuIsKeyboardDrivable(t *testing.T) {
 
 	m.openMenu()
 	send(t, m, key("esc"))
-	if m.menuOpen {
+	if m.menuOpen() {
 		t.Fatal("esc did not close the menu")
 	}
 	if m.layout != layoutTable {
@@ -1413,8 +1447,8 @@ func TestOpenMenuSwallowsNavigation(t *testing.T) {
 	if m.cursor != cursor {
 		t.Fatal("j moved the board cursor while the menu was open")
 	}
-	if m.menuIdx != 1 {
-		t.Fatalf("j did not move the menu cursor: %d", m.menuIdx)
+	if m.menu.Sel != 1 {
+		t.Fatalf("j did not move the menu cursor: %d", m.menu.Sel)
 	}
 }
 
@@ -1430,24 +1464,20 @@ func TestClickingARowSelectsIt(t *testing.T) {
 	}
 }
 
+// The title is on the first row only, and each menu entry is a choice on its
+// own row, under the title.
 func TestMenuHitTesting(t *testing.T) {
 	m := threeInTodo(t)
-	if m.titleHit(0, 1) {
-		t.Fatal("a click below the title counted as a hit")
-	}
-	if m.titleHit(99, menuRow) {
-		t.Fatal("a click far right counted as a hit")
-	}
-	if !m.titleHit(menuIndent, menuRow) {
-		t.Fatal("the first title column is not clickable")
+	title := zoneWhere(t, m, isControl("views"))
+	if title.Y != 0 || title.X0 != 1 {
+		t.Fatalf("title zone %+v", title)
 	}
 
 	m.openMenu()
-	if got := m.menuItemAt(menuIndent, menuFirstItemRow); got != 0 {
-		t.Fatalf("first item resolved to %d", got)
-	}
-	if got := m.menuItemAt(menuIndent, menuFirstItemRow+len(menuLayouts)); got != -1 {
-		t.Fatalf("a click past the last item resolved to %d", got)
+	first := zoneWhere(t, m, isChoice(0))
+	last := zoneWhere(t, m, isChoice(len(menuLayouts)-1))
+	if first.Y <= title.Y || last.Y != first.Y+len(menuLayouts)-1 {
+		t.Fatalf("choices at rows %d..%d", first.Y, last.Y)
 	}
 }
 
@@ -2264,8 +2294,14 @@ func TestClickingAPRLineOpensIt(t *testing.T) {
 		t.Fatal("no clickable regions were recorded")
 	}
 
-	// The PR heading.
-	head := m.links[0]
+	// The PR heading. (The note's field above it is a region too.)
+	var head linkRegion
+	for _, r := range m.links {
+		if strings.HasSuffix(r.url, "/pull/4") {
+			head = r
+			break
+		}
+	}
 	if _, cmd := m.Update(click(head.x0+1, head.row)); cmd != nil {
 		cmd()
 	}
@@ -2744,9 +2780,10 @@ func TestSidebarClickOnTopRowDoesNotOpenTheMenu(t *testing.T) {
 	m := newTestSidebarModel(t)
 	send(t, m, liveWorkspaces())
 
-	send(t, m, click(menuIndent+1, menuRow))
+	m.View()
+	send(t, m, click(2, 0))
 
-	if m.menuOpen {
+	if m.menuOpen() {
 		t.Fatal("a docked board should have no view switcher to open")
 	}
 }

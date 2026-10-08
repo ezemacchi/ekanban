@@ -17,6 +17,19 @@ var (
 	Cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 	Err    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	Key    = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	// Head is a section's heading; Label names a field of the detail.
+	Head  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+	Label = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
+	// Attention is what asks for you: a blocked agent, a failed build.
+	Attention = lipgloss.NewStyle().Foreground(CardAttention).Bold(true)
+)
+
+// Buttons, the search field and chips sit on a shaded ground, so they read as
+// things to click.
+var (
+	ButtonBg  = lipgloss.Color("237")
+	Button    = lipgloss.NewStyle().Background(ButtonBg).Foreground(lipgloss.Color("252"))
+	ButtonKey = lipgloss.NewStyle().Background(ButtonBg).Foreground(lipgloss.Color("111")).Bold(true)
 )
 
 // Nerd Font glyphs. Draw them through Icons, so they disappear when the

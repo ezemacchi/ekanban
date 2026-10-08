@@ -10,7 +10,6 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/keys"
 	"github.com/ezemacchi/ekanban/internal/look"
-	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
 )
 
@@ -51,17 +50,39 @@ func (m *Model) viewFrame() string {
 		return m.viewHandoff(base)
 	}
 
+	if m.mode == modeConfirm {
+		// The question sits over the board it was asked from.
+		m.mode = modeNormal
+		base := m.viewFrame()
+		m.mode = modeConfirm
+		m.resetZones()
+		return screen.Confirm(&m.zones, base, m.ask.title, m.ask.lines, m.width, m.height)
+	}
+
 	if m.archiveView && m.mode == modeNormal {
 		return m.viewArchive()
 	}
 
 	switch m.mode {
 	case modeHelp:
-		return m.viewHelp()
+		if m.sidebar {
+			return m.viewHelp() // a dock has no room for a box: the help takes it
+		}
+		// The help is a box over the board it was opened from.
+		m.mode = modeNormal
+		base := m.viewFrame()
+		m.mode = modeHelp
+		m.resetZones()
+		return m.viewHelpOver(base)
 	case modeManage, modeManageAdd, modeManageRename:
 		return m.viewManage()
 	case modeDetail:
 		return m.viewDetailOverBoard()
+	case modeNote:
+		// The note is written in the detail it was opened from.
+		if m.prevMode == modeDetail {
+			return m.viewDetailOverBoard()
+		}
 	case modeStatusPick:
 		// The picker opens inside what it was opened from: the detail modal,
 		// else the selected kanban card, else a bar in the footer.
@@ -110,10 +131,23 @@ func (m *Model) viewFrame() string {
 	}
 
 	// The pane tracks the cursor, so it always describes what you are looking
-	// at without needing to open anything.
+	// at without needing to open anything. Its buttons sit at its foot.
 	inner := paneWidth - 3
-	right := m.detailLines(m.selected(), inner)
 	body := m.bodyWidth()
+	var buttons []string
+	if sp := m.selected(); sp != nil {
+		mark := len(m.zones)
+		buttons = screen.ButtonRows(&m.zones, 0, 0, m.detailButtons(sp), inner)
+		m.zones.Shift(mark, body+1, 2+height-len(buttons))
+	}
+	right := m.detailLines(m.selected(), inner)
+	if room := height - len(buttons) - 1; len(right) > room && room > 0 {
+		right = right[:room]
+	}
+	for len(right) < height-len(buttons) {
+		right = append(right, detailLine{})
+	}
+	right = append(right, plain(buttons...)...)
 
 	// The pane starts two rows down (header, blank) and to the right of the
 	// separator, which is where its links are drawn.
@@ -136,44 +170,6 @@ func (m *Model) viewFrame() string {
 	return b.String()
 }
 
-func (m *Model) viewHeader() string {
-	// Count from the groups rather than the rows, so a collapsed group or a
-	// scrolled-off column still contributes.
-	var live, archived int
-	for _, group := range m.groups {
-		for _, sp := range group {
-			if sp.Live {
-				live++
-			} else {
-				archived++
-			}
-		}
-	}
-
-	// The title names the current view and opens the switcher.
-	left := " " + titleStyle.Render(m.title())
-	if st, ok := m.board.StatusByID(m.statusFilter); ok {
-		left += lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Render("  " + st.Label + " only")
-	}
-	if m.filter != "" {
-		left += dimStyle.Render(fmt.Sprintf("  /%s", m.filter))
-	}
-
-	right := ""
-	if b := m.bellSummary(); b != "" {
-		right += b + dimStyle.Render(" · ")
-	}
-	right += fmt.Sprintf("%d live", live)
-	if m.showArchive {
-		right += fmt.Sprintf(" · %d archived", archived)
-	} else {
-		right += " · archive hidden"
-	}
-	right += " "
-
-	return screen.JoinEnds(left, dimStyle.Render(right), m.width)
-}
-
 func (m *Model) viewFooter() string {
 	if m.err != nil {
 		return errStyle.Render(" " + truncate(m.err.Error(), m.width-2))
@@ -181,13 +177,20 @@ func (m *Model) viewFooter() string {
 
 	switch m.mode {
 	case modeNote:
+		if m.noteInDetail() {
+			return screen.Say(" "+noteHelp, dimStyle, m.width-1)
+		}
 		return keyStyle.Render(" note: ") + m.input.View()
 	case modeRename:
 		return keyStyle.Render(" rename: ") + m.input.View()
 	case modeMessage:
 		return keyStyle.Render(" to agent: ") + m.input.View()
 	case modeFilter:
-		return keyStyle.Render(" filter: ") + m.input.View()
+		// A dock has no top bar: the field is down here.
+		if m.sidebar {
+			return keyStyle.Render(" filter: ") + m.input.View()
+		}
+		return screen.Say(" "+searchHelp, dimStyle, m.width-1)
 	}
 
 	// A dock is too narrow for the legend, and its rows are worth more as
@@ -214,19 +217,12 @@ func (m *Model) viewFooter() string {
 		return screen.Say(" "+strings.Join(parts, " · "), dimStyle, m.width-1)
 	}
 
+	k := m.hintKey
 	if m.pipelineOn() {
-		k := m.hintKey
 		hints := []hint{
-			{k("accept"), "accept (" + m.columns.Label(pipeline.ReadyQA) + ")"}, {k("archive"), "archive"},
-			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("orchestrator"), "orchestrator"},
-			{k("open-issue"), "ticket"}, {k("prototype"), "prototype"},
-			{k("open-pull-request"), "pull request"}, {k("yank"), "copy"},
-			{k("refresh"), "refresh"}, {k("help"), "help"},
-		}
-		if sp := m.selected(); sp != nil && m.jiraOn() {
-			if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
-				hints = append([]hint{{k("handoff"), "hand off"}}, hints...)
-			}
+			{Key: k("filter"), Label: "Search"}, {Key: k("detail"), Label: "Detail"},
+			{Key: k("orchestrator"), Label: "Orchestrator"}, {Key: k("yank"), Label: "Copy"},
+			{Key: k("refresh"), Label: "Refresh"},
 		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
 		if !m.pipeAt.IsZero() {
@@ -238,7 +234,7 @@ func (m *Model) viewFooter() string {
 		if s := m.statusText(); s != "" {
 			state += " · " + s
 		}
-		return screen.Say(" "+state, dimStyle, m.width-1) + "\n " + m.buttons(1, 1, hints, m.width-2)
+		return m.footer(screen.Say(" "+state, dimStyle, m.width-1), hints)
 	}
 
 	// The picker in a list or table has no card to open in, so it takes the
@@ -251,11 +247,6 @@ func (m *Model) viewFooter() string {
 		return m.pickerBar(0, m.width) + "\n" + screen.Say(help, dimStyle, m.width-1)
 	}
 
-	// The numbered statuses are the fastest way to file something, so show the
-	// actual mapping rather than a generic "1-9". Each is a button too.
-	keys := " " + m.statusLegend()
-
-	k := m.hintKey
 	pair := func(a, b string) string {
 		if k(a) == "" || k(b) == "" {
 			return ""
@@ -265,26 +256,24 @@ func (m *Model) viewFooter() string {
 	var hints []hint
 	switch {
 	case m.grabbed != "" && m.layout == layoutKanban:
-		hints = []hint{{pair("left", "right"), "retag"}, {pair("down", "up"), "reorder"}, {k("jump"), "drop"}}
+		hints = []hint{{Key: pair("left", "right"), Label: "Retag"}, {Key: pair("down", "up"), Label: "Reorder"}, {Key: k("jump"), Label: "Drop"}}
 	case m.grabbed != "":
-		hints = []hint{{pair("down", "up"), "move (across a group changes status)"}, {k("jump"), "drop"}}
+		hints = []hint{{Key: pair("down", "up"), Label: "Move (across a group changes status)"}, {Key: k("jump"), Label: "Drop"}}
 	case m.layout == layoutKanban:
-		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "list"}, {k("help"), "help"}}
+		hints = []hint{{Key: k("filter"), Label: "Search"}, {Key: k("status-picker"), Label: "Status"}, {Key: k("note"), Label: "Note"}, {Key: k("grab"), Label: "Move"}, {Key: k("detail"), Label: "Detail"}}
 	case m.layout == layoutTable:
-		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("sort"), "sort"}, {k("jump"), "jump"}, {k("layout"), "kanban"}, {k("help"), "help"}}
-	case m.board.HideDetail:
-		hints = []hint{{k("status-picker"), "status"}, {k("detail"), "detail"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "table"}, {k("help"), "help"}}
+		hints = []hint{{Key: k("filter"), Label: "Search"}, {Key: k("status-picker"), Label: "Status"}, {Key: k("note"), Label: "Note"}, {Key: k("sort"), Label: "Sort"}, {Key: k("detail"), Label: "Detail"}}
 	default:
-		hints = []hint{{k("status-picker"), "status"}, {k("note"), "note"}, {k("grab"), "move"}, {k("jump"), "jump"}, {k("layout"), "table"}, {k("help"), "help"}}
+		hints = []hint{{Key: k("filter"), Label: "Search"}, {Key: k("status-picker"), Label: "Status"}, {Key: k("note"), Label: "Note"}, {Key: k("grab"), Label: "Move"}, {Key: k("jump"), Label: "Go"}, {Key: k("detail"), Label: "Detail pane"}}
 	}
-	line := " "
-	x := 1
-	if s := m.statusText(); s != "" {
-		said := screen.Say(s+" · ", dimStyle, max(m.width/2, 20)+3)
-		line += said
-		x += lipgloss.Width(said)
+	// The numbered statuses are the fastest way to file something, so show the
+	// actual mapping rather than a generic "1-9". Each is a button too. A
+	// message takes their line while it is fresh.
+	first := screen.Say(" "+m.statusText(), dimStyle, m.width-1)
+	if m.statusText() == "" {
+		first = " " + m.statusLegend()
 	}
-	return keys + "\n" + line + m.buttons(1, x, hints, m.width-x-1)
+	return m.footer(first, hints)
 }
 
 // statusLegend is the numbered statuses, each a button for its digit on the
@@ -337,26 +326,35 @@ func (m *Model) isBusy() bool {
 	return m.busyText != "" && m.status == m.busyText && m.err == nil
 }
 
+// listName and listFact are how much of a list row the name and the fact at
+// its right end take.
+const (
+	listName = 22
+	listFact = 34
+)
+
+// renderRow is one row of the list: a group's heading, the same as a kanban
+// column's, or a space as a one-line card -- its name, what it is about, and
+// at the right the fact that says most about it.
 func (m *Model) renderRow(i int) string {
 	r := m.rows[i]
 	selected := i == m.cursor
+	body := m.rowWidth()
 
 	switch r.kind {
 	case rowEmpty:
+		if m.filter != "" {
+			return m.noMatch(body)
+		}
 		return dimStyle.Render("  no spaces yet — open a workspace in Herdr and it appears here")
 
 	case rowHeader:
-		arrow := "▾"
-		if m.board.IsCollapsed(r.status.ID) && m.filter == "" {
-			arrow = "▸"
-		}
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(r.status.Color)).Bold(true)
-		line := fmt.Sprintf("%s %s", arrow, m.statusLabel(r.status))
-		out := " " + style.Render(line) + dimStyle.Render(fmt.Sprintf(" (%d)", r.count))
+		lead := " "
 		if selected {
-			return cursorStyle.Render("❯") + out[1:]
+			lead = cursorStyle.Render("❯")
 		}
-		return out
+		folded := m.board.IsCollapsed(r.status.ID) && m.filter == ""
+		return lead + screen.Heading(m.statusLabel(r.status), r.status.Color, r.count, folded, body-1)
 	}
 
 	sp := r.space
@@ -370,39 +368,27 @@ func (m *Model) renderRow(i int) string {
 		prefix = cursorStyle.Render(" ❯ ")
 	}
 
-	name := m.spaceLabel(sp)
-	if b := m.bellFor(sp.Key); b != "" {
-		name = bellGlyph + " " + name
-	}
-	nameStyled := labelStyle.Render(pad(name, 22))
+	name := truncate(m.spaceLabel(sp), listName)
+	style := look.Title
 	switch {
 	case held:
-		nameStyled = grabStyle.Render(pad(name, 22))
+		style = grabStyle
+	case selected:
+		style = cursorStyle
 	case !sp.Live:
-		nameStyled = archivedStyle.Render(pad(name, 22))
+		style = archivedStyle
 	case sp.Focused:
-		nameStyled = focusStyle.Render(pad(name, 22))
+		style = focusStyle
 	}
+	named := m.marked(sp, style.Render(name))
+	named += strings.Repeat(" ", max(listName+2-lipgloss.Width(named), 1))
 
-	// The note is the point of the "waiting" status, so it wins the middle
-	// column whenever there is one; otherwise show where the space lives.
-	detail := abbreviate(sp.Key)
-	detailStyle := dimStyle
-	if sp.Note != "" {
-		detail = sp.Note
-		detailStyle = noteStyle
+	right := ""
+	if f, ok := m.heaviest(sp); ok {
+		right = m.line(f, min(listFact, body/3))
 	}
-
-	hint := agentHint(sp)
-	// Rows share the width with the detail pane when it is open.
-	body := m.rowWidth()
-	room := body - 3 - 22 - lipgloss.Width(hint) - 2
-	if room < 8 {
-		room = 8
-	}
-
-	line := prefix + nameStyled + " " + detailStyle.Render(truncate(detail, room))
-	return screen.JoinEnds(line, dimStyle.Render(hint+" "), body)
+	room := max(body-lipgloss.Width(prefix)-lipgloss.Width(named)-lipgloss.Width(right)-2, 8)
+	return screen.JoinEnds(prefix+named+m.about(sp, room), right+" ", body)
 }
 
 // Narrow rows keep a name readable before anything else earns room, and hold a
@@ -431,6 +417,9 @@ func (m *Model) renderNarrowRow(i int) string {
 
 	switch r.kind {
 	case rowEmpty:
+		if m.filter != "" {
+			return m.noMatch(width)
+		}
 		return dimStyle.Render(truncate("  no spaces yet", width))
 
 	case rowHeader:
@@ -554,20 +543,6 @@ func agentGlyph(sp *space) string {
 	return ""
 }
 
-// agentHint is the dim secondary signal. It never groups or sorts anything --
-// the board tracks the user's own work, not the agent's.
-func agentHint(sp *space) string {
-	if !sp.Live {
-		return "offline"
-	}
-	switch sp.AgentStatus {
-	case "working", "blocked", "done", "idle":
-		return "·" + sp.AgentStatus
-	default:
-		return ""
-	}
-}
-
 func (m *Model) viewManage() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Statuses") + dimStyle.Render("  order here is the order on the board") + "\n\n")
@@ -612,140 +587,67 @@ func (m *Model) viewManage() string {
 	return b.String()
 }
 
-// helpRow is one key and what it does, in a long form and a short one. The
-// short form is not the long one truncated: a clipped sentence loses its verb
-// and says nothing, so the narrow board gets phrasing written for it.
-type helpRow struct {
-	// actions are named in actions.go; the row shows their current keys, so a
-	// binding in config.toml shows up here too.
-	actions     []string
-	long, short string
-	// wide marks a key that only does something on a board wide enough for the
-	// arrangements it switches between. Listing those in a dock, where they are
-	// deliberately inert, spends its scarcest rows on things that will not
-	// happen.
-	wide bool
+// helpLayout is how the help groups the actions, in reading order; the
+// words are each action's own help, in actions.go.
+var helpLayout = []screen.HelpSection{
+	{Title: "Move", Rows: [][]string{{"down", "up"}, {"left", "right"}, {"top", "bottom"}, {"page-down", "page-up"}, {"attention"}}},
+	{Title: "The board", Rows: [][]string{
+		{"filter"}, {"status-only"}, {"fold"}, {"layout"}, {"sort"}, {"archive"}, {"archived"},
+		{"statuses"}, {"reorder-spaces"}, {"refresh"}, {"help"}, {"quit"},
+	}},
+	{Title: "The selected card", Rows: [][]string{
+		{"jump"}, {"detail"}, {"menu"}, {"open-issue"}, {"prototype"}, {"open-pull-request"}, {"open-pr"},
+		{"orchestrator"}, {"yank"}, {"note"}, {"accept"}, {"handoff"}, {"status-picker"}, {"set-status"},
+		{"grab"}, {"rename"}, {"message"}, {"send-failure"}, {"forget"},
+	}},
 }
 
-var helpRows = []helpRow{
-	{actions: []string{"layout"}, long: "cycle the view: list → table → kanban", wide: true},
-	{actions: []string{"sort"}, long: "table only: sort by status, name, or when it last changed", wide: true},
-	{actions: []string{"detail"}, long: "list: show or hide the detail pane · elsewhere: detail modal", wide: true},
-	{actions: []string{"down", "up"}, long: "move", short: "move"},
-	{actions: []string{"top", "bottom"}, long: "first row · last row", short: "first · last"},
-	{actions: []string{"open-pr"}, long: "open the pull request in a browser", short: "open the PR"},
-	{actions: []string{"open-issue"}, long: "open the ticket in Jira", short: "open the ticket"},
-	{actions: []string{"prototype"}, long: "open the ticket's HTML prototype", short: "open the prototype"},
-	{actions: []string{"send-failure"}, long: "send the failing check, with the end of its log, to that space's agent", short: "send the failure"},
-	{actions: []string{"left", "right"}, long: "kanban: move between columns · list: collapse / expand", short: "fold · unfold"},
-	{actions: []string{"grab"}, long: "grab a row, then move it — leaving its group changes its status", short: "grab and move"},
-	{actions: []string{"jump"}, long: "jump to space (reopens archived ones)", short: "jump to space"},
-	{actions: []string{"set-status"}, long: "send to that status, numbered along the bottom", short: "set status"},
-	{actions: []string{"status-picker"}, long: "status picker", short: "status picker"},
-	{actions: []string{"note"}, long: "edit note — who or what you are waiting on", short: "edit note"},
-	{actions: []string{"rename"}, long: "rename the space — renames the Herdr workspace too", short: "rename space"},
-	{actions: []string{"message"}, long: "type a message into that space's agent, then go there to send it", short: "message agent"},
-	{actions: []string{"fold"}, long: "collapse / expand group", short: "fold group"},
-	{actions: []string{"status-only"}, long: "show only the status under the cursor; again for all", short: "this status only"},
-	{actions: []string{"reorder-spaces"}, long: "reorder Herdr's own Spaces sidebar to match this board", short: "reorder Spaces"},
-	{actions: []string{"archived"}, long: "show or hide archived spaces", short: "archived"},
-	{actions: []string{"filter"}, long: "filter by name, path or note", short: "filter"},
-	{actions: []string{"statuses"}, long: "manage statuses (add, rename, reorder, delete)", short: "statuses"},
-	{actions: []string{"forget"}, long: "forget the selected space", short: "forget space"},
-	{actions: []string{"refresh"}, long: "refresh", short: "refresh"},
-	{actions: []string{"quit"}, long: "quit", short: "quit"},
-}
+// wideOnly are actions that only do something on a board wide enough for the
+// arrangements they switch between. A dock leaves them out of its help rather
+// than spend its scarcest rows on things that will not happen.
+var wideOnly = map[string]bool{"layout": true, "sort": true, "detail": true}
 
-// helpKeys is a row's key column: each action's first current key. False
-// when the screen in front has none of them (archived, on the computed board).
-func (m *Model) helpKeys(r helpRow) (string, bool) {
-	var parts []string
-	for _, name := range r.actions {
-		if k := m.hintKey(name); k != "?" {
-			parts = append(parts, keys.Display([]string{k}))
-		}
+// notComputed are actions the computed board refuses: its columns are not
+// set by hand, and its pull requests do not come from GitHub.
+var notComputed = map[string]bool{"status-picker": true, "set-status": true, "statuses": true, "open-pr": true, "send-failure": true}
+
+// helpGroups are the help's sections for the screen in front.
+func (m *Model) helpGroups() []screen.HelpGroup {
+	km := m.keyMap()
+	if km == nil {
+		km, _ = keys.New(m.defaultActions(), nil)
 	}
-	return strings.Join(parts, " / "), len(parts) > 0
+	return screen.HelpFor(km, helpLayout, func(name string) bool {
+		return m.sidebar && wideOnly[name] || m.pipelineOn() && notComputed[name]
+	})
 }
 
-// helpKeyColumn is how much room the keys get. "gg / G" is the longest, and in
-// a dock the description needs every column the keys do not.
-const (
-	helpKeyColumn       = 10
-	helpKeyColumnNarrow = 7
-	// helpNarrowUnder is the width below which the help changes shape rather
-	// than just clipping.
-	helpNarrowUnder = 56
-)
+// helpNotes explain the board rather than drive it.
+func (m *Model) helpNotes() []string {
+	notes := []string{
+		"mouse: click selects · click again jumps · every button does what its key does",
+		"a column's ▾ folds it · its name shows it alone · ✕ lifts a search or a filter",
+	}
+	if m.pipelineOn() {
+		return append([]string{
+			"columns come from the run, " + m.pipe.CIName() + " and git; they are not moved by hand",
+			"in the Archive" + screen.Plain(m.archiveKeysNote()),
+		}, notes...)
+	}
+	return append([]string{"status is yours; the dim right column is Herdr's agent state"}, notes...)
+}
+
+// viewHelpOver is the help in a box over the board, like the detail.
+func (m *Model) viewHelpOver(base string) string {
+	return screen.HelpOver(base, m.helpGroups(), m.helpNotes(), m.width, m.height)
+}
 
 func (m *Model) viewHelp() string {
-	narrow := m.width < helpNarrowUnder
-
-	indent, keyCol := "   ", helpKeyColumn
-	if narrow {
-		indent, keyCol = " ", helpKeyColumnNarrow
-	}
-	room := m.width - lipgloss.Width(indent) - keyCol - 1
-
-	lines := []string{titleStyle.Render(" Board"), ""}
-	if m.pipelineOn() {
-		lines = append(lines,
-			dimStyle.Render(indent+truncate("Columns come from the run, "+m.pipe.CIName()+" and git; they are not moved by hand.", room+keyCol)),
-			indent+keyStyle.Render(pad(m.hintKey("accept"), keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
-			indent+keyStyle.Render(pad(m.hintKey("archive"), keyCol))+screen.Say("Archive of accepted tickets"+m.archiveKeysNote(), dimStyle, room),
-			"")
-	}
-	for _, r := range helpRows {
-		key, ok := m.helpKeys(r)
-		if !ok {
-			continue
-		}
-		text := r.long
-		if narrow {
-			// A key that does nothing here is not worth a row.
-			if r.wide {
-				continue
-			}
-			text = r.short
-		}
-		lines = append(lines, indent+keyStyle.Render(pad(key, keyCol))+
-			dimStyle.Render(truncate(text, room)))
-	}
-
-	// The closing notes are the first thing to go: they explain the board
-	// rather than drive it, and a dock has no rows to spare for prose.
-	//
-	// They are dropped whole rather than truncated, note by note: a clipped
-	// sentence of prose is worse than no sentence, having taken a row to say
-	// nothing.
-	if !narrow {
-		notes := []string{
-			"   status is yours; the dim right column is Herdr's agent state",
-			"   mouse: wheel scrolls · click selects · click again jumps · click a header folds",
-			"   docked, one click jumps — and the board closes behind you either way",
-		}
-		var fit []string
-		for _, n := range notes {
-			if lipgloss.Width(n) <= m.width {
-				fit = append(fit, dimStyle.Render(n))
-			}
-		}
-		if len(fit) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, fit...)
-		}
-	}
-
-	// Clip rather than overflow. A help taller than the pane scrolls its own
-	// first rows into the scrollback -- which is exactly where the keys you
-	// opened it for have gone, since the list starts at the top.
-	footer := dimStyle.Render(" " + truncate("any key to go back", max0(m.width-2)))
-	if room := m.height - 2; room > 1 && len(lines) > room {
-		lines = lines[:room-1]
-		lines = append(lines, dimStyle.Render(indent+"…"))
-	}
-
-	lines = append(lines, "", footer)
+	lines := []string{" " + titleStyle.Render("Help"), ""}
+	// The way out always stays on screen: two rows are kept for it.
+	body := screen.Help(m.helpGroups(), m.helpNotes(), m.width, max(m.height-len(lines)-2, 1))
+	lines = append(lines, body...)
+	lines = append(lines, "", dimStyle.Render(" "+truncate("any key to go back", max0(m.width-2))))
 	return strings.Join(lines, "\n")
 }
 

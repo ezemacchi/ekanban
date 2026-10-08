@@ -18,6 +18,9 @@ const (
 	OnChoice             // a choice inside an expanded card or a modal: Choice
 	OnButton             // a key hint or a clickable line: Key
 	OnBox                // a modal's box: a click inside it lands on nothing
+	// OnControl is something the board handles itself rather than through a
+	// key: ID names it ("fold" with Col, "clear-search", a section's name).
+	OnControl
 )
 
 // Zone is a rectangle of the screen a click can act on. Every frame records
@@ -30,6 +33,7 @@ type Zone struct {
 	Col, Row int
 	Choice   int
 	Key      string
+	ID       string // what an OnControl zone is
 	// Footer means Y counts from the footer's first line until PlaceFooter.
 	Footer bool
 }
@@ -50,6 +54,24 @@ func (z Zones) PlaceFooter(top int) {
 			z[i].Y += top
 			z[i].Footer = false
 		}
+	}
+}
+
+// MarkFooter flags the zones from index from as the footer's, so their rows
+// count from the footer's first line until PlaceFooter.
+func (z Zones) MarkFooter(from int) {
+	for i := from; i < len(z); i++ {
+		z[i].Footer = true
+	}
+}
+
+// Shift moves the zones from index from by dx columns and dy rows: a block
+// drawn at 0, 0 and placed later.
+func (z Zones) Shift(from, dx, dy int) {
+	for i := from; i < len(z); i++ {
+		z[i].X0 += dx
+		z[i].X1 += dx
+		z[i].Y += dy
 	}
 }
 

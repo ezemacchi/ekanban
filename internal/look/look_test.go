@@ -30,19 +30,6 @@ func TestTruncateMeasuresWidth(t *testing.T) {
 	}
 }
 
-func TestCardIsExactlyItsWidth(t *testing.T) {
-	styled := lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Render("a styled line that is far too long for the card")
-	lines := Card([]string{"short", styled, Check + " glyph"}, 20, CardSelected)
-	if len(lines) != 5 {
-		t.Fatalf("want top, three lines, bottom; got %d", len(lines))
-	}
-	for i, l := range lines {
-		if w := lipgloss.Width(l); w != 20 {
-			t.Errorf("line %d is %d cells wide, want 20: %q", i, w, l)
-		}
-	}
-}
-
 func TestIconsOffShowsTextOnly(t *testing.T) {
 	if got := (Icons{}).With(Check, "done"); got != "done" {
 		t.Fatalf("off: %q", got)

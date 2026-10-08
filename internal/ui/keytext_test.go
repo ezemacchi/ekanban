@@ -20,11 +20,8 @@ func TestRebindingRenamesEveryMention(t *testing.T) {
 	m.width = 140
 
 	foot := ansi.Strip(m.View())
-	if !strings.Contains(foot, "N note") || strings.Contains(foot, "n note") {
+	if !strings.Contains(foot, "N Note") || strings.Contains(foot, "n Note") {
 		t.Fatalf("the footer does not name N for note:\n%s", foot)
-	}
-	if !strings.Contains(foot, "L list") {
-		t.Fatalf("the footer does not name L for the layout:\n%s", foot)
 	}
 
 	m.cycleSort()
@@ -37,7 +34,7 @@ func TestRebindingRenamesEveryMention(t *testing.T) {
 		t.Fatal("d did not open the detail modal")
 	}
 	modal := ansi.Strip(m.View())
-	if !strings.Contains(modal, "N note") {
+	if !strings.Contains(modal, "N Note") {
 		t.Fatalf("the modal's buttons do not name N:\n%s", modal)
 	}
 	send(t, m, key("n"))

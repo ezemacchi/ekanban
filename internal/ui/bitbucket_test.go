@@ -183,7 +183,7 @@ func TestTheDetailExplainsTheBlockAndLinksToSonar(t *testing.T) {
 		}
 	}
 	body := strings.Join(text, "\n")
-	for _, want := range []string{"Bitbucket · into master", "SonarQube failed", "Quality Gate failed", "2 New Critical Issues", "Code Coverage 0%"} {
+	for _, want := range []string{"SonarQube failed", "Quality Gate failed", "2 New Critical Issues", "Code Coverage 0%"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("detail lacks %q:\n%s", want, body)
 		}

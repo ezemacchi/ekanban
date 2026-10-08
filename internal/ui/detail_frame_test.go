@@ -28,7 +28,7 @@ func TestDetailBoxKeepsTheFrameTheSameHeight(t *testing.T) {
 	if len(open) != len(before) || len(after) != len(before) {
 		t.Fatalf("frame heights differ: board %d, box open %d, closed again %d", len(before), len(open), len(after))
 	}
-	if last := after[len(after)-1]; !strings.Contains(last, "detail") || !strings.Contains(last, "help") {
+	if last := after[len(after)-1]; !strings.Contains(last, "Detail") || !strings.Contains(last, "Help") {
 		t.Fatalf("the hints are not the last row after closing: %q", last)
 	}
 }

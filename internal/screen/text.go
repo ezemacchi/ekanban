@@ -9,39 +9,6 @@ import (
 	"github.com/ezemacchi/ekanban/internal/look"
 )
 
-// Hint is one clickable key hint in a footer: what to press and what it does.
-type Hint struct{ Key, Label string }
-
-// Buttons draws hints as "key label · key label" within width, recording each
-// as an OnButton zone on footer row line, starting at column x. A hint with no
-// key (an action unbound in [keys]) is left out.
-func Buttons(z *Zones, line, x int, hints []Hint, width int) string {
-	var b strings.Builder
-	used := 0
-	sep := look.Dim.Render(" · ")
-	for i, h := range hints {
-		if h.Key == "" {
-			continue
-		}
-		text := look.Key.Render(h.Key) + look.Dim.Render(" "+h.Label)
-		w := lipgloss.Width(text)
-		gap := 0
-		if i > 0 && used > 0 {
-			gap = 3
-		}
-		if used+gap+w > width {
-			break
-		}
-		if gap > 0 {
-			b.WriteString(sep)
-		}
-		z.Add(Zone{Kind: OnButton, Y: line, X0: x + used + gap, X1: x + used + gap + w, Key: h.Key, Footer: true})
-		b.WriteString(text)
-		used += gap + w
-	}
-	return b.String()
-}
-
 // JoinEnds puts left and right on one line, right-aligned to width.
 func JoinEnds(left, right string, width int) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -99,4 +66,42 @@ func Wrap(s string, width int) []string {
 		lines = append(lines, current)
 	}
 	return lines
+}
+
+// Inline draws the inline marks a run's markdown uses: **bold** in bold and
+// `code` in the key colour, the rest in base, cut to width cells (<= 0 does
+// not cut). A mark left open runs to the end of the line.
+func Inline(s string, base lipgloss.Style, width int) string {
+	var b strings.Builder
+	bold, code := false, false
+	var run strings.Builder
+	flush := func() {
+		if run.Len() == 0 {
+			return
+		}
+		style := base
+		if bold {
+			style = style.Bold(true)
+		}
+		if code {
+			style = look.Key
+		}
+		b.WriteString(style.Render(run.String()))
+		run.Reset()
+	}
+	for i := 0; i < len(s); i++ {
+		switch {
+		case strings.HasPrefix(s[i:], "**") && !code:
+			flush()
+			bold = !bold
+			i++
+		case s[i] == '`':
+			flush()
+			code = !code
+		default:
+			run.WriteByte(s[i])
+		}
+	}
+	flush()
+	return TruncateStyled(b.String(), width)
 }

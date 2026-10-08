@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
-	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/screen"
 )
@@ -32,6 +30,7 @@ const (
 type detailLine struct {
 	text string
 	url  string
+	key  string // what a click on it presses, when it is a field to edit
 }
 
 func plain(lines ...string) []detailLine {
@@ -90,116 +89,91 @@ func (m *Model) detailLines(sp *space, width int) []detailLine {
 		return plain(dimStyle.Render(truncate("nothing selected", width)))
 	}
 
-	name := sp.Label
-	if !sp.Live {
-		name = archivedStyle.Render(truncate(name, width))
-	} else {
-		name = titleStyle.Render(truncate(name, width))
-	}
-
-	lines := plain(name, dimStyle.Render(strings.Repeat("─", width)))
+	lines := plain(m.modalTitle(sp, width), dimStyle.Render(strings.Repeat("─", width)))
 	return append(lines, m.detailBody(sp, width)...)
 }
 
-// detailBody is the detail without the name: status, note, alerts, pull
-// request and machine facts. The modal shows the name in its title instead.
+// detailBody is the detail without the name: what the card is about, then
+// labelled fields -- status, note, what asks for you, the ticket, the agent,
+// the pull request, the workspace. The modal shows the name in its title.
 func (m *Model) detailBody(sp *space, width int) []detailLine {
 	var lines []detailLine
+	value := max(width-screen.FieldLabel, 8)
+	field := func(label string, field []detailLine) {
+		if len(field) == 0 {
+			return
+		}
+		drawn := screen.Field(label, texts(field))
+		for i := range field {
+			field[i].text = drawn[i]
+		}
+		lines = append(lines, field...)
+	}
+
+	// What the card is about comes first, as on the card.
+	if h := m.headline(sp); h != "" {
+		for _, l := range screen.Wrap(h, width) {
+			lines = append(lines, detailLine{text: titleStyle.Render(l)})
+		}
+		lines = append(lines, detailLine{})
+	}
+
 	if st, ok := m.board.StatusByID(sp.StatusID); ok {
-		lines = append(lines, plain(lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Bold(true).Render(truncate(m.statusLabel(st), width)))...)
-	}
-	lines = append(lines, plain("")...)
-
-	// The note is the reason this view exists, so it gets the room it needs.
-	if sp.Note != "" {
-		noteWidth := width - lipgloss.Width(m.glyph(look.Pencil, ""))
-		for i, line := range screen.Wrap(sp.Note, noteWidth) {
-			lead := m.glyph(look.Pencil, "")
-			if i > 0 {
-				lead = strings.Repeat(" ", lipgloss.Width(lead))
-			}
-			lines = append(lines, plain(noteStyle.Render(lead+line))...)
-		}
-	} else {
-		lines = append(lines, plain(screen.Say(m.glyph(look.Pencil, "no note"+m.press("note", "to add one")), dimStyle, width))...)
-	}
-	lines = append(lines, plain("")...)
-
-	// What happened while you were away comes first: it is the reason the row
-	// was calling for attention.
-	if alerts := m.alertLines(sp.Key, width); len(alerts) > 0 {
-		lines = append(lines, plain(alerts...)...)
-		lines = append(lines, plain("")...)
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color)).Bold(true)
+		field("status", plain(style.Render(truncate(m.statusLabel(st), value))))
 	}
 
-	// PR context sits between the note and the machine facts: it is about the
-	// work, but unlike the note it is not something you wrote.
+	// What happened while you were away: the reason the card is calling.
+	field("alerts", plain(m.alertLines(sp.Key, value)...))
+
+	// The note is a field to write in, where it is read: a click on it, or
+	// the note key, edits it right here.
+	field("note", m.noteBox(sp, value))
+
+	byKind := map[string][]detailLine{}
+	for _, f := range m.facts(sp) {
+		byKind[f.kind] = append(byKind[f.kind], detailLine{text: m.line(f, value), url: f.url})
+	}
+	key := m.ticketOf(sp)
+	field("ticket", append(byKind[kindTicket], m.jiraTests(key, value)...))
+	field("agent", byKind[kindAgent])
 	if m.pipelineOn() {
-		if info, ok := m.pipeInfo[sp.Key]; ok && info.Title != "" {
-			for _, line := range screen.Wrap(info.Title, width) {
-				lines = append(lines, plain(line)...)
-			}
-			lines = append(lines, plain("")...)
-		}
-		facts := m.pipelineLines(sp, width)
-		if info := m.pipeInfo[sp.Key]; info.PR > 0 {
-			// The pull request line opens Bitbucket on click.
-			for i, l := range facts {
-				if strings.Contains(l, fmt.Sprintf("PR #%d", info.PR)) {
-					lines = append(lines, detailLine{text: l, url: links.PullRequest(info.PR)})
-					facts = append(facts[:i:i], facts[i+1:]...)
-					break
-				}
-			}
-		}
-		// The Jira status line opens the ticket on click.
-		if key := m.ticketOf(sp); key != "" && m.jiraOn() {
-			for i, l := range facts {
-				if strings.Contains(l, "Jira: ") {
-					lines = append(lines, detailLine{text: l, url: links.Issue(key)})
-					facts = append(facts[:i:i], facts[i+1:]...)
-					break
-				}
-			}
-		}
-		lines = append(lines, plain(facts...)...)
-		lines = append(lines, m.bitbucketDetailLines(m.pipeInfo[sp.Key], width)...)
-		lines = append(lines, m.jiraDetailLines(m.ticketOf(sp), width)...)
-		lines = append(lines, plain("")...)
+		field("pull req", append(byKind[kindPR], m.bitbucketDetailLines(m.pipeInfo[sp.Key], value)...))
 	} else if pr, ok := m.prFor(sp.Key); ok {
-		lines = append(lines, prDetailLines(pr, width)...)
-		lines = append(lines, plain("")...)
+		field("pull req", prDetailLines(pr, value))
 	}
+	field("info", byKind[""])
+	field("comment", m.jiraComment(key, value))
 
 	if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
 		return lines // a ticket with no folder, branch or workspace yet
 	}
-	for _, line := range screen.Wrap(m.glyph(look.Folder, abbreviate(sp.Key)), width) {
-		lines = append(lines, plain(dimStyle.Render(line))...)
+	var where []string
+	for _, line := range screen.Wrap(m.glyph(look.Folder, abbreviate(sp.Key)), value) {
+		where = append(where, dimStyle.Render(line))
 	}
 	if branch := m.branchFor(sp.Key); branch != "" {
 		mark := "⎇ " + branch
 		if m.icons {
 			mark = look.Branch + " " + branch
 		}
-		lines = append(lines, plain(branchStyle.Render(truncate(mark, width)))...)
+		where = append(where, branchStyle.Render(truncate(mark, value)))
 	}
-
-	where := "archived"
+	state := "archived"
 	if sp.Live {
-		where = "live"
+		state = "live"
 		if ids := strings.Join(sp.WorkspaceIDs, ", "); ids != "" {
-			where += " · " + ids
+			state += " · " + ids
 		}
 		if sp.AgentStatus != "" {
-			where += " · " + sp.AgentStatus
+			state += " · " + sp.AgentStatus
 		}
 	}
-	lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Monitor, where), width)))...)
-
+	where = append(where, dimStyle.Render(truncate(m.glyph(look.Monitor, state), value)))
 	if !sp.UpdatedAt.IsZero() {
-		lines = append(lines, plain(dimStyle.Render(truncate(m.glyph(look.Clock, "changed "+humanAge(sp.UpdatedAt)), width)))...)
+		where = append(where, dimStyle.Render(truncate(m.glyph(look.Clock, "changed "+humanAge(sp.UpdatedAt)), value)))
 	}
+	field("workspace", plain(where...))
 	return lines
 }
 
@@ -207,7 +181,7 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 // between these, so a long note or branch is not wrapped into a narrow strip.
 const (
 	detailModalMin    = 40
-	detailModalMax    = 110
+	detailModalMax    = 84
 	detailModalMargin = 8
 )
 
@@ -231,23 +205,14 @@ var pickerHelp = screen.Key("s") + "/arrows move · " + screen.Key("enter") + " 
 
 func (m *Model) viewDetailModal(base string) string {
 	sp := m.selected()
-	maxInner := min(m.width-detailModalMargin, detailModalMax) - 4
-	if maxInner < detailModalMin {
-		maxInner = detailModalMin
-	}
-	k := m.hintKey
-	hints := []hint{{k("note"), "note"}, {k("status-picker"), "status"}, {k("jump"), "jump"}, {k("quit"), "close"}}
-	if m.pipelineOn() {
-		hints = []hint{{k("note"), "note"}, {k("open-issue"), "ticket"}, {k("prototype"), "prototype"}, {k("open-pull-request"), "pull request"}, {k("yank"), "copy"}, {k("jump"), "jump"}, {k("quit"), "close"}}
-	}
+	maxInner := max(min(m.width-detailModalMargin, detailModalMax)-4, detailModalMin)
+	// The ✕ in the title closes it for the mouse; the hint stays for the keys.
+	hints := append(m.detailButtons(sp), hint{Key: m.hintKey("quit"), Label: "Close"})
 	picking := m.mode == modeStatusPick
 
 	// Lay out at the widest allowed, then shrink to what the content uses and
 	// lay out again so wrapped lines fill the final width.
-	inner := 0
-	for _, h := range hints {
-		inner += lipgloss.Width(h.key+" "+h.label) + 3
-	}
+	inner := lipgloss.Width(screen.Buttons(nil, 0, 0, hints, 1<<20))
 	for _, l := range texts(m.modalContent(sp, maxInner)) {
 		inner = max(inner, lipgloss.Width(l))
 	}
@@ -265,41 +230,48 @@ func (m *Model) viewDetailModal(base string) string {
 		}
 		bottom = append(bottom, screen.Say(pickerHelp, dimStyle, inner))
 	} else {
-		bottom = []string{m.buttons(0, 0, hints, inner)}
-		for i := mark; i < len(m.zones); i++ {
-			m.zones[i].Footer = false
-		}
+		bottom = screen.ButtonRows(&m.zones, 0, 0, hints, inner)
 	}
 
-	title := m.modalTitle(sp, inner)
-	body := title + "\n\n" + strings.Join(texts(content), "\n") + "\n\n" + strings.Join(bottom, "\n")
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(0, 1).
-		Width(inner + 2).
-		Render(body)
+	box := screen.Modal(screen.Closable(m.modalTitle(sp, inner-4), inner), texts(content), bottom, inner)
 
 	// Record where each line landed so a click can find its URL: past the
 	// border, the title and the blank line under it.
 	boxW, boxH := lipgloss.Width(box), lipgloss.Height(box)
-	originX := max0((m.width - boxW) / 2)
-	originY := max0((m.height - boxH) / 2)
-	m.trackLinks(content, originY+3, originX+2, originX+2+inner)
+	originX, originY := screen.Center(boxW, boxH, m.width, m.height)
+	m.trackLinks(content, originY+screen.ModalBody, originX+2, originX+2+inner)
 
-	// Past the border, the title, the blank line, the content and the blank.
-	bottomY := originY + 1 + 2 + len(content) + 1
-	for i := mark; i < len(m.zones); i++ {
-		m.zones[i].Y += bottomY
-		m.zones[i].X0 += originX + 2
-		m.zones[i].X1 += originX + 2
-	}
+	// Past the body and the blank line under it.
+	m.zones.Shift(mark, originX+2, originY+screen.ModalBody+len(content)+1)
 	// The box goes under its own zones: a click inside it on nothing does not
-	// close it.
+	// close it. Its ✕ does, at the right of the title.
 	m.zones = append(m.zones[:mark], append([]zone{{Kind: zoneModal, Y: originY, H: boxH, X0: originX, X1: originX + boxW}}, m.zones[mark:]...)...)
+	if k := m.hintKey("quit"); k != "" {
+		m.addZone(screen.CloseZone(originX, originY, inner, k))
+	}
 
-	return overlay(base, box, originX, originY, m.width, m.height)
+	return screen.Overlay(base, box, originX, originY, m.height)
+}
+
+// noteBox is the note as a field width cells wide: the note, or what to write
+// in it, behind a pencil; while it is being written, the input itself.
+func (m *Model) noteBox(sp *space, width int) []detailLine {
+	if m.mode == modeNote && sp == m.selected() {
+		m.input.Width = max(width-6, 4)
+		return plain(screen.Input("✎", "", "", true, m.input.View(), width))
+	}
+	key := m.hintKey("note")
+	var lines []detailLine
+	for _, l := range screen.TextBox("✎", screen.Wrap(sp.Note, max(width-4, 4)), "click to write a note: who or what you are waiting on", width) {
+		lines = append(lines, detailLine{text: l, key: key})
+	}
+	return lines
+}
+
+// noteInDetail is whether the note being written is in a detail on screen,
+// rather than in the footer.
+func (m *Model) noteInDetail() bool {
+	return m.mode == modeNote && (m.prevMode == modeDetail || m.layout == layoutList && m.detailPaneWidth() > 0)
 }
 
 func (m *Model) modalContent(sp *space, width int) []detailLine {
@@ -315,42 +287,22 @@ func (m *Model) modalTitle(sp *space, width int) string {
 	if sp == nil {
 		return titleStyle.Render("detail")
 	}
-	name := truncate(m.spaceLabel(sp), width-4)
-	if !m.icons {
-		return titleStyle.Render(name)
+	// Whatever asks for you is said at the right, where the card has its red
+	// dot; otherwise the ticket's type.
+	right := ""
+	if why := m.attention(sp); why != "" {
+		right = look.Attention.Render(truncate("● "+why, width/2))
+	} else if i, ok := m.jr.issues[m.ticketOf(sp)]; ok && i.Type != "" {
+		right = dimStyle.Render(i.Type)
 	}
-	edge := lipgloss.NewStyle().Foreground(look.PillColor)
-	fill := lipgloss.NewStyle().Background(look.PillColor).Foreground(lipgloss.Color("231")).Bold(true)
-	return edge.Render(look.PillLeft) + fill.Render(" "+name+" ") + edge.Render(look.PillRight)
-}
-
-// overlay draws box over base with its top-left corner at x, y, keeping the
-// base visible on either side of each line it covers.
-func overlay(base, box string, x, y, width, height int) string {
-	lines := strings.Split(base, "\n")
-	// Pad only as far as the box needs. The board is one line shorter than the
-	// screen; padding it to the full height made the frame one line taller
-	// while a box was open, and when the box closed the frame shrank and the
-	// terminal erased the bottom line of the board -- the row of key hints.
-	// Keeping the frame the same height either way leaves that row alone.
-	boxLines := strings.Split(box, "\n")
-	for len(lines) < min(height, y+len(boxLines)) {
-		lines = append(lines, "")
+	name := truncate(m.spaceLabel(sp), width-4-lipgloss.Width(right))
+	title := titleStyle.Render(name)
+	if m.icons {
+		edge := lipgloss.NewStyle().Foreground(look.PillColor)
+		fill := lipgloss.NewStyle().Background(look.PillColor).Foreground(lipgloss.Color("231")).Bold(true)
+		title = edge.Render(look.PillLeft) + fill.Render(" "+name+" ") + edge.Render(look.PillRight)
 	}
-	for i, bl := range boxLines {
-		row := y + i
-		if row < 0 || row >= len(lines) {
-			continue
-		}
-		l := lines[row]
-		left := ansi.Truncate(l, x, "")
-		if gap := x - ansi.StringWidth(left); gap > 0 {
-			left += strings.Repeat(" ", gap)
-		}
-		right := ansi.TruncateLeft(l, x+ansi.StringWidth(bl), "")
-		lines[row] = left + "\x1b[0m" + bl + "\x1b[0m" + right
-	}
-	return strings.Join(lines, "\n")
+	return screen.JoinEnds(title, right, width)
 }
 
 func humanAge(t time.Time) string {
