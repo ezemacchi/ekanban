@@ -60,7 +60,7 @@ rules = ["merged", "working"]
 [keys]
 accept = "y"
 
-[lead]
+[orchestrator]
 kind = "cursor"
 args = ["--model", "m"]
 prompt = "personal"
@@ -72,7 +72,7 @@ rules = ["landed"]
 [keys]
 archive = "z"
 
-[lead]
+[orchestrator]
 kind = "evil"
 prompt = "the project's"
 
@@ -92,8 +92,8 @@ state = "status.md"
 	if s.Keys["accept"][0] != "y" || s.Keys["archive"][0] != "z" {
 		t.Fatalf("a table merges: %v", s.Keys)
 	}
-	if s.Lead.Prompt != "the project's" || s.Lead.Kind != "cursor" || strings.Join(s.Lead.Args, " ") != "--model m" {
-		t.Fatalf("lead: %+v", s.Lead)
+	if s.Orchestrator.Prompt != "the project's" || s.Orchestrator.Kind != "cursor" || strings.Join(s.Orchestrator.Args, " ") != "--model m" {
+		t.Fatalf("orchestrator: %+v", s.Orchestrator)
 	}
 	if len(s.Problems) != 1 || !strings.Contains(s.Problems[0], "kind and args") {
 		t.Fatalf("problems: %q", s.Problems)
@@ -103,8 +103,8 @@ state = "status.md"
 	}
 
 	// Outside any repository only config.toml counts.
-	if s := LoadFor(t.TempDir()); s.RepoPath != "" || s.Lead.Prompt != "personal" {
-		t.Fatalf("outside a repo: %q %q", s.RepoPath, s.Lead.Prompt)
+	if s := LoadFor(t.TempDir()); s.RepoPath != "" || s.Orchestrator.Prompt != "personal" {
+		t.Fatalf("outside a repo: %q %q", s.RepoPath, s.Orchestrator.Prompt)
 	}
 }
 

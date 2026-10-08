@@ -48,11 +48,11 @@ var (
 
 	// PipelineActions are the computed board's: a accepts instead of showing
 	// archived spaces, A opens the archive of accepted tickets, and o goes to
-	// a ticket's lead, so sorting the table moves to ctrl+o.
+	// a ticket's orchestrator, so sorting the table moves to ctrl+o.
 	PipelineActions = append(withKeys(commonActions, "sort", "ctrl+o"),
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
-		keys.Action{Name: "lead", Keys: []string{"o"}, Canon: "lead", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"})
+		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"})
 
 	// ArchiveActions are the archive list's.
 	ArchiveActions = []keys.Action{

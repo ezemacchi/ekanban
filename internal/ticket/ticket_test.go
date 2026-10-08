@@ -20,18 +20,18 @@ func write(t *testing.T, path, text string) {
 	}
 }
 
-// fullTeam is a five-role team with an orchestrator for its lead.
+// fullTeam is a five-role team with an orchestrator for its orchestrator.
 func fullTeam(t *testing.T) []team.Team {
 	t.Helper()
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "full.toml"), `name = "Full"
 match = '(?i)full'
-[lead]
+[orchestrator]
 label = "Orchestrator"
 match = 'orchestrator'
 [[role]]
-id = "technical-lead"
-match = 'tech(nical)?-?lead'
+id = "technical-orchestrator"
+match = 'tech(nical)?-?orchestrator'
 done_file = "ENVELOPE.md"
 [[role]]
 id = "evidence"
@@ -94,7 +94,7 @@ func TestPrototypeFromSpecFieldOrMostMentioned(t *testing.T) {
 func TestLoadPlacesRoles(t *testing.T) {
 	wt := t.TempDir()
 	run := filepath.Join(wt, ".runs", "ABC-1")
-	write(t, filepath.Join(run, "STATE.md"), "# Run\r\nTeam: Full team | Target: master | Jira: ABC-1\r\n\r\n## Objective\r\nFix the thing.\r\n\r\n## Open questions\r\n- Which caption? (for the lead)\r\n- Old one (decided: keep)\r\n\r\n## Known defects\r\n- not a question\r\n\r\n## Landed\r\n")
+	write(t, filepath.Join(run, "STATE.md"), "# Run\r\nTeam: Full team | Target: master | Jira: ABC-1\r\n\r\n## Objective\r\nFix the thing.\r\n\r\n## Open questions\r\n- Which caption? (for the orchestrator)\r\n- Old one (decided: keep)\r\n\r\n## Known defects\r\n- not a question\r\n\r\n## Landed\r\n")
 	write(t, filepath.Join(run, "ENVELOPE.md"), "x")
 	write(t, filepath.Join(run, "DISPATCH-01-evidence.md"), "x")
 	write(t, filepath.Join(run, "DISPATCH-02-implementer.md"), "x")
@@ -112,7 +112,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 	if r.Key != "ABC-1" || r.Team != "Full team" || r.Target != "master" {
 		t.Fatalf("header: %+v", r)
 	}
-	if len(r.Questions) != 1 || r.Questions[0] != "Which caption? (for the lead)" {
+	if len(r.Questions) != 1 || r.Questions[0] != "Which caption? (for the orchestrator)" {
 		t.Fatalf("questions: %q", r.Questions)
 	}
 	if r.Landed {
@@ -125,7 +125,7 @@ func TestLoadPlacesRoles(t *testing.T) {
 	if r.TeamName != "Full" || len(r.Cards) != 5 {
 		t.Fatalf("team %q with %d cards", r.TeamName, len(r.Cards))
 	}
-	want := map[string]Column{"technical-lead": Done, "evidence": Pending, "implementer": Working, "qa": Pending}
+	want := map[string]Column{"technical-orchestrator": Done, "evidence": Pending, "implementer": Working, "qa": Pending}
 	for _, c := range r.Cards {
 		if w, ok := want[c.Role.ID]; ok && c.Column != w {
 			t.Errorf("%s: column %d, want %d (%s)", c.Role.ID, c.Column, w, c.Note)
@@ -137,9 +137,9 @@ func TestLoadPlacesRoles(t *testing.T) {
 }
 
 // An agent in the ticket's workspace belongs to it wherever its folder is,
-// and one that is no role's is the lead: an orchestrator started by hand in
+// and one that is no role's is the orchestrator: an orchestrator started by hand in
 // the main clone, in a tab nobody renamed.
-func TestWorkspaceAgentsAndLead(t *testing.T) {
+func TestWorkspaceAgentsAndOrchestrator(t *testing.T) {
 	wt := t.TempDir()
 	write(t, filepath.Join(wt, ".runs", "ABC-1", "STATE.md"), "Team: Full team\n")
 	write(t, filepath.Join(wt, ".runs", "ABC-1", "DISPATCH-01-implementer.md"), "x")
@@ -162,8 +162,8 @@ func TestWorkspaceAgentsAndLead(t *testing.T) {
 	if r.Workspace != "w" {
 		t.Fatalf("workspace = %q", r.Workspace)
 	}
-	if r.LeadPane != "w:p1" || r.LeadStatus != "idle" || r.Lead.Label != "Orchestrator" {
-		t.Fatalf("lead = %q %q %q", r.LeadPane, r.LeadStatus, r.Lead.Label)
+	if r.OrchestratorPane != "w:p1" || r.OrchestratorStatus != "idle" || r.Orchestrator.Label != "Orchestrator" {
+		t.Fatalf("orchestrator = %q %q %q", r.OrchestratorPane, r.OrchestratorStatus, r.Orchestrator.Label)
 	}
 	for _, c := range r.Cards {
 		if c.Role.ID == "implementer" && (c.Column != Working || c.PaneID != "w:p2") {
@@ -175,18 +175,18 @@ func TestWorkspaceAgentsAndLead(t *testing.T) {
 	live.Tabs["w:t1"] = "notes"
 	live.Agents = append(live.Agents, herdr.Agent{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", WorkspaceID: "w", Cwd: wt})
 	live.Tabs["w:t3"] = "orchestrator"
-	if r, _ = Load(wt, opts, live); r.LeadPane != "w:p3" {
-		t.Fatalf("named lead = %q", r.LeadPane)
+	if r, _ = Load(wt, opts, live); r.OrchestratorPane != "w:p3" {
+		t.Fatalf("named orchestrator = %q", r.OrchestratorPane)
 	}
 
 	// No workspace open: only agents inside the worktree count, and none is
-	// the lead by elimination.
+	// the orchestrator by elimination.
 	live.Workspaces = map[string]string{"x": elsewhere}
-	if r, _ = Load(wt, opts, live); r.Workspace != "" || r.LeadPane != "w:p3" {
-		t.Fatalf("without workspace: %q %q", r.Workspace, r.LeadPane)
+	if r, _ = Load(wt, opts, live); r.Workspace != "" || r.OrchestratorPane != "w:p3" {
+		t.Fatalf("without workspace: %q %q", r.Workspace, r.OrchestratorPane)
 	}
 	live.Tabs["w:t3"] = "scratch"
-	if r, _ = Load(wt, opts, live); r.LeadPane != "" {
-		t.Fatalf("lead by elimination without a workspace: %q", r.LeadPane)
+	if r, _ = Load(wt, opts, live); r.OrchestratorPane != "" {
+		t.Fatalf("orchestrator by elimination without a workspace: %q", r.OrchestratorPane)
 	}
 }

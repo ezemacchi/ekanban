@@ -48,9 +48,11 @@ type Config struct {
 	Ticket TicketConfig `toml:"ticket"`
 	// Keys binds keys to actions by name: accept = "y" or accept = ["y", "Y"].
 	Keys map[string]any `toml:"keys"`
-	// Lead overrides the teams' [lead]: how the agent running a ticket is
+	// Orchestrator overrides the teams' [orchestrator]: how the agent running a ticket is
 	// recognised and started.
-	Lead team.Lead `toml:"lead"`
+	Orchestrator team.Orchestrator `toml:"orchestrator"`
+	// Lead is [orchestrator]'s old name, still read; see foldLead.
+	Lead *team.Orchestrator `toml:"lead"`
 	// Run is where a team run lives and how its state file reads.
 	Run ticket.LayoutConfig `toml:"run"`
 }
@@ -116,7 +118,7 @@ type Settings struct {
 	Ticket        TicketConfig
 	Keys          map[string][]string            // action name -> keys
 	ScreenKeys    map[string]map[string][]string // [keys.board], [keys.ticket]
-	Lead          team.Lead                      // [lead], over each team's
+	Orchestrator  team.Orchestrator              // [orchestrator], over each team's
 	Layout        ticket.Layout                  // [run]
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
@@ -154,20 +156,22 @@ func Load() Settings { return LoadFor("") }
 // not an error.
 //
 // The repository file describes the project's process, so it cannot choose
-// which program starts: [lead] kind and args are read from config.toml only.
+// which program starts: [orchestrator] kind and args are read from config.toml only.
 func LoadFor(dir string) Settings {
 	s := Settings{PollInterval: DefaultPollInterval, Notifications: true}
 	var c Config
 	if base, err := Dir(); err == nil {
 		s.Path = filepath.Join(base, "config.toml")
 		s.Problems = decodeOver(&c, s.Path, s.Problems)
+		s.Problems = foldLead(&c, s.Path, s.Problems)
 	}
 	if s.RepoPath = RepoFile(dir); s.RepoPath != "" {
-		lead := c.Lead
+		orchestrator := c.Orchestrator
 		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
-		if c.Lead.Kind != lead.Kind || !slices.Equal(c.Lead.Args, lead.Args) {
-			s.Problems = append(s.Problems, fmt.Sprintf("%s: [lead] kind and args are only read from config.toml — ignored", s.RepoPath))
-			c.Lead.Kind, c.Lead.Args = lead.Kind, lead.Args
+		s.Problems = foldLead(&c, s.RepoPath, s.Problems)
+		if c.Orchestrator.Kind != orchestrator.Kind || !slices.Equal(c.Orchestrator.Args, orchestrator.Args) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [orchestrator] kind and args are only read from config.toml — ignored", s.RepoPath))
+			c.Orchestrator.Kind, c.Orchestrator.Args = orchestrator.Kind, orchestrator.Args
 		}
 	}
 	return resolve(c, s)
@@ -191,6 +195,17 @@ func decodeOver(c *Config, path string, problems []string) []string {
 	}
 	_ = toml.Unmarshal(data, c)
 	return problems
+}
+
+// foldLead moves a [lead] table, [orchestrator]'s old name, into
+// [orchestrator], whose own fields win, and asks for the rename.
+func foldLead(c *Config, path string, problems []string) []string {
+	if c.Lead == nil {
+		return problems
+	}
+	c.Orchestrator = c.Lead.Over(c.Orchestrator)
+	c.Lead = nil
+	return append(problems, fmt.Sprintf("%s: [lead] is now [orchestrator]; it still works, rename it", path))
 }
 
 // resolve validates c into s.
@@ -222,10 +237,10 @@ func resolve(c Config, s Settings) Settings {
 	s.Pipeline = c.Pipeline
 	s.Ticket = c.Ticket
 	s.Keys, s.ScreenKeys, s.Problems = bindings(c.Keys, s.Problems)
-	if _, err := (team.Lead{}).With(c.Lead); err != nil {
-		s.Problems = append(s.Problems, fmt.Sprintf("[lead]: %v — ignored", err))
+	if _, err := (team.Orchestrator{}).With(c.Orchestrator); err != nil {
+		s.Problems = append(s.Problems, fmt.Sprintf("[orchestrator]: %v — ignored", err))
 	} else {
-		s.Lead = c.Lead
+		s.Orchestrator = c.Orchestrator
 	}
 	if s.Pipeline.CI.Kind == "" && s.Pipeline.CI.URL == "" && s.Pipeline.JenkinsPRJobs != "" {
 		s.Pipeline.CI = CIConfig{Kind: "jenkins", URL: s.Pipeline.JenkinsPRJobs}
@@ -279,6 +294,9 @@ func bindings(raw map[string]any, problems []string) (map[string][]string, map[s
 	return out, screens, problems
 }
 
+// renamedAction is an action [keys] still accepts under its old name.
+var renamedAction = struct{ from, to string }{"lead", "orchestrator"}
+
 func bindingsOf(raw map[string]any, where string, problems []string) (map[string][]string, []string) {
 	out := map[string][]string{}
 	for name, v := range raw {
@@ -299,6 +317,13 @@ func bindingsOf(raw map[string]any, where string, problems []string) (map[string
 			problems = append(problems, fmt.Sprintf("%s.%s: use a key in quotes or a list of them", where, name))
 		}
 	}
+	if ks, ok := out[renamedAction.from]; ok {
+		if _, both := out[renamedAction.to]; !both {
+			out[renamedAction.to] = ks
+		}
+		delete(out, renamedAction.from)
+		problems = append(problems, fmt.Sprintf("%s.%s is now %s.%s; it still works, rename it", where, renamedAction.from, where, renamedAction.to))
+	}
 	return out, problems
 }
 
@@ -310,8 +335,8 @@ const Example = `# ekanban settings.
 # A repository can add its own .ekanban.toml at its root, with any of the
 # settings below: it is read over this file whenever a board opens inside that
 # repository (or one of its worktrees). Put the project's process there --
-# tracker, pull request and build server links, targets, [run], the [lead]
-# prompt -- and keep personal choices here. [lead] kind and args, which choose
+# tracker, pull request and build server links, targets, [run], the [orchestrator]
+# prompt -- and keep personal choices here. [orchestrator] kind and args, which choose
 # the program a board starts, are read from this file only.
 
 # How often the background watcher asks GitHub about your pull requests.
@@ -379,13 +404,14 @@ icons = false
 # id = "waiting"
 # label = "Waiting on you"
 
-# The agent that runs a ticket: the team's [lead]. o on the boards goes to it, or opens one in a new tab of the
+# The agent that runs a ticket: the team's [orchestrator], with these fields
+# over it. o on the boards goes to it, or opens one in a new tab of the
 # ticket's workspace when none is open. kind is the Herdr agent kind to start
 # (cursor, claude, ...); without it the boards only go to an open one. prompt
 # is written to the run folder and the new agent is told to read it.
 # Placeholders: {label} {key} {team} {target} {branch} {worktree} {run}
-# {state} {workspace} {issue}.
-# [lead]
+# {state} {workspace} {issue}. [lead], the table's old name, is still read.
+# [orchestrator]
 # kind = "cursor"
 # args = ["--model", "some-model"]
 # prompt = "You are the {label} of {key}. Read {state} in full and continue the run."
@@ -420,7 +446,7 @@ icons = false
 # accept = "y"
 # archive = ["A", "z"]
 # [keys.board]
-# lead = []
+# orchestrator = []
 `
 
 // WriteExample creates the template, refusing to overwrite an existing file.

@@ -57,7 +57,20 @@ description = "Space board"
 ```
 
 `prefix+d` is free in Herdr's default keymap. A `keys.command` entry silently
-replaces a built-in key, so check with the user before choosing another.
+replaces a built-in key, so check with the user before choosing another, and
+run `herdr config check` after editing.
+
+Offer the `show` action as well. It opens the board for wherever the user is:
+the workspace's `board` tab if there is one, else a new `board` tab beside an
+agent's pane, else the board over the current pane:
+
+```toml
+[[keys.command]]
+key = "prefix+shift+k"
+type = "plugin_action"
+command = "ekanban.show"
+description = "open the kanban"
+```
 
 ### 4. Settings
 
@@ -65,16 +78,17 @@ There are two settings files, both optional:
 
 | File | Holds | Shared? |
 |---|---|---|
-| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agent a board starts (`[lead] kind`, `args`), keys, the specifications clone | never |
-| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[lead]` prompt | the team decides |
+| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agent a board starts (`[orchestrator] kind`, `args`), keys, the specifications clone | never |
+| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[orchestrator]` prompt | the team decides |
 
 `ekanban.exe config --init` writes a commented `config.toml` with every setting.
 `ekanban.exe config`, run inside a repository, prints which files are in force.
 
 The repository file is read over `config.toml` when a board opens in that
 repository or any of its worktrees. A value replaces the personal one; a list
-replaces the whole list. `[lead] kind` and `args` are ignored there, because
-they choose a program to start.
+replaces the whole list. `[orchestrator] kind` and `args` are ignored there,
+because they choose a program to start. `[lead]` is the old name of
+`[orchestrator]`; it still works, but write `[orchestrator]`.
 
 Ask the user whether `.ekanban.toml` should be committed. When it holds internal
 addresses (a private tracker, build server, or code host), keep it out of git
@@ -96,8 +110,9 @@ setting seems to need a token, stop and ask.
 A team is the set of roles a run goes through. The ticket board shows one card
 per role. The binary ships one example team (planner, implementer, reviewer,
 QA). Put the user's own teams in a `teams` folder inside the config folder, one
-TOML file per team; `internal/team/teams/example.toml` explains every field.
-Mark the usual one with `default = true`.
+TOML file per team; `internal/team/teams/example.toml` explains every field,
+including the `[orchestrator]` table (the agent that runs the team). Mark the
+usual one with `default = true`.
 
 ### 6. Check it works
 
@@ -108,8 +123,8 @@ herdr plugin pane open --plugin ekanban --entrypoint ticket --placement tab --cw
 
 The first is the global board for a repository: one card per ticket worktree,
 in delivery columns. It is the `tab` entrypoint, which stays open when a card
-sends you elsewhere; `board` (a popup) and `side` (a dock) close then. The second is one run's roles; it needs a run folder in
-the worktree (by default `.runs/<KEY>/STATE.md`; `[run]` changes that). Read
+sends you elsewhere; `board` (a popup) and `side` (a dock) close then. The
+second is one run's roles; it needs a run folder in the worktree (by default `.runs/<KEY>/STATE.md`; `[run]` changes that). Read
 the pane back with `herdr pane read <pane_id> --source visible` and confirm the
 cards are there.
 
@@ -149,19 +164,27 @@ Rules for this repository:
 - Every key is an action in `internal/ui/actions.go` or
   `internal/ticketui/model.go`, so `[keys]` can rebind it and the help screen
   lists it.
+- Never write a rebindable key into a string. Ask the key map for it
+  (`hintKey`, `keyMap().Key`), mark it with `screen.Key` and draw the message
+  with `screen.Say`, so it follows `[keys]` and is drawn in the key colour.
+  Leave the hint out when the action has no key.
+- Both boards draw through `internal/screen`. Change how a board looks there,
+  not in one board, or the two drift apart again.
 
 Package map:
 
 | Package | Job |
 |---|---|
-| `cmd/ekanban` | entry points: board, sidebar, ticket, watch, startup, config |
+| `cmd/ekanban` | entry points: board, tab, sidebar, open (the show action), ticket, watch, startup, config |
 | `internal/config` | `config.toml` and `.ekanban.toml` |
 | `internal/ui` | the plain board and the global board in a repository |
 | `internal/ticketui` | the ticket board |
+| `internal/screen` | what both boards draw alike: columns, cards, footer buttons, click zones, keys in messages |
+| `internal/keys` | actions, their default keys, and `[keys]` rebinding |
 | `internal/ticket` | reading a run folder: roles, agents, questions, `[run]` layout |
 | `internal/team` | team definitions |
 | `internal/pipeline` | delivery columns from git and the build server |
-| `internal/lead` | going to, or starting, the agent that runs a ticket |
+| `internal/orchestrator` | going to, or starting, the agent that runs a ticket |
 | `internal/herdr` | the Herdr socket API |
 | `internal/gh` | pull requests through the `gh` CLI |
 | `internal/store` | the board's own state file |

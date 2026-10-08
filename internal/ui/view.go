@@ -209,7 +209,7 @@ func (m *Model) viewFooter() string {
 		k := m.hintKey
 		hints := []hint{
 			{k("accept"), "accept (" + m.columns.Label(pipeline.ReadyQA) + ")"}, {k("archive"), "archive"},
-			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("lead"), "orchestrator"},
+			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("orchestrator"), "orchestrator"},
 			{k("refresh"), "refresh"}, {k("help"), "help"},
 		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"

@@ -16,9 +16,9 @@ import (
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/keys"
-	"github.com/ezemacchi/ekanban/internal/lead"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
+	"github.com/ezemacchi/ekanban/internal/orchestrator"
 	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
@@ -69,7 +69,7 @@ type Model struct {
 	settling bool      // an event is waiting out settle
 	loadedAt time.Time // the last load finished
 	stamp    string    // the run folder as last read, see runStamp
-	opening  bool      // the lead is being opened
+	opening  bool      // the orchestrator is being opened
 
 	events    chan herdr.Event
 	subCancel context.CancelFunc
@@ -129,7 +129,7 @@ var Actions = []keys.Action{
 	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
 	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
 	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
-	{Name: "lead", Keys: []string{"o"}, Help: "go to the lead (the agent running the team), or open one"},
+	{Name: "orchestrator", Keys: []string{"o"}, Help: "go to the orchestrator (the agent running the team), or open one"},
 	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
@@ -184,7 +184,7 @@ type eventMsg struct {
 	ch chan herdr.Event
 	ok bool
 }
-type leadMsg struct {
+type orchestratorMsg struct {
 	text string
 	err  error
 }
@@ -316,7 +316,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settledMsg:
 		m.settling = false
 		return m, m.reload()
-	case leadMsg:
+	case orchestratorMsg:
 		m.opening = false
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -396,7 +396,7 @@ func (m *Model) key(k string) tea.Cmd {
 	case "r":
 		return tea.Batch(m.working(refreshing), m.reload())
 	case "o":
-		return m.goLead()
+		return m.goOrchestrator()
 	case "t":
 		if m.run != nil {
 			url := m.run.JiraURL
@@ -455,8 +455,8 @@ func (m *Model) clamp() {
 	}
 }
 
-// goLead goes to the run's lead, or opens a new one when none is open.
-func (m *Model) goLead() tea.Cmd {
+// goOrchestrator goes to the run's orchestrator, or opens a new one when none is open.
+func (m *Model) goOrchestrator() tea.Cmd {
 	if m.run == nil {
 		return nil
 	}
@@ -465,13 +465,13 @@ func (m *Model) goLead() tea.Cmd {
 	}
 	run, client := m.run, m.client
 	var start tea.Cmd
-	if run.LeadPane == "" {
+	if run.OrchestratorPane == "" {
 		m.opening = true
-		start = m.working("opening a new " + strings.ToLower(run.Lead.Label) + "…")
+		start = m.working("opening a new " + strings.ToLower(run.Orchestrator.Label) + "…")
 	}
 	return tea.Batch(start, func() tea.Msg {
-		text, err := lead.Go(client, run)
-		return leadMsg{text: text, err: err}
+		text, err := orchestrator.Go(client, run)
+		return orchestratorMsg{text: text, err: err}
 	})
 }
 
@@ -624,22 +624,22 @@ func (m *Model) body(width, top int) string {
 	for _, l := range r.Objective {
 		line(look.Truncate(l, text), "")
 	}
-	leadName := strings.ToLower(r.Lead.Label)
-	leadKey := m.keyMap().Key("lead")
-	orch := "no " + leadName + " open" + keyHint(leadKey, "opens one")
+	orchestratorName := strings.ToLower(r.Orchestrator.Label)
+	orchestratorKey := m.keyMap().Key("orchestrator")
+	orch := "no " + orchestratorName + " open" + keyHint(orchestratorKey, "opens one")
 	orchStyle := dimStyle
-	if r.LeadPane != "" {
-		al := look.Agent(r.LeadStatus)
-		orch = leadName + ": " + orDash(al.Word)
-		if r.LeadTitle != "" {
-			orch += " · " + r.LeadTitle
+	if r.OrchestratorPane != "" {
+		al := look.Agent(r.OrchestratorStatus)
+		orch = orchestratorName + ": " + orDash(al.Word)
+		if r.OrchestratorTitle != "" {
+			orch += " · " + r.OrchestratorTitle
 		}
-		orch += keyHint(leadKey, "goes there")
-		if r.LeadStatus != "idle" {
+		orch += keyHint(orchestratorKey, "goes there")
+		if r.OrchestratorStatus != "idle" {
 			orchStyle = al.Style
 		}
 	}
-	line(screen.Say(ic.With(look.Sitemap, orch), orchStyle, text), "lead")
+	line(screen.Say(ic.With(look.Sitemap, orch), orchStyle, text), "orchestrator")
 	b.WriteString("\n")
 
 	cols := m.kanbanColumns()
@@ -771,7 +771,7 @@ func (m *Model) footer(width, below int) string {
 	}
 	k := m.keyMap().Key
 	hints := []screen.Hint{
-		{Key: k("jump"), Label: "go"}, {Key: k("lead"), Label: "lead"},
+		{Key: k("jump"), Label: "go"}, {Key: k("orchestrator"), Label: "orchestrator"},
 		{Key: k("open-issue"), Label: "tracker"}, {Key: k("prototype"), Label: "prototype"},
 		{Key: k("refresh"), Label: "refresh"}, {Key: k("quit"), Label: "quit"},
 	}

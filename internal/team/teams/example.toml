@@ -18,26 +18,28 @@
 # done_field        or when this header field of the state file has a value,
 # done_when_landed  or when the run has landed.
 #
-# [lead] is the agent that runs the team (o on the boards goes to it, or opens
-# one when there is none):
+# [orchestrator] is the agent that runs the team (o on the boards goes to it,
+# or opens one when there is none); [lead], its old name, is still read:
 # label   shown on the board.
 # match   regex on agent names and tab labels. An agent named after the
 #         ticket, or one in the ticket's workspace that matches no role, also
 #         counts.
-# tab     label of the tab a new lead opens in.
+# tab     label of the tab a new orchestrator opens in.
 # kind    Herdr agent kind to start (cursor, claude, ...); without it the
-#         board cannot open one. Usually set once in config.toml's [lead].
+#         board cannot open one. Usually set once in config.toml's
+#         [orchestrator].
 # args    passed to the agent.
-# prompt  sent to a new lead; see config.toml's [lead] for the placeholders.
+# prompt  sent to a new orchestrator; see config.toml's [orchestrator] for
+#         the placeholders.
 
 name = "Example"
 match = '(?i)example'
 default = true
 
-[lead]
-label = "Lead"
-match = '(^|[^a-z])lead([^a-z]|$)'
-tab = "lead"
+[orchestrator]
+label = "Orchestrator"
+match = '(^|[^a-z])orchestrator([^a-z]|$)'
+tab = "orchestrator"
 
 [[role]]
 id = "planner"

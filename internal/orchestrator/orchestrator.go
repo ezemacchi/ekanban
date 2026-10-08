@@ -1,8 +1,8 @@
-// Package lead takes the user to the agent running a ticket (the team's lead),
+// Package orchestrator takes the user to the agent running a ticket (the team's orchestrator),
 // opening one when none is open: a
 // tab in the ticket's workspace, the agent the configuration names, and its
 // prompt written to the run folder.
-package lead
+package orchestrator
 
 import (
 	"fmt"
@@ -23,11 +23,11 @@ type Herdr interface {
 	PromptAgent(target, text string) error
 }
 
-// Go focuses run's lead, or opens a new one. The string says what happened.
+// Go focuses run's orchestrator, or opens a new one. The string says what happened.
 func Go(c Herdr, run *ticket.Run) (string, error) {
-	label := strings.ToLower(run.Lead.Label)
-	if run.LeadPane != "" {
-		if err := c.FocusAgent(run.LeadPane); err != nil {
+	label := strings.ToLower(run.Orchestrator.Label)
+	if run.OrchestratorPane != "" {
+		if err := c.FocusAgent(run.OrchestratorPane); err != nil {
 			return "", err
 		}
 		return "going to the " + label, nil
@@ -35,8 +35,8 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	if run.Workspace == "" {
 		return "", fmt.Errorf("no Herdr workspace is open on %s, so there is nowhere to open the %s", run.Worktree, label)
 	}
-	if run.Lead.Kind == "" {
-		return "", fmt.Errorf("no %s is open; set kind in config.toml's [lead] (e.g. kind = \"cursor\") to open one", label)
+	if run.Orchestrator.Kind == "" {
+		return "", fmt.Errorf("no %s is open; set kind in config.toml's [orchestrator] (e.g. kind = \"cursor\") to open one", label)
 	}
 
 	agents, err := c.Agents()
@@ -44,15 +44,15 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 		return "", err
 	}
 	name := freeName(run, agents)
-	_, pane, err := c.CreateTab(run.Workspace, run.Worktree, run.Lead.Tab)
+	_, pane, err := c.CreateTab(run.Workspace, run.Worktree, run.Orchestrator.Tab)
 	if err != nil {
-		return "", fmt.Errorf("open the %s tab: %w", run.Lead.Tab, err)
+		return "", fmt.Errorf("open the %s tab: %w", run.Orchestrator.Tab, err)
 	}
-	if err := c.StartAgent(name, run.Lead.Kind, pane, run.Lead.Args); err != nil {
-		return "", fmt.Errorf("start the %s in tab %s: %w", label, run.Lead.Tab, err)
+	if err := c.StartAgent(name, run.Orchestrator.Kind, pane, run.Orchestrator.Args); err != nil {
+		return "", fmt.Errorf("start the %s in tab %s: %w", label, run.Orchestrator.Tab, err)
 	}
-	file := filepath.Join(run.Dir, run.Lead.Tab+"-resume.md")
-	if err := os.WriteFile(file, []byte(Expand(run.Lead.Prompt, run)+"\n"), 0o644); err != nil {
+	file := filepath.Join(run.Dir, run.Orchestrator.Tab+"-resume.md")
+	if err := os.WriteFile(file, []byte(Expand(run.Orchestrator.Prompt, run)+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("write the %s's prompt: %w", label, err)
 	}
 	// One line pointing at the file: long text typed into a terminal agent is
@@ -61,7 +61,7 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 		return "", fmt.Errorf("send the %s its prompt: %w", label, err)
 	}
 	_ = c.FocusAgent(pane)
-	return fmt.Sprintf("opened a new %s (%s) in tab %s", label, name, run.Lead.Tab), nil
+	return fmt.Sprintf("opened a new %s (%s) in tab %s", label, name, run.Orchestrator.Tab), nil
 }
 
 // freeName is the ticket key in lower case, or that plus the tab, or a
@@ -76,9 +76,9 @@ func freeName(run *ticket.Run, agents []herdr.Agent) string {
 		if !taken[name] {
 			return name
 		}
-		name = base + "-" + run.Lead.Tab
+		name = base + "-" + run.Orchestrator.Tab
 		if i > 0 {
-			name = fmt.Sprintf("%s-%s-%d", base, run.Lead.Tab, i+1)
+			name = fmt.Sprintf("%s-%s-%d", base, run.Orchestrator.Tab, i+1)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func freeName(run *ticket.Run, agents []herdr.Agent) string {
 // Expand fills a prompt's placeholders from run.
 func Expand(prompt string, run *ticket.Run) string {
 	return strings.NewReplacer(
-		"{label}", run.Lead.Label,
+		"{label}", run.Orchestrator.Label,
 		"{key}", run.Key,
 		"{team}", run.TeamName,
 		"{target}", run.Target,

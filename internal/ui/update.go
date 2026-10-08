@@ -67,7 +67,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "sent to " + msg.label
 		return m, m.focusAgentAndQuit(msg.pane)
 
-	case leadMsg:
+	case orchestratorMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			return m, nil

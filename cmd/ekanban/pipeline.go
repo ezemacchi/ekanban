@@ -69,7 +69,7 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	ci, ciProblems := pipeline.NewCI(pipeline.CIConfig{Kind: cfg.Pipeline.CI.Kind, URL: cfg.Pipeline.CI.URL})
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
-	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Lead: cfg.Lead, Columns: cols, Layout: &cfg.Layout}
+	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Orchestrator: cfg.Orchestrator, Columns: cols, Layout: &cfg.Layout}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
@@ -85,7 +85,7 @@ func ticketSettings(cfg config.Settings) ticketui.Settings {
 	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
 	problems = slices.Concat(cfg.Problems, problems, colProblems)
 	return ticketui.Settings{
-		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Lead: cfg.Lead, Layout: &cfg.Layout},
+		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Orchestrator: cfg.Orchestrator, Layout: &cfg.Layout},
 		Columns:  cols,
 		Keys:     cfg.KeysFor("ticket"),
 		Icons:    cfg.Icons,

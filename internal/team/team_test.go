@@ -16,10 +16,10 @@ func TestBuiltinTeamLoads(t *testing.T) {
 		t.Fatalf("built-in teams: %d", len(teams))
 	}
 	ex, _ := Pick(teams, "anything")
-	if ex.Name != "Example" || len(ex.Roles) != 4 || ex.Lead.Label != "Lead" {
+	if ex.Name != "Example" || len(ex.Roles) != 4 || ex.Orchestrator.Label != "Orchestrator" {
 		t.Fatalf("example: %+v", ex)
 	}
-	if !ex.Roles[0].Matches("dispatch-01-planner.md") || !ex.Lead.Matches("abc-1-lead") || ex.Lead.Matches("leader") {
+	if !ex.Roles[0].Matches("dispatch-01-planner.md") || !ex.Orchestrator.Matches("abc-1-orchestrator") || ex.Orchestrator.Matches("leader") {
 		t.Fatal("example matches")
 	}
 }
@@ -35,6 +35,24 @@ func TestUsersDefaultTeamWinsOverTheExample(t *testing.T) {
 		t.Fatalf("default team is %q", d.Name)
 	}
 }
+
+// A team written with [lead], [orchestrator]'s old name, still loads it.
+func TestTeamsOldLeadTableStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	body := "name = 'Old'\nmatch = 'old'\n[lead]\nlabel = 'Boss'\nmatch = 'boss'\n[[role]]\nid = 'solo'\nmatch = 'solo'\n"
+	if err := os.WriteFile(filepath.Join(dir, "old.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	teams, problems := Load(dir)
+	old, _ := Pick(teams, "old")
+	if old.Orchestrator.Label != "Boss" || !old.Orchestrator.Matches("the boss") {
+		t.Fatalf("orchestrator %+v", old.Orchestrator)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "[lead] is now [orchestrator]") {
+		t.Fatalf("problems %v", problems)
+	}
+}
+
 func TestUserFileReplacesAndAdds(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {

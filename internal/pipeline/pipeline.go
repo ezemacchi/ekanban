@@ -84,15 +84,15 @@ type Target struct {
 // Settings is where to look. A nil CI means no build server: pull requests are
 // found from the run and merge commits only.
 type Settings struct {
-	CI        CI       // nil: none
-	Host      CodeHost // nil: "any"
-	TicketKey *regexp.Regexp
-	Targets   []Target
-	Rules     []Rule         // nil: DefaultRules
-	Teams     []team.Team    // nil: the built-in teams
-	Lead      team.Lead      // config.toml's [lead], over each team's
-	Columns   columns.Set    // nil: DefaultColumns
-	Layout    *ticket.Layout // nil: ticket.DefaultLayout
+	CI           CI       // nil: none
+	Host         CodeHost // nil: "any"
+	TicketKey    *regexp.Regexp
+	Targets      []Target
+	Rules        []Rule            // nil: DefaultRules
+	Teams        []team.Team       // nil: the built-in teams
+	Orchestrator team.Orchestrator // config.toml's [orchestrator], over each team's
+	Columns      columns.Set       // nil: DefaultColumns
+	Layout       *ticket.Layout    // nil: ticket.DefaultLayout
 }
 
 // CIName names the build server on the board, "CI" when there is none.
@@ -186,9 +186,9 @@ func (s *Source) Refresh(ctx context.Context) {
 	s.published = pubs
 }
 
-// Run reads worktree's run with the board's teams and lead.
+// Run reads worktree's run with the board's teams and orchestrator.
 func (s *Source) Run(worktree string, live ticket.Live) (*ticket.Run, error) {
-	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Lead: s.set.Lead, Layout: s.set.Layout}, live)
+	return ticket.Load(worktree, ticket.Options{Teams: s.set.Teams, Orchestrator: s.set.Orchestrator, Layout: s.set.Layout}, live)
 }
 
 // Classify places one worktree. knownPR is a pull request number remembered
@@ -292,12 +292,12 @@ func notStarted(run *ticket.Run) bool {
 			return false
 		}
 	}
-	return run.LeadStatus == ""
+	return run.OrchestratorStatus == ""
 }
 
 func describeRun(info *Info, run *ticket.Run) {
 	info.Agents = run.Agents()
-	if run.LeadStatus == "blocked" {
+	if run.OrchestratorStatus == "blocked" {
 		info.Waiting = true
 	}
 	var current *ticket.Card

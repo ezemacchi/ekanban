@@ -11,9 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ezemacchi/ekanban/internal/lead"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
+	"github.com/ezemacchi/ekanban/internal/orchestrator"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
@@ -299,8 +299,8 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		m.archiveView = true
 		m.archiveIdx = 0
 		return true, m, nil
-	case "lead":
-		return true, m, m.goLead()
+	case "orchestrator":
+		return true, m, m.goOrchestrator()
 	case "r":
 		m.branchesAt = time.Time{}
 		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true))
@@ -312,14 +312,14 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 	return false, m, nil
 }
 
-type leadMsg struct {
+type orchestratorMsg struct {
 	text string
 	err  error
 }
 
-// goLead goes to the selected ticket's lead, or opens a new one in its
+// goOrchestrator goes to the selected ticket's orchestrator, or opens a new one in its
 // workspace when none is open.
-func (m *Model) goLead() tea.Cmd {
+func (m *Model) goOrchestrator() tea.Cmd {
 	sp := m.selected()
 	if sp == nil {
 		return nil
@@ -328,19 +328,19 @@ func (m *Model) goLead() tea.Cmd {
 		m.status = sp.Label + " has no ticket run"
 		return nil
 	}
-	start := m.working("looking for the lead of " + m.spaceName(sp) + "…")
+	start := m.working("looking for the orchestrator of " + m.spaceName(sp) + "…")
 	src, client, worktree := m.pipe, m.client, sp.Key
 	return tea.Batch(start, func() tea.Msg {
 		live, err := ticket.ReadLive(client)
 		if err != nil {
-			return leadMsg{err: err}
+			return orchestratorMsg{err: err}
 		}
 		run, err := src.Run(worktree, live)
 		if err != nil {
-			return leadMsg{err: fmt.Errorf("no run found in %s", worktree)}
+			return orchestratorMsg{err: fmt.Errorf("no run found in %s", worktree)}
 		}
-		text, err := lead.Go(client, run)
-		return leadMsg{text: text, err: err}
+		text, err := orchestrator.Go(client, run)
+		return orchestratorMsg{text: text, err: err}
 	})
 }
 

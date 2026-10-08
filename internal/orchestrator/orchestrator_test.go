@@ -1,4 +1,4 @@
-package lead
+package orchestrator
 
 import (
 	"errors"
@@ -40,29 +40,29 @@ func (f *fake) PromptAgent(target, text string) error {
 }
 
 func run(t *testing.T) *ticket.Run {
-	l, err := team.Lead{Label: "Orchestrator", Tab: "orchestrator"}.With(team.Lead{})
+	l, err := team.Orchestrator{Label: "Orchestrator", Tab: "orchestrator"}.With(team.Orchestrator{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	return &ticket.Run{Key: "ABC-1", Dir: dir, Worktree: filepath.Dir(dir), TeamName: "Example", Lead: l, Workspace: "w"}
+	return &ticket.Run{Key: "ABC-1", Dir: dir, Worktree: filepath.Dir(dir), TeamName: "Example", Orchestrator: l, Workspace: "w"}
 }
 
-func TestGoFocusesAnOpenLead(t *testing.T) {
+func TestGoFocusesAnOpenOrchestrator(t *testing.T) {
 	f := &fake{}
 	r := run(t)
-	r.LeadPane = "w:p1"
+	r.OrchestratorPane = "w:p1"
 	text, err := Go(f, r)
 	if err != nil || len(f.focused) != 1 || f.focused[0] != "w:p1" || len(f.tabs) != 0 {
 		t.Fatalf("%q %v %+v", text, err, f)
 	}
 }
 
-func TestGoOpensANewLead(t *testing.T) {
+func TestGoOpensANewOrchestrator(t *testing.T) {
 	f := &fake{agents: []herdr.Agent{{Name: "abc-1"}}}
 	r := run(t)
-	r.Lead.Kind, r.Lead.Args = "cursor", []string{"--model", "m"}
-	r.Lead.Prompt = "Lead {label} of {key} ({team}): read {state}."
+	r.Orchestrator.Kind, r.Orchestrator.Args = "cursor", []string{"--model", "m"}
+	r.Orchestrator.Prompt = "Orchestrator {label} of {key} ({team}): read {state}."
 	text, err := Go(f, r)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestGoOpensANewLead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Lead Orchestrator of ABC-1 (Example): read " + filepath.ToSlash(filepath.Join(r.Dir, "STATE.md")) + ".\n"
+	want := "Orchestrator Orchestrator of ABC-1 (Example): read " + filepath.ToSlash(filepath.Join(r.Dir, "STATE.md")) + ".\n"
 	if string(data) != want {
 		t.Fatalf("prompt file %q, want %q", data, want)
 	}
@@ -96,7 +96,7 @@ func TestGoCannotOpen(t *testing.T) {
 	if _, err := Go(&fake{}, r); err == nil || !strings.Contains(err.Error(), "kind") {
 		t.Fatalf("no kind: %v", err)
 	}
-	r.Lead.Kind, r.Workspace = "cursor", ""
+	r.Orchestrator.Kind, r.Workspace = "cursor", ""
 	if _, err := Go(&fake{}, r); err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("no workspace: %v", err)
 	}

@@ -234,14 +234,21 @@ The ticket board opens as a tab of the ticket's workspace and shows one card per
 role of the run's team: pending, working, waiting on you, done. Under it are the
 run's objective, current step and open questions, and a list of what the agents
 did. `enter` goes to a role's tab, and `o` goes to the agent running the team
-(its lead), or starts one with a prompt to resume the run.
+(its orchestrator), or starts one with a prompt to resume the run.
+
+The title line and the buttons stay put; everything between them scrolls with
+the wheel when the run is taller than the pane, and moving the selection keeps
+the selected card in view.
 
 Teams are TOML files. One example team ships with the binary; yours go in the
-`teams` folder beside `config.toml`. Where runs live and how their state file
-reads is `[run]` in the settings, so another team's layout needs no code.
+`teams` folder beside `config.toml`. A team's `[orchestrator]` table says how
+its orchestrator is recognised and started. Where runs live and how their
+state file reads is `[run]` in the settings, so another team's layout needs no
+code.
 
-Both boards take the mouse: click a card to select it, click again to go there,
-and click the buttons along the bottom.
+Both boards look the same — the same columns, cards and buttons — and take the
+mouse: click a card to select it, click again to go there, and click the
+buttons along the bottom.
 
 ## Install
 
@@ -278,7 +285,21 @@ and reload: `herdr server reload-config`.
 `prefix+d` is unbound in Herdr's default keymap. A `keys.command` entry silently
 shadows a built-in, so check the config reference before picking another —
 `prefix+b` is `toggle_sidebar` and `prefix+k` is `focus_pane_up`, both easy to
-lose by accident.
+lose by accident. `herdr config check` validates the file.
+
+`ekanban.show` is the other action worth a key. It shows the board for
+wherever you are: the workspace's `board` tab when it has one, else a new
+`board` tab (first in the workspace) when you are in an agent's pane, else the
+board over the current pane until you quit or jump. The board in a tab stays
+open when a card sends you elsewhere.
+
+```toml
+[[keys.command]]
+key = "prefix+shift+k"
+type = "plugin_action"
+command = "ekanban.show"
+description = "open the kanban"
+```
 
 Requires Herdr 0.7.5+ and Go.
 
@@ -394,9 +415,14 @@ A repository can keep a `.ekanban.toml` at its root with any of the same
 settings. It is read over `config.toml` whenever a board opens in that
 repository or one of its worktrees, so the project's process lives with the
 project: tracker and pull request links, build server, target branches, the
-`[run]` layout, the prompt a new lead starts with. A value there replaces the
-personal one, and a list replaces the whole list. `[lead] kind` and `args` are
-read from `config.toml` only, since they choose a program to start.
+`[run]` layout, the prompt a new orchestrator starts with. A value there
+replaces the personal one, and a list replaces the whole list.
+`[orchestrator] kind` and `args` are read from `config.toml` only, since they
+choose a program to start.
+
+`[orchestrator]` used to be called `[lead]`, and the action `o` runs used to be
+`lead` in `[keys]`. The old names still work, and the board asks you to rename
+them.
 
 Commit it to share it with the team, or list it in `.git/info/exclude` to keep
 it to one clone. An uncommitted file is only in the main checkout, and boards in
@@ -433,8 +459,21 @@ linked worktrees look for it there.
 
 In a repository the board adds its own: `a` accepts a ticket in the last column
 and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
-lead (so sorting the table moves to `ctrl+o`). `ekanban keys` lists every
-screen's keys, and `[keys]` in the settings rebinds any of them.
+orchestrator (so sorting the table moves to `ctrl+o`). `ekanban keys` lists every
+screen's keys, and `[keys]` in the settings rebinds any of them:
+
+```toml
+[keys]
+note = "N"          # one key
+archive = ["A", "z"] # or several
+[keys.board]
+orchestrator = []   # an empty list turns the action off on that board
+```
+
+Everything that names a key follows the binding: the buttons along the bottom,
+the detail modal's, and messages such as "press n to add one", where the key
+is drawn in the same colour as the buttons. An action with no key drops out of
+them rather than naming a key that does something else.
 
 ## Mouse
 
@@ -458,9 +497,11 @@ The popup is where rows are worked on rather than travelled to: click a row,
 then press `2`, or `n`, or `v`. A click that jumped would close the whole board
 under you, so there the second click is what activates.
 
-Either board closes once you jump. You opened it to get somewhere, and once you
-are there it is a strip of screen showing you a board you have stopped reading.
-A key brings it straight back.
+The popup and the dock close once you jump. You opened them to get somewhere,
+and once you are there they are a strip of screen showing you a board you have
+stopped reading. A key brings them straight back. A board in a tab of its own
+(the `tab` entrypoint, or what `ekanban.show` opens beside an agent) is out of
+the way already, so it stays open.
 
 Scrolling leaves the cursor alone either way: the cursor is what the keys act
 on, and having a look further down the board should not change what `1` or
@@ -517,6 +558,9 @@ belongs to the project rather than the window.
 ekanban sync            # re-apply stored statuses to workspace tokens
 ekanban startup         # what Herdr's [[startup]] hook runs
 ekanban watch           # poll PRs and notify (the board starts this for you)
+ekanban tab             # the board in a tab of its own, which stays open on a jump
+ekanban sidebar         # the narrow board, for a split down the side
+ekanban open            # the show action: the board for wherever you are
 ekanban ticket [dir]    # the ticket board of the run in a worktree
 ekanban pipeline [repo] # where each worktree of a repository lands, as JSON
 ekanban config          # show the settings in force, and the repository file

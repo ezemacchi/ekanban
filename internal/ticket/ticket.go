@@ -78,8 +78,8 @@ type Options struct {
 	SpecRoot string
 	// Teams are the team definitions; nil means the built-in ones.
 	Teams []team.Team
-	// Lead overrides fields of the team's [lead]: config.toml's [lead].
-	Lead team.Lead
+	// Orchestrator overrides fields of the team's [orchestrator]: config.toml's [orchestrator].
+	Orchestrator team.Orchestrator
 	// Layout is where runs live and how their state file reads; the zero
 	// value is DefaultLayout.
 	Layout *Layout
@@ -172,9 +172,9 @@ type Card struct {
 	Title  string
 }
 
-// Agent is one live agent of the run, the lead or a role's.
+// Agent is one live agent of the run, the orchestrator or a role's.
 type Agent struct {
-	Who    string // the role's or the lead's label
+	Who    string // the role's or the orchestrator's label
 	Pane   string
 	Status string
 	Title  string
@@ -231,11 +231,11 @@ func Loudest(agents []Agent) (Agent, bool) {
 	return top, look.AgentRank(top.Status) > look.AgentRank("idle")
 }
 
-// Agents are the run's live agents: the lead first, then the roles in order.
+// Agents are the run's live agents: the orchestrator first, then the roles in order.
 func (r *Run) Agents() []Agent {
 	var out []Agent
-	if r.LeadPane != "" {
-		out = append(out, Agent{r.Lead.Label, r.LeadPane, r.LeadStatus, r.LeadTitle})
+	if r.OrchestratorPane != "" {
+		out = append(out, Agent{r.Orchestrator.Label, r.OrchestratorPane, r.OrchestratorStatus, r.OrchestratorTitle})
 	}
 	for _, c := range r.Cards {
 		if c.PaneID != "" {
@@ -265,12 +265,12 @@ type Run struct {
 	Questions   []string
 	Landed      bool
 
-	// Lead is the team's lead definition; LeadStatus and LeadPane are its live
+	// Orchestrator is the team's orchestrator definition; OrchestratorStatus and OrchestratorPane are its live
 	// agent, empty when none is open.
-	Lead       team.Lead
-	LeadStatus string
-	LeadPane   string
-	LeadTitle  string
+	Orchestrator       team.Orchestrator
+	OrchestratorStatus string
+	OrchestratorPane   string
+	OrchestratorTitle  string
 	// Workspace is the Herdr workspace open on the worktree, or "".
 	Workspace string
 
@@ -355,11 +355,11 @@ func Load(worktree string, opts Options, live Live) (*Run, error) {
 	}
 	t, _ := team.Pick(teams, r.Team)
 	r.TeamName = t.Name
-	r.Lead, _ = t.Lead.With(opts.Lead)
+	r.Orchestrator, _ = t.Orchestrator.With(opts.Orchestrator)
 	r.Workspace = live.WorkspaceOf(worktree)
 
 	mine := agentsIn(worktree, r.Workspace, live.Agents)
-	r.placeLead(t.Roles, mine, live.Tabs)
+	r.placeOrchestrator(t.Roles, mine, live.Tabs)
 	r.placeRoles(t.Roles, mine, live.Tabs)
 	return r, nil
 }
@@ -469,10 +469,10 @@ func describe(a herdr.Agent, tabLabels map[string]string) string {
 	return strings.ToLower(a.Name + " " + tabLabels[a.TabID])
 }
 
-// placeLead finds the lead among the ticket's agents: one its match names,
+// placeOrchestrator finds the orchestrator among the ticket's agents: one its match names,
 // else one named after the ticket, else one in the ticket's workspace that is
-// no role's (a lead started by hand, in a tab nobody renamed).
-func (r *Run) placeLead(roles []team.Role, agents []herdr.Agent, tabLabels map[string]string) {
+// no role's (an orchestrator started by hand, in a tab nobody renamed).
+func (r *Run) placeOrchestrator(roles []team.Role, agents []herdr.Agent, tabLabels map[string]string) {
 	key := strings.ToLower(r.Key)
 	isRole := func(a herdr.Agent) bool {
 		d := describe(a, tabLabels)
@@ -484,14 +484,14 @@ func (r *Run) placeLead(roles []team.Role, agents []herdr.Agent, tabLabels map[s
 		return false
 	}
 	tests := []func(herdr.Agent) bool{
-		func(a herdr.Agent) bool { return r.Lead.Matches(describe(a, tabLabels)) },
+		func(a herdr.Agent) bool { return r.Orchestrator.Matches(describe(a, tabLabels)) },
 		func(a herdr.Agent) bool { return strings.ToLower(strings.TrimSpace(a.Name)) == key },
 		func(a herdr.Agent) bool { return r.Workspace != "" && a.WorkspaceID == r.Workspace && !isRole(a) },
 	}
 	for _, test := range tests {
 		for _, a := range agents {
 			if test(a) {
-				r.LeadStatus, r.LeadPane, r.LeadTitle = a.AgentStatus, a.PaneID, titleOf(a)
+				r.OrchestratorStatus, r.OrchestratorPane, r.OrchestratorTitle = a.AgentStatus, a.PaneID, titleOf(a)
 				return
 			}
 		}
