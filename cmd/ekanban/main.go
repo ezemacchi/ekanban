@@ -19,6 +19,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/jira"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/store"
@@ -176,6 +177,15 @@ func run(args []string) error {
 		set, problems := pipelineSettings(settings)
 		model.SetPipeline(pipeline.New(cwd, set, gh.HideWindow))
 		model.SetProblems(problems)
+		// Jira adds the tickets with no worktree and each card's Jira status.
+		// Off, with a word on the status line, until [jira] and the account's
+		// variables are set.
+		jc, why := jira.New(settings.Jira)
+		var targets []string
+		for _, t := range settings.Pipeline.Targets {
+			targets = append(targets, t.Branch)
+		}
+		model.SetJira(jc, settings.Jira, targets, cwd, why, gh.HideWindow)
 	} else {
 		// A watcher keeps polling GitHub after the board closes, which is the
 		// only way a notification can reach you while you are elsewhere. The

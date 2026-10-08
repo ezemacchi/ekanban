@@ -102,8 +102,14 @@ A file kept out of git exists only in the main checkout. Boards opened in
 linked worktrees find it there.
 
 Settings never hold credentials. The plugin reads pull requests through the
-user's `gh` login and talks to the build server without signing in. If a
-setting seems to need a token, stop and ask.
+user's `gh` login and talks to the build server without signing in. The one
+credential is for Jira (`[jira]`, optional): an Atlassian API token and the
+e-mail of its account, kept in two environment variables that `email_env` and
+`token_env` name (`JIRA_EMAIL` and `JIRA_API_TOKEN` by default). The user
+creates and sets them; never ask for the value in chat, write it to a file, or
+print it. `[jira] url`, `email_env`, `token_env` and `handoff.command` are
+ignored in `.ekanban.toml`. If any other setting seems to need a token, stop
+and ask.
 
 ### 5. Teams
 
@@ -185,6 +191,7 @@ Package map:
 | `internal/team` | team definitions |
 | `internal/pipeline` | delivery columns from git and the build server |
 | `internal/orchestrator` | going to, or starting, the agent that runs a ticket |
+| `internal/jira` | read-only Jira client: ticket list, linked tests, comments, `[jira]` column mapping and handoff command |
 | `internal/herdr` | the Herdr socket API |
 | `internal/gh` | pull requests through the `gh` CLI |
 | `internal/store` | the board's own state file |

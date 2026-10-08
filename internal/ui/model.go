@@ -37,6 +37,7 @@ const (
 	modeManageRename
 	modeDetail
 	modeHelp
+	modeHandoff
 )
 
 // space is one row of the board: a directory, whatever the user recorded about
@@ -250,6 +251,9 @@ type Model struct {
 	spinner        look.Spinner
 
 	keys keyMaps // config.toml's [keys] applied; zero means the defaults
+
+	// jr is the Jira side of the pipeline board (jira.go).
+	jr jiraState
 }
 
 // New builds the initial model.
@@ -286,7 +290,7 @@ func New(client *herdr.Client, board *store.Board) *Model {
 	}
 	cache := gh.LoadCache(stateDir)
 
-	return &Model{
+	m := &Model{
 		client:   client,
 		board:    board,
 		gh:       gh.New(),
@@ -302,6 +306,11 @@ func New(client *herdr.Client, board *store.Board) *Model {
 		width:    80,
 		height:   24,
 	}
+	// Start on the default keys: an action that a screen reaches through a
+	// different key than its first (orchestrator, handoff, pull request) is
+	// only recognised through a key map.
+	m.SetKeys(nil)
+	return m
 }
 
 // --- messages ---
@@ -527,6 +536,7 @@ func (m *Model) rebuild() {
 	for _, key := range m.closedWorktrees(open) {
 		spaces[key] = &space{Key: key}
 	}
+	m.addJiraCards(spaces)
 
 	for key, entry := range m.board.Entries {
 		sp, ok := spaces[key]
@@ -738,7 +748,7 @@ func (m *Model) matches(sp *space) bool {
 		return true
 	}
 	needle := strings.ToLower(m.filter)
-	for _, hay := range []string{sp.Label, sp.Key, sp.Note} {
+	for _, hay := range []string{sp.Label, sp.Key, sp.Note, m.summaryOf(sp)} {
 		if strings.Contains(strings.ToLower(hay), needle) {
 			return true
 		}

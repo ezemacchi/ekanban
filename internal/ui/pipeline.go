@@ -196,6 +196,9 @@ func orKey(ticketKey, space string) string {
 
 // pipelineStage is a space's column, and whether it belongs on the board.
 func (m *Model) pipelineStage(sp *space) (string, bool) {
+	if k, ok := jiraCardKey(sp.Key); ok {
+		return m.jiraStage(k)
+	}
 	if e, ok := m.board.Entries[sp.Key]; ok && e.Accepted != nil {
 		return "", false
 	}
@@ -216,11 +219,17 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 
 // pipelineLines are the facts under a card's name.
 func (m *Model) pipelineLines(sp *space, width int) []string {
+	if k, ok := jiraCardKey(sp.Key); ok {
+		return m.jiraLines(k, width)
+	}
 	info, ok := m.pipeInfo[sp.Key]
 	if !ok {
 		return []string{dimStyle.Render(truncate(m.spinner.Frame()+" working it out", width))}
 	}
 	var lines []string
+	if l := m.jiraStatusLine(info.Key, width); l != "" {
+		lines = append(lines, l)
+	}
 	if !sp.Live {
 		// No workspace, so no agents: waiting and lost do not apply.
 		info.Waiting, info.Lost = false, false
@@ -301,15 +310,39 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, nil
 	case "orchestrator":
 		return true, m, m.goOrchestrator()
+	case "handoff":
+		return true, m, m.startHandoff()
+	case "open-pull-request":
+		if sp := m.selected(); sp != nil {
+			return true, m, m.openPipelinePR(sp)
+		}
+		return true, m, nil
 	case "r":
 		m.branchesAt = time.Time{}
-		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true))
+		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true))
 	}
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
 		m.status = m.computedColumns()
 		return true, m, nil
 	}
 	return false, m, nil
+}
+
+// openPipelinePR opens the pull request the board found for a card, from
+// pipeline.pr_url. The pipeline board has no GitHub cache to read it from.
+func (m *Model) openPipelinePR(sp *space) tea.Cmd {
+	info := m.pipeInfo[sp.Key]
+	if info.PR == 0 {
+		m.status = "no pull request for " + m.spaceName(sp) + " yet"
+		return nil
+	}
+	url := links.PullRequest(info.PR)
+	if url == "" {
+		m.status = "pipeline.pr_url is missing from config.toml"
+		return nil
+	}
+	m.status = fmt.Sprintf("opening PR #%d", info.PR)
+	return openURLCmd(url)
 }
 
 type orchestratorMsg struct {
@@ -321,7 +354,7 @@ type orchestratorMsg struct {
 // workspace when none is open.
 func (m *Model) goOrchestrator() tea.Cmd {
 	sp := m.selected()
-	if sp == nil {
+	if sp == nil || !m.requireWorktree() {
 		return nil
 	}
 	if m.pipeInfo[sp.Key].Key == "" {
@@ -347,7 +380,7 @@ func (m *Model) goOrchestrator() tea.Cmd {
 // acceptSelected archives a ticket in the ready_qa column.
 func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 	sp := m.selected()
-	if sp == nil {
+	if sp == nil || !m.requireWorktree() {
 		return m, nil
 	}
 	info := m.pipeInfo[sp.Key]

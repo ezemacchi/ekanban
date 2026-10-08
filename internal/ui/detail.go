@@ -152,13 +152,27 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 				}
 			}
 		}
+		// The Jira status line opens the ticket on click.
+		if key := m.ticketOf(sp); key != "" && m.jiraOn() {
+			for i, l := range facts {
+				if strings.Contains(l, "Jira: ") {
+					lines = append(lines, detailLine{text: l, url: links.Issue(key)})
+					facts = append(facts[:i:i], facts[i+1:]...)
+					break
+				}
+			}
+		}
 		lines = append(lines, plain(facts...)...)
+		lines = append(lines, m.jiraDetailLines(m.ticketOf(sp), width)...)
 		lines = append(lines, plain("")...)
 	} else if pr, ok := m.prFor(sp.Key); ok {
 		lines = append(lines, prDetailLines(pr, width)...)
 		lines = append(lines, plain("")...)
 	}
 
+	if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
+		return lines // a ticket with no folder, branch or workspace yet
+	}
 	for _, line := range screen.Wrap(m.glyph(look.Folder, abbreviate(sp.Key)), width) {
 		lines = append(lines, plain(dimStyle.Render(line))...)
 	}
@@ -223,7 +237,7 @@ func (m *Model) viewDetailModal(base string) string {
 	k := m.hintKey
 	hints := []hint{{k("note"), "note"}, {k("status-picker"), "status"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	if m.pipelineOn() {
-		hints = []hint{{k("note"), "note"}, {k("jump"), "jump"}, {k("quit"), "close"}}
+		hints = []hint{{k("note"), "note"}, {k("open-pull-request"), "pull request"}, {k("yank"), "copy"}, {k("jump"), "jump"}, {k("quit"), "close"}}
 	}
 	picking := m.mode == modeStatusPick
 

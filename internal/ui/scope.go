@@ -23,6 +23,9 @@ func (m *Model) inScope(key string) bool {
 	if m.scope == "" {
 		return true
 	}
+	if _, ok := jiraCardKey(key); ok {
+		return true // a ticket, not a folder
+	}
 	common, ok := m.scopeOf[key]
 	if !ok {
 		common = gitCommonDir(key)

@@ -50,6 +50,16 @@ func TestRebindingRenamesEveryMention(t *testing.T) {
 	}
 }
 
+// The help's Archive line names the archive's current keys.
+func TestArchiveHelpFollowsRebinding(t *testing.T) {
+	m := newTestModel(t)
+	m.SetKeys(map[string][]string{"open-pull-request": {"P"}, "restore": {}})
+	got := screen.Plain(m.archiveKeysNote())
+	if got != " (o tracker, P PR, / search)" {
+		t.Fatalf("archive help %q", got)
+	}
+}
+
 // An action with no key is left out of messages instead of naming a key that
 // does something else.
 func TestUnboundActionIsLeftOut(t *testing.T) {

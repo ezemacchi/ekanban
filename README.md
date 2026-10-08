@@ -250,6 +250,37 @@ Both boards look the same — the same columns, cards and buttons — and take t
 mouse: click a card to select it, click again to go there, and click the
 buttons along the bottom.
 
+### Jira
+
+With `[jira]` set, the global board reads your tickets from Jira. Read only: it
+never writes to Jira.
+
+- A ticket of your query that has no worktree yet is a card of its own, in the
+  column its Jira status maps to. By default a status in the category *new*
+  goes to To Do and one in *indeterminate* (in progress, in review) to Working;
+  a done one is left off. `[jira.columns]` maps a status name or category to any
+  column, so a ticket waiting on QA can sit in To QA. A ticket in
+  implementation is therefore never shown as not started.
+- Every card shows its ticket's Jira status, and the status line opens the
+  ticket on click.
+- The detail (`d`) adds the ticket's linked test cases, with their states, and
+  the latest comment, which is where QA writes what failed.
+- `H` on a card with no worktree asks for the target branch and the team, shows
+  the command it will run, and runs `[jira.handoff] command` on `enter`: the
+  board does not know how work is started, your command does. It is run
+  without a shell, so a ticket's summary is one argument whatever it contains.
+- `y` on any card, or in its detail, copies what another session needs to pick
+  it up: the ticket and its status, the spec and prototype the run names, the
+  worktree and branch, the pull request and its build, the run's current step
+  and open questions, the linked tests, and the latest comment in full.
+- `p` opens the card's pull request in the browser, from `pipeline.pr_url`;
+  `gp` does the same.
+
+The account is two environment variables, named by `email_env` and `token_env`
+(an Atlassian API token); the token is never in a file, and a repository's
+`.ekanban.toml` cannot change the site, the variables or the handoff command.
+Without them the board says so on its status line and works as before.
+
 ## Install
 
 This fork runs on Windows, and installing it compiles it, so Go must be on
@@ -417,8 +448,9 @@ repository or one of its worktrees, so the project's process lives with the
 project: tracker and pull request links, build server, target branches, the
 `[run]` layout, the prompt a new orchestrator starts with. A value there
 replaces the personal one, and a list replaces the whole list.
-`[orchestrator] kind` and `args` are read from `config.toml` only, since they
-choose a program to start.
+`[orchestrator] kind` and `args`, and `[jira]` `url`, `email_env`, `token_env`
+and `handoff.command`, are read from `config.toml` only, since they choose a
+program to start or where a credential comes from.
 
 `[orchestrator]` used to be called `[lead]`, and the action `o` runs used to be
 `lead` in `[keys]`. The old names still work, and the board asks you to rename
@@ -438,6 +470,7 @@ linked worktrees look for it there.
 | `j` / `k` | move |
 | `gg` / `G` | first row · last row |
 | `gp` | open the pull request in a browser |
+| `y` | copy the card's context (ticket, spec, branch, pull request, QA's comment) to the clipboard |
 | `gf` | send the failing check, and the end of its log, to that space's agent |
 | `h` / `l` | kanban: move between columns · list: collapse / expand a group |
 | `v` | grab the row, then move it — leaving its group changes its status |
@@ -459,7 +492,9 @@ linked worktrees look for it there.
 
 In a repository the board adds its own: `a` accepts a ticket in the last column
 and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
-orchestrator (so sorting the table moves to `ctrl+o`). `ekanban keys` lists every
+orchestrator (so sorting the table moves to `ctrl+o`), `p` opens its pull
+request, and `H` hands off a Jira ticket that has no worktree. `y` copies a
+card's context on both boards. `ekanban keys` lists every
 screen's keys, and `[keys]` in the settings rebinds any of them:
 
 ```toml

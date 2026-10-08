@@ -144,22 +144,22 @@ func TestConfiguredColumnNamesShow(t *testing.T) {
 	}
 }
 
-// [keys] accept = "y": y accepts, a no longer does, and help shows y.
+// [keys] accept = "Z": Z accepts, a no longer does, and help shows Z.
 func TestReboundAcceptKey(t *testing.T) {
 	m := pipelineBoard(t)
-	m.SetKeys(map[string][]string{"accept": {"y"}})
+	m.SetKeys(map[string][]string{"accept": {"Z"}})
 	selectSpace(t, m, tmp+"api")
 	api := store.Key(tmp + "api")
 	send(t, m, key("a"))
 	if m.board.Entries[api].Accepted != nil {
-		t.Fatal("a still accepts after accept moved to y")
+		t.Fatal("a still accepts after accept moved to Z")
 	}
-	send(t, m, key("y"))
+	send(t, m, key("Z"))
 	if m.board.Entries[api].Accepted == nil {
-		t.Fatalf("y did not accept; status %q", m.status)
+		t.Fatalf("Z did not accept; status %q", m.status)
 	}
 	send(t, m, key("?"))
-	if out := m.View(); !strings.Contains(out, "y") || !strings.Contains(out, "accept a ticket in") {
+	if out := m.View(); !strings.Contains(out, "Z") || !strings.Contains(out, "accept a ticket in") {
 		t.Fatalf("help does not show the bound key:\n%s", out)
 	}
 }

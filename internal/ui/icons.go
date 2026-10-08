@@ -62,6 +62,9 @@ func (m *Model) ticketName(space, key string) string {
 // spaceName is what a message calls a space: its ticket on the pipeline
 // board, else its label, else its folder.
 func (m *Model) spaceName(sp *space) string {
+	if k, ok := jiraCardKey(sp.Key); ok {
+		return k
+	}
 	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
 		return m.ticketName(sp.Key, info.Key)
 	}
@@ -76,6 +79,9 @@ func (m *Model) spaceName(sp *space) string {
 // named by its ticket key: the folder names of one repository's worktrees
 // share a long prefix, so cut to a card's width they all read the same.
 func (m *Model) spaceLabel(sp *space) string {
+	if k, ok := jiraCardKey(sp.Key); ok {
+		return m.glyph(look.Jira, k)
+	}
 	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
 		return m.glyph(look.Branch, m.ticketName(sp.Key, info.Key))
 	}

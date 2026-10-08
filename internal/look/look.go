@@ -45,6 +45,8 @@ const (
 	Wifi      = "\uf1eb" // partial data, offline source
 	Archive   = "\uf187"
 	Pause     = "\uf04c" // workspace closed
+	Flask     = "\uf0c3" // linked test cases
+	Comment   = "\uf075"
 	PillLeft  = "\ue0b6" // rounded ends of a title pill
 	PillRight = "\ue0b4"
 )

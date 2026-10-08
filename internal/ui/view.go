@@ -42,6 +42,15 @@ func (m *Model) viewFrame() string {
 		return ""
 	}
 
+	if m.mode == modeHandoff {
+		// The handoff box sits over the board it was opened from.
+		m.mode = modeNormal
+		base := m.viewFrame()
+		m.mode = modeHandoff
+		m.resetZones()
+		return m.viewHandoff(base)
+	}
+
 	if m.archiveView && m.mode == modeNormal {
 		return m.viewArchive()
 	}
@@ -210,7 +219,13 @@ func (m *Model) viewFooter() string {
 		hints := []hint{
 			{k("accept"), "accept (" + m.columns.Label(pipeline.ReadyQA) + ")"}, {k("archive"), "archive"},
 			{k("detail"), "detail"}, {k("note"), "note"}, {k("jump"), "go"}, {k("orchestrator"), "orchestrator"},
+			{k("open-pull-request"), "pull request"}, {k("yank"), "copy"},
 			{k("refresh"), "refresh"}, {k("help"), "help"},
+		}
+		if sp := m.selected(); sp != nil && m.jiraOn() {
+			if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
+				hints = append([]hint{{k("handoff"), "hand off"}}, hints...)
+			}
 		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
 		if !m.pipeAt.IsZero() {
@@ -674,7 +689,7 @@ func (m *Model) viewHelp() string {
 		lines = append(lines,
 			dimStyle.Render(indent+truncate("Columns come from the run, "+m.pipe.CIName()+" and git; they are not moved by hand.", room+keyCol)),
 			indent+keyStyle.Render(pad(m.hintKey("accept"), keyCol))+dimStyle.Render(truncate("accept a ticket in "+m.columns.Label(pipeline.ReadyQA)+": it moves to the Archive", room)),
-			indent+keyStyle.Render(pad(m.hintKey("archive"), keyCol))+dimStyle.Render(truncate("Archive of accepted tickets (o Jira, p PR, u restore, / search)", room)),
+			indent+keyStyle.Render(pad(m.hintKey("archive"), keyCol))+screen.Say("Archive of accepted tickets"+m.archiveKeysNote(), dimStyle, room),
 			"")
 	}
 	for _, r := range helpRows {

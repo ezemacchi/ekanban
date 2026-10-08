@@ -38,6 +38,7 @@ var (
 		{Name: "filter", Keys: []string{"/"}, Help: "filter by name, path or note", Short: "filter"},
 		{Name: "statuses", Keys: []string{"S"}, Help: "manage statuses (add, rename, reorder, delete)", Short: "statuses"},
 		{Name: "forget", Keys: []string{"x"}, Help: "forget the selected space", Short: "forget space"},
+		{Name: "yank", Keys: []string{"y"}, Help: "copy the card's context (ticket, spec, branch, pull request, QA's comment) to the clipboard, to start another session from it", Short: "copy context"},
 		{Name: "refresh", Keys: []string{"r"}, Help: "refresh", Short: "refresh"},
 		{Name: "help", Keys: []string{"?"}, Help: "this help", Short: "help"},
 	}
@@ -52,7 +53,9 @@ var (
 	PipelineActions = append(withKeys(commonActions, "sort", "ctrl+o"),
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
-		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"})
+		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"},
+		keys.Action{Name: "open-pull-request", Keys: []string{"p"}, Canon: "open-pull-request", Help: "open the selected ticket's pull request in the browser", Short: "pull request"},
+		keys.Action{Name: "handoff", Keys: []string{"H"}, Canon: "handoff", Help: "a Jira ticket with no worktree: choose the target branch and team, then start the work (needs [jira])", Short: "hand off"})
 
 	// ArchiveActions are the archive list's.
 	ArchiveActions = []keys.Action{
@@ -142,6 +145,27 @@ func (m *Model) pipelineKey(action string) string {
 // screen.Say, or "" when the action has no key.
 func (m *Model) press(action, what string) string {
 	return pressWith(m.hintKey(action), what)
+}
+
+// archiveKeysNote is " (<key> tracker, <key> PR, ...)" with the archive's
+// current keys marked for screen.Say, leaving out unbound actions.
+func (m *Model) archiveKeysNote() string {
+	km := m.keys.archive
+	if km == nil {
+		km, _ = keys.New(ArchiveActions, nil)
+	}
+	var parts []string
+	for _, a := range []struct{ name, what string }{
+		{"open-issue", "tracker"}, {"open-pull-request", "PR"}, {"restore", "restore"}, {"filter", "search"},
+	} {
+		if k := km.Key(a.name); k != "" {
+			parts = append(parts, screen.Key(k)+" "+a.what)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 func pressWith(key, what string) string {

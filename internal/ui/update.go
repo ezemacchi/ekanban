@@ -31,7 +31,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spacesChanged(), m.loadPipeline(false))
 
 	case pipelineMsg:
-		return m, m.applyPipeline(msg)
+		return m, tea.Batch(m.applyPipeline(msg), m.loadJira(false), m.ensureDetail())
+
+	case jiraMsg:
+		m.applyJira(msg)
+		return m, m.ensureDetail()
+
+	case jiraDetailMsg:
+		m.applyDetail(msg)
+		return m, nil
+
+	case yankMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
+			m.status = msg.text
+		}
+		return m, nil
+
+	case handoffMsg:
+		return m, m.applyHandoff(msg)
 
 	case look.SpinMsg:
 		return m, m.spinner.Update(msg, m.pipelineBusy() || m.isBusy())
@@ -51,7 +70,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The board's own clock: PR entries age out of the cache, and branches
 		// go stale silently because a checkout raises no Herdr event. Both
 		// calls are no-ops until something is genuinely due.
-		return m, tea.Batch(m.loadPRs(), m.loadBranches(), m.loadPipeline(false), tick())
+		return m, tea.Batch(m.loadPRs(), m.loadBranches(), m.loadPipeline(false), m.loadJira(false), tick())
 
 	case prLoadedMsg:
 		return m, m.applyPRs(msg)
@@ -102,10 +121,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		return m.handleMouse(msg)
+		model, cmd := m.handleMouse(msg)
+		return model, tea.Batch(cmd, m.ensureDetail())
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		model, cmd := m.handleKey(msg)
+		return model, tea.Batch(cmd, m.ensureDetail())
 	}
 	return m, nil
 }
@@ -138,6 +159,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
+	}
+
+	if m.mode == modeHandoff {
+		return m, nil // the box takes keys only
 	}
 
 	if m.mode == modeHelp {
@@ -300,6 +325,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleManageKey(msg)
 	case modeDetail:
 		return m.handleDetailKey(msg)
+	case modeHandoff:
+		return m.handleHandoffKey(msg)
 	case modeNote, modeRename, modeMessage, modeFilter, modeManageAdd, modeManageRename:
 		return m.handleInputKey(msg)
 	case modeHelp:
@@ -463,7 +490,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 
 	case "m":
-		if !m.requireSpace() {
+		if !m.requireSpace() || !m.requireWorktree() {
 			return m, nil
 		}
 		m.mode = modeMessage
@@ -471,7 +498,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 
 	case "R":
-		if !m.requireSpace() {
+		if !m.requireSpace() || !m.requireWorktree() {
 			return m, nil
 		}
 		m.mode = modeRename
@@ -506,6 +533,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "x":
 		return m.forgetSelected()
+
+	case "y":
+		return m, m.yankSelected()
 
 	case "r":
 		// An explicit refresh means all of it, TTLs included: the user has just
@@ -666,6 +696,19 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.mode = modeNormal
 		return m.openSelected()
+
+	case "y":
+		return m, m.yankSelected()
+
+	case "open-pull-request":
+		if sp := m.selected(); sp != nil && m.pipelineOn() {
+			return m, m.openPipelinePR(sp)
+		}
+
+	case "handoff":
+		if m.pipelineOn() {
+			return m, m.startHandoff()
+		}
 
 	default:
 		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
@@ -829,7 +872,7 @@ func (m *Model) ensureEntry(sp *space) {
 // workspace at its directory if it is archived.
 func (m *Model) openSelected() (tea.Model, tea.Cmd) {
 	sp := m.selected()
-	if sp == nil {
+	if sp == nil || !m.requireWorktree() {
 		return m, nil
 	}
 	client := m.client
@@ -863,7 +906,7 @@ func (m *Model) openSelected() (tea.Model, tea.Cmd) {
 // immediately with the default status; archived ones vanish for good.
 func (m *Model) forgetSelected() (tea.Model, tea.Cmd) {
 	sp := m.selected()
-	if sp == nil {
+	if sp == nil || !m.requireWorktree() {
 		return m, nil
 	}
 	delete(m.board.Entries, sp.Key)

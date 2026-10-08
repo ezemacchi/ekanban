@@ -18,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/ezemacchi/ekanban/internal/columns"
+	"github.com/ezemacchi/ekanban/internal/jira"
 	"github.com/ezemacchi/ekanban/internal/team"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
@@ -46,7 +47,7 @@ type Config struct {
 	Pipeline PipelineConfig `toml:"pipeline"`
 	// Ticket is how the ticket board shows a run.
 	Ticket TicketConfig `toml:"ticket"`
-	// Keys binds keys to actions by name: accept = "y" or accept = ["y", "Y"].
+	// Keys binds keys to actions by name: accept = "Z" or accept = ["Z", "z"].
 	Keys map[string]any `toml:"keys"`
 	// Orchestrator overrides the teams' [orchestrator]: how the agent running a ticket is
 	// recognised and started.
@@ -55,6 +56,8 @@ type Config struct {
 	Lead *team.Orchestrator `toml:"lead"`
 	// Run is where a team run lives and how its state file reads.
 	Run ticket.LayoutConfig `toml:"run"`
+	// Jira is the site the global board reads tickets from.
+	Jira jira.Config `toml:"jira"`
 }
 
 // TicketConfig is the [ticket] table.
@@ -120,6 +123,7 @@ type Settings struct {
 	ScreenKeys    map[string]map[string][]string // [keys.board], [keys.ticket]
 	Orchestrator  team.Orchestrator              // [orchestrator], over each team's
 	Layout        ticket.Layout                  // [run]
+	Jira          jira.Config                    // [jira], defaults filled
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
 	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
@@ -156,7 +160,9 @@ func Load() Settings { return LoadFor("") }
 // not an error.
 //
 // The repository file describes the project's process, so it cannot choose
-// which program starts: [orchestrator] kind and args are read from config.toml only.
+// which program starts or where the Jira token goes: [orchestrator] kind and
+// args, and [jira] url, email_env, token_env and handoff.command, are read
+// from config.toml only.
 func LoadFor(dir string) Settings {
 	s := Settings{PollInterval: DefaultPollInterval, Notifications: true}
 	var c Config
@@ -166,12 +172,22 @@ func LoadFor(dir string) Settings {
 		s.Problems = foldLead(&c, s.Path, s.Problems)
 	}
 	if s.RepoPath = RepoFile(dir); s.RepoPath != "" {
-		orchestrator := c.Orchestrator
+		// Snapshots of what only config.toml may set. The lists are cloned:
+		// decoding over a slice rewrites its elements in place, which would
+		// rewrite the snapshot and let the repository file through.
+		orchestrator, account := c.Orchestrator, c.Jira
+		orchestrator.Args = slices.Clone(orchestrator.Args)
+		account.Handoff.Command = slices.Clone(account.Handoff.Command)
 		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
 		s.Problems = foldLead(&c, s.RepoPath, s.Problems)
 		if c.Orchestrator.Kind != orchestrator.Kind || !slices.Equal(c.Orchestrator.Args, orchestrator.Args) {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [orchestrator] kind and args are only read from config.toml — ignored", s.RepoPath))
 			c.Orchestrator.Kind, c.Orchestrator.Args = orchestrator.Kind, orchestrator.Args
+		}
+		if c.Jira.URL != account.URL || c.Jira.EmailEnv != account.EmailEnv || c.Jira.TokenEnv != account.TokenEnv || !slices.Equal(c.Jira.Handoff.Command, account.Handoff.Command) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [jira] url, email_env, token_env and handoff.command are only read from config.toml — ignored", s.RepoPath))
+			c.Jira.URL, c.Jira.EmailEnv, c.Jira.TokenEnv = account.URL, account.EmailEnv, account.TokenEnv
+			c.Jira.Handoff.Command = account.Handoff.Command
 		}
 	}
 	return resolve(c, s)
@@ -251,6 +267,7 @@ func resolve(c Config, s Settings) Settings {
 	if len(s.Pipeline.Targets) == 0 {
 		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
 	}
+	s.Jira = c.Jira.WithDefaults()
 	var layoutProblems []string
 	s.Layout, layoutProblems = ticket.NewLayout(c.Run)
 	s.Problems = append(s.Problems, layoutProblems...)
@@ -438,12 +455,40 @@ icons = false
 # spec_code = '(?i)\b(E\d+)[_-](US|TS)[_-](\d+)'
 # prototypes = "specifications/backlog/{1}"
 
+# Jira, read only: the global board shows the tickets of jql that have no
+# worktree yet, each in the column its Jira status maps to, and every card
+# shows its ticket's Jira status. The account is read from two environment
+# variables, never from a file: an Atlassian API token and the e-mail of the
+# account it belongs to. Leave url out to turn Jira off.
+# url, email_env, token_env and handoff.command are read from this file only;
+# the rest can also go in a repository's .ekanban.toml.
+# [jira]
+# url = "https://your-site.atlassian.net"
+# email_env = "JIRA_EMAIL"
+# token_env = "JIRA_API_TOKEN"
+# jql = "project = ABC AND assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC, updated DESC"
+# test_type = "Test"      # the issue type of linked test cases
+# A ticket with no worktree goes by its status name, else its status category
+# (new, indeterminate, done), to a column id; "" leaves it off the board.
+# Defaults: new = "todo", indeterminate = "in_progress", done = "".
+# [jira.columns]
+# "In Quality Review" = "ready_qa"
+# H on such a card asks for the target branch and the team, then runs command
+# without a shell. Placeholders: {key} {summary} {target} {team} {type} {repo}
+# ({type} is "fix" for the fix_types issue types, else "feat"; {repo} is the
+# main checkout). A command that prints a JSON line with "code" and "message"
+# has it shown on the status line.
+# [jira.handoff]
+# command = ["pwsh", "-NoProfile", "-File", "handoff.ps1", "-Key", "{key}", "-Summary", "{summary}", "-Target", "{target}", "-Team", "{team}", "-Type", "{type}"]
+# teams = ["standalone", "small-team", "full-team"]
+# fix_types = ["Bug", "Defect", "Defect Candidate"]
+
 # Keys, by action name: one key or a list. A rebound action stops answering
 # its old key, and an empty list turns it off. The help screen (?) shows the
 # current keys and the names are listed by ` + "`ekanban keys`" + `. gg, gp,
 # gf and 1-9 are fixed. [keys.board] and [keys.ticket] apply to one board only.
 # [keys]
-# accept = "y"
+# accept = "Z"
 # archive = ["A", "z"]
 # [keys.board]
 # orchestrator = []

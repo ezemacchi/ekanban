@@ -67,6 +67,10 @@ func (m *Model) openPR() tea.Cmd {
 		return nil
 	}
 
+	if m.pipelineOn() {
+		return m.openPipelinePR(sp)
+	}
+
 	pr, ok := m.prFor(sp.Key)
 	if !ok {
 		m.status = "no pull request for " + sp.Label
