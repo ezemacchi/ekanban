@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"sync/atomic"
 	"time"
@@ -65,7 +64,7 @@ func (c *Client) nextID(method string) string {
 
 // Request performs one request/response round trip.
 func (c *Client) Request(method string, params any, out any) error {
-	conn, err := net.DialTimeout("unix", c.socketPath, 3*time.Second)
+	conn, err := dial(c.socketPath, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial herdr socket: %w", err)
 	}
@@ -126,7 +125,7 @@ var WorkspaceSubscriptions = []string{
 // Subscribe streams events until ctx is cancelled or the connection drops.
 // It holds its own connection for the lifetime of the stream.
 func (c *Client) Subscribe(ctx context.Context, types []string, out chan<- Event) error {
-	conn, err := net.DialTimeout("unix", c.socketPath, 3*time.Second)
+	conn, err := dial(c.socketPath, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial herdr socket: %w", err)
 	}

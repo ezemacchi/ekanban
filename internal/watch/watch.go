@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/phin-tech/herdr-phin-board/internal/alert"
@@ -61,19 +60,6 @@ func (l *Lock) Release() {
 	if l != nil {
 		_ = os.Remove(l.path)
 	}
-}
-
-// alive reports whether a pid is a running process. Signal 0 checks for
-// existence without delivering anything.
-func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // Run polls until the context is cancelled or Herdr goes away.

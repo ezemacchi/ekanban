@@ -11,7 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"strconv"
+	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -88,6 +89,17 @@ func run(args []string) error {
 		switch args[0] {
 		case "sync":
 			return sync(client, board)
+		case "move-tab":
+			// The Herdr CLI has no tab reordering; /handoff uses this to make
+			// a board tab the first one in its workspace.
+			if len(args) != 3 {
+				return fmt.Errorf("usage: move-tab <tab_id> <index>")
+			}
+			index, err := strconv.Atoi(args[2])
+			if err != nil || index < 0 {
+				return fmt.Errorf("move-tab: index must be a number >= 0, got %q", args[2])
+			}
+			return client.MoveTab(args[1], index)
 		case "sidebar":
 			// Narrow rendering for a region down the right-hand side: hoarder's
 			// dock, or a tiled split on upstream Herdr. It is its own
@@ -165,6 +177,12 @@ func stateDir() (string, error) {
 // Failures are deliberately silent: the board works without it, and a noisy
 // error on every open would be worse than quietly having no notifications.
 func spawnWatcher() {
+	// Under `go test` os.Executable is the test binary, which ignores "watch"
+	// and reruns every test, each spawning another. Detached on Windows, that
+	// chain never ends.
+	if testing.Testing() {
+		return
+	}
 	dir, err := stateDir()
 	if err != nil {
 		return
@@ -183,7 +201,7 @@ func spawnWatcher() {
 		return
 	}
 	cmd := exec.Command(self, "watch")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detachedAttr()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	_ = cmd.Start()
 	if cmd.Process != nil {

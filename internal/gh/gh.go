@@ -131,6 +131,7 @@ func execRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
+	hideWindow(cmd)
 
 	out, err := cmd.Output()
 	if err == nil {

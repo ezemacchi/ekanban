@@ -198,6 +198,14 @@ func (c *Client) MoveWorkspace(id string, index int) error {
 	}, nil)
 }
 
+// MoveTab puts a tab at index within its workspace; 0 is first.
+func (c *Client) MoveTab(id string, index int) error {
+	return c.Request("tab.move", map[string]any{
+		"tab_id":       id,
+		"insert_index": index,
+	}, nil)
+}
+
 // Worktree is one checkout of a repository.
 type Worktree struct {
 	Branch string `json:"branch"`

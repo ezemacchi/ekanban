@@ -2,18 +2,20 @@ id = "phin-board"
 name = "Phin Board"
 version = "0.5.0"
 min_herdr_version = "0.7.5"
-description = "A status board over your spaces: todo, in progress, waiting on someone, done — plus any status you invent."
-platforms = ["macos", "linux"]
+description = "A status board over your spaces: todo, in progress, waiting on someone, done - plus any status you invent."
+# Windows fork: every command goes through cmd.exe instead of sh, which Herdr
+# on Windows does not have. cmd expands %HERDR_PLUGIN_ROOT% the way sh -c
+# expanded $HERDR_PLUGIN_ROOT upstream.
+platforms = ["windows"]
 
 [[build]]
-# Compiles from source when Go is present, else fetches the CI-built binary.
-command = ["sh", "build.sh"]
+command = ["cmd", "/c", "go build -trimpath -o bin\\herdr-phin-board.exe .\\cmd\\herdr-phin-board"]
 
 [[actions]]
 id = "open"
 title = "Open Phin Board"
 contexts = ["global", "workspace"]
-command = ["sh", "action-open.sh"]
+command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "phin-board"]
 
 [[panes]]
 id = "phin-board"
@@ -21,53 +23,23 @@ title = "Board"
 placement = "popup"
 width = "80%"
 height = "85%"
-# Pane commands are resolved against PATH, not the plugin root, so the binary
-# has to be named absolutely via the injected plugin root.
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board"']
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe"]
 
 [[actions]]
 id = "dock"
 title = "Dock Phin Board to the right"
 contexts = ["global", "workspace"]
-command = ["sh", "action-dock.sh"]
+command = ["cmd", "/c", "%HERDR_BIN_PATH%", "plugin", "pane", "open", "--plugin", "%HERDR_PLUGIN_ID%", "--entrypoint", "side", "--placement", "split", "--direction", "right"]
 
-# The narrow rendering -- the grouped list only, no detail pane -- as upstream
-# Herdr can have it: a tiled split, the closest thing it has to a right-hand
-# region and the only one it will accept. A manifest naming a placement it does
-# not know fails to parse there in full, taking every action and hook with it.
-#
-# No width: it is a popup-only field, and a split carrying one fails the
-# manifest the same way. Nor is there a field for which side the split lands
-# on, so action-dock.sh opens this with --direction right.
-#
-# The id differs from the hoarder pane below on purpose. Both entries are
-# visible to hoarder, and two panes sharing an id fails its manifest just as
-# hard -- for the whole plugin, actions included. They run the same `sidebar`
-# entrypoint either way.
 [[panes]]
 id = "side"
 title = "Board"
 placement = "split"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" sidebar']
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sidebar"]
 
-# hoarder -- a fork of Herdr -- has a persistent right-hand dock, which is a
-# better home for this than a tiled split: it survives layout changes and does
-# not take a slot from the panes you are working in. Upstream silently ignores
-# unknown manifest keys, so it never sees this entry.
-[[hoarder.panes]]
-id = "sidebar"
-title = "Board"
-placement = "sidebar-right"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" sidebar']
-
-# Runs once after the server restores a session, and again after a live
-# handoff. Reapplies the $status badges, which do not survive a restart, and
-# starts the background watcher -- so pull request notifications arrive whether
-# or not the board has ever been opened. Requires Herdr 0.7.5.
 [[startup]]
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" startup']
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "startup"]
 
-# A workspace opened later was not there at startup, so it needs its badge too.
 [[events]]
 on = "workspace.created"
-command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/bin/herdr-phin-board" sync']
+command = ["cmd", "/c", "%HERDR_PLUGIN_ROOT%\\bin\\herdr-phin-board.exe", "sync"]
