@@ -20,15 +20,16 @@ func TestStepSkipsEmptyAndStopsAtEdge(t *testing.T) {
 	}
 }
 
-func TestSettleFindsNearestNonEmpty(t *testing.T) {
+func TestSettleGoesToTheFirstCard(t *testing.T) {
 	if got := Settle(0, 4, counts(0, 0, 0, 1)); got != 3 {
 		t.Fatalf("got %d", got)
 	}
-	if got := Settle(2, 4, counts(1, 0, 0, 1)); got != 3 {
+	// Not the nearest: the first from the left, wherever the cursor was.
+	if got := Settle(2, 4, counts(1, 0, 0, 1)); got != 0 {
 		t.Fatalf("got %d", got)
 	}
-	if got := Settle(1, 4, counts(1, 0, 0, 1)); got != 0 {
-		t.Fatalf("got %d", got)
+	if got := Settle(3, 4, counts(0, 1, 0, 1)); got != 3 {
+		t.Fatalf("a column with cards keeps the cursor: %d", got)
 	}
 	if got := Settle(9, 4, counts(0, 0, 0, 0)); got != 3 {
 		t.Fatalf("all empty clamps: %d", got)

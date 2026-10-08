@@ -66,6 +66,15 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 	}
 }
 
+// With To Do empty the cursor starts on the board's first card, not on an
+// empty column where it cannot be seen.
+func TestCursorStartsOnTheFirstCard(t *testing.T) {
+	m := pipelineBoard(t)
+	if st := m.board.Statuses[m.col]; st.ID != pipeline.ReadyQA || m.rowInCol != 0 {
+		t.Fatalf("cursor is on %s row %d, want the first card in Ready for QA", st.ID, m.rowInCol)
+	}
+}
+
 // Empty columns shrink to their header; the column with cards takes the room.
 func TestEmptyColumnsTakeOnlyTheirHeader(t *testing.T) {
 	m := pipelineBoard(t)

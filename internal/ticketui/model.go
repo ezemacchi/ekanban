@@ -181,7 +181,9 @@ func (m *Model) stepColumn(dir int) {
 
 func (m *Model) clamp() {
 	// A refresh can empty the column under the cursor.
-	m.col = nav.Settle(m.col, len(ticket.Columns), m.cardCount)
+	if col := nav.Settle(m.col, len(ticket.Columns), m.cardCount); col != m.col {
+		m.col, m.row = col, 0
+	}
 	n := m.cardCount(m.col)
 	if m.row >= n {
 		m.row = n - 1

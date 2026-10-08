@@ -13,8 +13,8 @@ func Step(cur, dir, columns int, cards func(col int) int) int {
 }
 
 // Settle keeps the cursor in range and, when its column is empty, moves it to
-// the nearest column that has a card (left first on a tie). With every column
-// empty it stays where it was.
+// the first column from the left that has a card: the cursor then rests on
+// the board's first card. With every column empty it stays where it was.
 func Settle(cur, columns int, cards func(col int) int) int {
 	if columns <= 0 {
 		return 0
@@ -28,11 +28,8 @@ func Settle(cur, columns int, cards func(col int) int) int {
 	if cards(cur) > 0 {
 		return cur
 	}
-	for d := 1; d < columns; d++ {
-		if c := cur - d; c >= 0 && cards(c) > 0 {
-			return c
-		}
-		if c := cur + d; c < columns && cards(c) > 0 {
+	for c := 0; c < columns; c++ {
+		if cards(c) > 0 {
 			return c
 		}
 	}

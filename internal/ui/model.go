@@ -16,6 +16,7 @@ import (
 	"github.com/ezemacchi/herdr-phin-board/internal/gh"
 	"github.com/ezemacchi/herdr-phin-board/internal/herdr"
 	"github.com/ezemacchi/herdr-phin-board/internal/look"
+	"github.com/ezemacchi/herdr-phin-board/internal/nav"
 	"github.com/ezemacchi/herdr-phin-board/internal/pipeline"
 	"github.com/ezemacchi/herdr-phin-board/internal/store"
 )
@@ -588,14 +589,21 @@ func (m *Model) firstOccupiedColumn() (int, bool) {
 
 func (m *Model) columnCount(col int) int { return len(m.columnSpaces(col)) }
 
-// clampColumnCursor only keeps the cursor in range: a number key may jump to
-// an empty status on purpose, and an empty column then selects nothing.
+// clampColumnCursor keeps the cursor in range. With manual statuses a number
+// key may jump to an empty status on purpose, and an empty column then selects
+// nothing. With computed columns nothing can be filed by hand, so an empty
+// column under the cursor sends it to the board's first card.
 func (m *Model) clampColumnCursor() {
 	if m.col >= len(m.board.Statuses) {
 		m.col = len(m.board.Statuses) - 1
 	}
 	if m.col < 0 {
 		m.col = 0
+	}
+	if m.pipelineOn() {
+		if col := nav.Settle(m.col, len(m.board.Statuses), m.columnCount); col != m.col {
+			m.col, m.rowInCol = col, 0
+		}
 	}
 	group := m.columnSpaces(m.col)
 	if m.rowInCol >= len(group) {
