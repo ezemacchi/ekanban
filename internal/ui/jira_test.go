@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,30 @@ func TestHandoffAsksTargetThenTeamThenConfirms(t *testing.T) {
 	}
 	if _, cmd := m.Update(key("enter")); cmd == nil || m.mode != modeNormal {
 		t.Fatal("enter on the confirm step did not run the handoff")
+	}
+}
+
+// A target nobody configured is taken alone, so the confirm step says where
+// it came from; a configured one is shown as is.
+func TestHandoffSaysWhenTheTargetIsTheDefault(t *testing.T) {
+	m := jiraBoard(t)
+	m.width, m.height = 120, 30
+	m.jr.targets, m.jr.cfg.Handoff.Teams = []string{"trunk"}, []string{"full-team"}
+	m.SetTargetDefaulted(true)
+	selectJiraCard(t, m, "ABC-3")
+	send(t, m, key("H"))
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "trunk (the default branch; set [[pipeline.target]] to choose)") {
+		t.Fatalf("a defaulted target is not marked:\n%s", out)
+	}
+	if args := m.jr.cfg.Handoff.Args(m.handoffValues()); !slices.Contains(args, "trunk") {
+		t.Fatalf("the marker leaked into the command: %v", args)
+	}
+	send(t, m, key("esc"))
+
+	m.SetTargetDefaulted(false)
+	send(t, m, key("H"))
+	if out := ansi.Strip(m.View()); strings.Contains(out, "default branch") {
+		t.Fatalf("a configured target is marked:\n%s", out)
 	}
 }
 

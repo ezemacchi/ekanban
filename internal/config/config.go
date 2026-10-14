@@ -113,7 +113,8 @@ type PipelineConfig struct {
 	// Rules names the column rules in the order they are tried.
 	Rules []string `toml:"rules"`
 	// Targets are the branches pull requests merge into, most downstream
-	// first, each with the publish job that deploys it.
+	// first, each with the publish job that deploys it. Empty when unset:
+	// the caller fills the repository's default branch (pipeline.DefaultBranch).
 	Targets []TargetConfig `toml:"target"`
 	// Columns rename, recolour, reorder or re-icon the computed columns, and
 	// add one for a custom rule to return.
@@ -168,6 +169,9 @@ type Settings struct {
 	Broadcast     []string                       // [broadcast] presets, defaults filled
 	Questions     orchestrator.Questions         // [questions], defaults filled
 	Stack         stack.Config                   // [stack]; no sources means off
+	// TargetDefaulted is true when [[pipeline.target]] named no branch and
+	// the one in Pipeline.Targets was taken from the repository instead.
+	TargetDefaulted bool
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
 	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
@@ -333,9 +337,6 @@ func resolve(c Config, s Settings) Settings {
 	if s.Pipeline.CI.Kind == "" && s.Pipeline.CI.URL != "" {
 		s.Problems = append(s.Problems, "pipeline.ci has a url but no kind — no build server is read")
 	}
-	if len(s.Pipeline.Targets) == 0 {
-		s.Pipeline.Targets = []TargetConfig{{Branch: "main"}}
-	}
 	s.Jira = c.Jira.WithDefaults()
 	s.Bitbucket = c.Bitbucket.WithDefaults()
 	s.Reviews = c.Reviews
@@ -489,6 +490,8 @@ icons = false
 
 # Branches pull requests merge into, most downstream first. publish is the
 # build server job that deploys the branch; env is how the card names it.
+# They are also the target branches H offers on a Jira card. With none, the
+# board uses the remote's default branch (origin/HEAD), else main.
 # [[pipeline.target]]
 # branch = "main"
 # env = "dev"

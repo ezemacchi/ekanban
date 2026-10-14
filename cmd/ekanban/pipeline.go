@@ -28,7 +28,9 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	set, problems := pipelineSettings(config.LoadFor(repo))
+	cfg := config.LoadFor(repo)
+	defaultTarget(&cfg, repo)
+	set, problems := pipelineSettings(cfg)
 	for _, p := range problems {
 		fmt.Fprintln(os.Stderr, p)
 	}
@@ -57,6 +59,16 @@ func dumpPipeline(client *herdr.Client, repo string) error {
 		}
 	}
 	return nil
+}
+
+// defaultTarget fills the target [[pipeline.target]] leaves out with the
+// repository's default branch, and marks it as not chosen.
+func defaultTarget(cfg *config.Settings, repo string) {
+	if len(cfg.Pipeline.Targets) > 0 {
+		return
+	}
+	cfg.Pipeline.Targets = []config.TargetConfig{{Branch: pipeline.DefaultBranch(repo, gh.HideWindow)}}
+	cfg.TargetDefaulted = true
 }
 
 // pipelineSettings turns config.toml's [pipeline] into the classifier's

@@ -179,6 +179,7 @@ func run(args []string) error {
 	if model.Scoped() {
 		// Inside a repository the columns are its tickets' delivery stages,
 		// read from the build server and git rather than GitHub.
+		defaultTarget(&settings, cwd)
 		set, problems := pipelineSettings(settings)
 		model.SetPipeline(pipeline.New(cwd, set, gh.HideWindow))
 		model.SetProblems(problems)
@@ -193,6 +194,7 @@ func run(args []string) error {
 			targets = append(targets, t.Branch)
 		}
 		model.SetJira(jc, settings.Jira, targets, cwd, why, gh.HideWindow)
+		model.SetTargetDefaulted(settings.TargetDefaulted)
 		// Bitbucket says whether each pull request may merge: the reports
 		// posted on it, the reviewers and its own checks. The repository comes
 		// from pipeline.pr_url; the server and token only from config.toml.

@@ -41,8 +41,11 @@ type jiraState struct {
 	client  *jira.Client
 	cfg     jira.Config
 	targets []string
-	repo    string // the board's checkout, for {repo} and the command's directory
-	hide    func(*exec.Cmd)
+	// targetDefaulted: targets is the repository's default branch, not a
+	// [[pipeline.target]] the user chose.
+	targetDefaulted bool
+	repo            string // the board's checkout, for {repo} and the command's directory
+	hide            func(*exec.Cmd)
 
 	issues  map[string]jira.Issue
 	at      time.Time
@@ -73,6 +76,10 @@ func (m *Model) SetJira(client *jira.Client, cfg jira.Config, targets []string, 
 		m.SetProblems([]string{why})
 	}
 }
+
+// SetTargetDefaulted says the handoff's target was not configured but taken
+// from the repository, so the handoff box can say so. Call it after SetJira.
+func (m *Model) SetTargetDefaulted(on bool) { m.jr.targetDefaulted = on }
 
 func (m *Model) jiraOn() bool { return m.pipelineOn() && m.jr.client != nil }
 
@@ -760,7 +767,13 @@ func (m *Model) viewHandoff(base string) string {
 		lines = append(lines, dimStyle.Render(truncate("Jira: "+h.issue.Status+" · "+m.jr.cfg.Handoff.Type(h.issue.Type), inner)))
 	}
 	lines = append(lines, "")
-	for _, done := range [][2]string{{"target", h.target}, {"team", h.team}, {"tests", h.tests}} {
+	target := h.target
+	if target != "" && m.jr.targetDefaulted {
+		// Chosen alone and never configured: a wrong guess would only show
+		// up as the command failing.
+		target += " (the default branch; set [[pipeline.target]] to choose)"
+	}
+	for _, done := range [][2]string{{"target", target}, {"team", h.team}, {"tests", h.tests}} {
 		if done[1] != "" {
 			lines = append(lines, screen.Field(done[0], []string{done[1]})...)
 		}

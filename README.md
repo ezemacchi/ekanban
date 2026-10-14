@@ -413,6 +413,9 @@ never writes to Jira.
   the command it will run, and runs `[jira.handoff] command` on `enter`: the
   board does not know how work is started, your command does. It is run
   without a shell, so a ticket's summary is one argument whatever it contains.
+  The target branches are the `[[pipeline.target]]` ones. With none, the board
+  uses the remote's default branch (`origin/HEAD`), else `main`, and the
+  handoff box says it is a default rather than a choice.
 - `y` on any card, or in its detail, copies what another session needs to pick
   it up: the ticket and its status, the spec and prototype the run names, the
   worktree and branch, the pull request and its build, the run's current step
