@@ -201,6 +201,29 @@ func answer(word, key string) Item {
 	return Item{Text: text, On: &Zone{Kind: OnButton, Key: key}}
 }
 
+// Asking draws a question with a text field in a box over base, width ×
+// height: the title, the lines that say what the text is for, the field --
+// field draws it inner cells wide -- and its buttons, enter and esc. It
+// records its zones -- the box, the buttons and its ✕ (esc) -- so the board
+// only has to act on enter, esc and typing.
+func Asking(z *Zones, base, title string, lines []string, field func(inner int) string, width, height int) string {
+	inner := max(min(width-8, 72)-4, 24)
+	var body []string
+	for _, l := range lines {
+		body = append(body, Wrap(l, inner)...)
+	}
+	body = append(body, "", field(inner))
+	var buttons Zones
+	row := Buttons(&buttons, 0, 0, []Hint{{Key: "enter", Label: "OK"}, {Key: "esc", Label: "Cancel"}}, inner)
+	box := Modal(Closable(look.Title.Render(title), inner), body, []string{row}, inner)
+	x, y := Center(lipgloss.Width(box), lipgloss.Height(box), width, height)
+	z.Add(Zone{Kind: OnBox, Y: y, H: lipgloss.Height(box), X0: x, X1: x + lipgloss.Width(box)})
+	buttons.Shift(0, x+2, y+ModalBody+len(body)+1)
+	*z = append(*z, buttons...)
+	z.Add(CloseZone(x, y, inner, "esc"))
+	return Overlay(base, box, x, y, height)
+}
+
 // Confirm draws a yes-or-no question in a box over base, width × height:
 // the title, the lines that say what yes does, and (Y)es and (N)o. It
 // records its zones -- the box, its ✕ and the two answers, which press y

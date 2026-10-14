@@ -20,6 +20,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
+	"github.com/ezemacchi/ekanban/internal/stack"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
@@ -95,6 +96,10 @@ func (m *Model) requireWorktree() bool {
 		m.status = k + " has no worktree yet" + m.press("handoff", "to start it")
 		return false
 	}
+	if _, ok := reviewCardKey(sp.Key); ok {
+		m.status = m.spaceName(sp) + " is someone else's pull request" + m.press("open-pull-request", "to review it")
+		return false
+	}
 	return true
 }
 
@@ -111,6 +116,10 @@ func (m *Model) ticketOf(sp *space) string {
 	}
 	if k, ok := jiraCardKey(sp.Key); ok {
 		return k
+	}
+	if id, ok := reviewCardKey(sp.Key); ok {
+		r, _ := m.review(id)
+		return reviewTicket(r, m.rv.keyRe)
 	}
 	return m.pipeInfo[sp.Key].Key
 }
@@ -249,6 +258,9 @@ func (m *Model) applyDetail(msg jiraDetailMsg) {
 		return
 	}
 	m.jr.detail[msg.key] = msg.detail
+	if m.stk.Needs(stack.Card{Key: msg.key}) {
+		m.rebuild() // what a stack reads has changed, and may move its card
+	}
 }
 
 // detailLimit is how many lines of the latest comment the detail shows.
@@ -326,6 +338,7 @@ type yankFacts struct {
 	Branch   string
 	CI       string
 	Merge    []string // Bitbucket's verdict, then each report; see bitbucketYank
+	Review   string   // the pull request waiting on your review; see reviewYank
 	Note     string
 }
 
@@ -342,12 +355,17 @@ func (m *Model) yankSelected() tea.Cmd {
 	if st, ok := m.board.StatusByID(sp.StatusID); ok {
 		f.Column = st.Label
 	}
+	if m.pipelineOn() {
+		if text, ok := m.placedText(sp.Key); ok {
+			f.Column += " (" + text + ")"
+		}
+	}
 	f.Issue, f.HasIssue = m.jr.issues[key]
 	if d, ok := m.jr.detail[key]; ok {
 		f.Detail = &d
 	}
-	_, jiraOnly := jiraCardKey(sp.Key)
-	if !jiraOnly {
+	f.Review = m.reviewYank(sp)
+	if !noWorktree(sp.Key) {
 		f.Worktree, f.Branch = sp.Key, m.branchFor(sp.Key)
 		f.Info = m.pipeInfo[sp.Key]
 		if f.Info.PR > 0 {
@@ -358,15 +376,19 @@ func (m *Model) yankSelected() tea.Cmd {
 	if m.pipelineOn() {
 		f.CI = m.pipe.CIName()
 	}
-	if key == "" && f.Worktree == "" {
+	if key == "" && f.Worktree == "" && f.Review == "" {
 		m.status = "this card has nothing to copy"
 		return nil
+	}
+	name := orKey(key, f.Worktree)
+	if key == "" && f.Worktree == "" {
+		name = m.spaceName(sp)
 	}
 	src, client, jc := m.pipe, m.client, m.jr.client
 	if !m.jiraOn() {
 		jc = nil
 	}
-	start := m.working("copying " + orKey(key, sp.Key) + "…")
+	start := m.working("copying " + name + "…")
 	return tea.Batch(start, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -392,7 +414,7 @@ func (m *Model) yankSelected() tea.Cmd {
 		if err := clipboardWrite(text); err != nil {
 			return yankMsg{err: fmt.Errorf("could not copy: %w", err)}
 		}
-		return yankMsg{text: fmt.Sprintf("copied %s: %d lines%s", orKey(key, f.Worktree), strings.Count(text, "\n")+1, why)}
+		return yankMsg{text: fmt.Sprintf("copied %s: %d lines%s", name, strings.Count(text, "\n")+1, why)}
 	})
 }
 
@@ -440,6 +462,9 @@ func yankText(f yankFacts) string {
 		if f.Info.MergedTo != "" {
 			pr += " · merged into " + f.Info.MergedTo
 		}
+		if f.Info.Diverged {
+			pr += " · the worktree " + divergedText
+		}
 		line("Pull request", pr)
 		if len(f.Merge) > 0 {
 			line("Merge check", f.Merge[0])
@@ -448,11 +473,13 @@ func yankText(f yankFacts) string {
 			}
 		}
 	}
+	line("Review asked of you", f.Review)
 	line("Shipped to", f.Info.Deployed)
 	line("Note", f.Note)
 	if r := f.Run; r != nil {
 		section(&b, "Current step", r.CurrentStep)
-		section(&b, "Open questions", r.Questions)
+		section(&b, "Questions for you", questionLines(r.ForYou))
+		section(&b, "Open questions", questionLines(r.Questions))
 	}
 	if d := f.Detail; d != nil {
 		if len(d.Tests) > 0 {
@@ -499,6 +526,11 @@ type handoffState struct {
 	// target and team are the choices made so far.
 	target, team string
 	prev         mode
+	// rework is a handoff of a ticket that already has a worktree, to fix
+	// what its stack names: tests are those items' keys, comma-separated,
+	// and evidence what said they failed, a line each (stack.go).
+	rework          bool
+	tests, evidence string
 }
 
 func (m *Model) startHandoff() tea.Cmd {
@@ -507,17 +539,28 @@ func (m *Model) startHandoff() tea.Cmd {
 		return nil
 	}
 	key := m.ticketOf(sp)
+	if _, review := reviewCardKey(sp.Key); review {
+		m.status = m.spaceName(sp) + " is someone else's work: review it, there is nothing to hand off"
+		return nil
+	}
 	if !m.jiraOn() {
 		m.status = "set [jira] in config.toml to hand tickets off from the board"
 		return nil
 	}
-	if _, jiraOnly := jiraCardKey(sp.Key); !jiraOnly {
-		if key != "" {
+	tests, evidence := m.stackWork(sp)
+	_, jiraOnly := jiraCardKey(sp.Key)
+	rework := !jiraOnly && tests != "" && len(m.jr.cfg.Handoff.ReworkCommand) > 0
+	if !jiraOnly && !rework {
+		switch {
+		case key == "":
+		case tests != "":
+			m.status = key + " has related tickets to fix: set [jira.handoff] rework_command to hand them off" + m.press("jump", "or go to its worktree")
+		default:
 			m.status = key + " already has a worktree" + m.press("jump", "to go there")
 		}
 		return nil
 	}
-	if len(m.jr.cfg.Handoff.Command) == 0 {
+	if len(m.jr.cfg.Handoff.Command) == 0 && !rework {
 		m.status = "set [jira.handoff] command in config.toml to hand tickets off"
 		return nil
 	}
@@ -525,7 +568,7 @@ func (m *Model) startHandoff() tea.Cmd {
 	if !ok {
 		issue = jira.Issue{Key: key}
 	}
-	m.jr.handoff = handoffState{issue: issue, prev: m.mode}
+	m.jr.handoff = handoffState{issue: issue, prev: m.mode, rework: rework, tests: tests, evidence: evidence}
 	m.mode = modeHandoff
 	m.handoffSkip()
 	return nil
@@ -612,6 +655,7 @@ func (m *Model) handoffValues() map[string]string {
 	return map[string]string{
 		"key": h.issue.Key, "summary": firstNonEmpty(h.issue.Summary, h.issue.Key),
 		"target": h.target, "team": h.team, "type": m.jr.cfg.Handoff.Type(h.issue.Type), "repo": m.jr.repo,
+		"tests": h.tests, "evidence": h.evidence,
 	}
 }
 
@@ -627,6 +671,9 @@ type handoffMsg struct {
 func (m *Model) runHandoff() tea.Cmd {
 	h := m.jr.handoff
 	args := m.jr.cfg.Handoff.Args(m.handoffValues())
+	if h.rework {
+		args = m.jr.cfg.Handoff.ReworkArgs(m.handoffValues())
+	}
 	repo, hide := m.jr.repo, m.jr.hide
 	start := m.working("handing " + h.issue.Key + " off: " + strings.Join(nonEmpty(h.target, h.team), ", ") + "…")
 	return tea.Batch(start, func() tea.Msg {
@@ -697,7 +744,7 @@ func (m *Model) applyHandoff(msg handoffMsg) tea.Cmd {
 		m.status = msg.key + " was not handed off: " + msg.text
 	}
 	m.branchesAt = time.Time{}
-	return tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true))
+	return tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true), m.loadReviews(true))
 }
 
 // viewHandoff is the handoff box over the board.
@@ -713,7 +760,7 @@ func (m *Model) viewHandoff(base string) string {
 		lines = append(lines, dimStyle.Render(truncate("Jira: "+h.issue.Status+" · "+m.jr.cfg.Handoff.Type(h.issue.Type), inner)))
 	}
 	lines = append(lines, "")
-	for _, done := range [][2]string{{"target", h.target}, {"team", h.team}} {
+	for _, done := range [][2]string{{"target", h.target}, {"team", h.team}, {"tests", h.tests}} {
 		if done[1] != "" {
 			lines = append(lines, screen.Field(done[0], []string{done[1]})...)
 		}

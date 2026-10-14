@@ -322,9 +322,9 @@ func TestBroadcastQuickChoices(t *testing.T) {
 	m.width, m.height = 140, 40
 	send(t, m, key("B"))
 	send(t, m, recipientsMsg{to: []recipient{
-		{key: "ABC-1", status: "idle", stage: pipeline.ReadyQA, openPR: true, on: true},
-		{key: "ABC-2", status: "working", stage: pipeline.InProgress, on: true},
-		{key: "ABC-3", status: "idle", stage: pipeline.InProgress, openPR: true, on: true},
+		{key: "ABC-1", pane: "p1", status: "idle", stage: pipeline.ReadyQA, openPR: true, on: true},
+		{key: "ABC-2", pane: "p2", status: "working", stage: pipeline.InProgress, on: true},
+		{key: "ABC-3", pane: "p3", status: "idle", stage: pipeline.InProgress, openPR: true, on: true},
 	}})
 	out := ansi.Strip(m.View())
 	for _, want := range []string{"a All 3", "n None", "p Open PR 2", "i Idle 2", "w Working 1", "1 Working 2", "2 To QA 1"} {

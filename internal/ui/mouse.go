@@ -108,6 +108,12 @@ func (m *Model) clickZone(x, y int) (bool, tea.Model, tea.Cmd) {
 		m.clampColumnCursor()
 		model, cmd := m.spaceClick(already)
 		return true, model, cmd
+	case screen.OnStack:
+		if m.mode != modeNormal {
+			return true, m, nil
+		}
+		model, cmd := m.stackClick(z.Col, z.Row, z.Choice)
+		return true, model, cmd
 	case zoneModal:
 		return true, m, nil // inside the box, on nothing clickable
 	}
@@ -159,7 +165,16 @@ func (m *Model) pickerStep(delta int) {
 // detail modal: a caption, then one status per line, the highlighted one
 // marked. The caller records their zones, since it knows where they land.
 func (m *Model) pickerLines(width int) []string {
-	lines := []string{dimStyle.Render(truncate("set status:", width))}
+	caption, computed := "set status:", ""
+	if m.pipelineOn() {
+		// The board's own column is marked, so a card moved by hand can be
+		// put back without remembering where it belongs.
+		caption = "move to:"
+		if sp := m.selected(); sp != nil {
+			computed = m.pipeInfo[sp.Key].Stage
+		}
+	}
+	lines := []string{dimStyle.Render(truncate(caption, width))}
 	for i, st := range m.board.Statuses {
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color(st.Color))
 		mark := "  "
@@ -170,6 +185,9 @@ func (m *Model) pickerLines(width int) []string {
 		label := st.Label
 		if i < 9 {
 			label = string(rune('1'+i)) + " " + label
+		}
+		if st.ID == computed {
+			label += " · board"
 		}
 		lines = append(lines, mark+style.Render(truncate(label, width-2)))
 	}

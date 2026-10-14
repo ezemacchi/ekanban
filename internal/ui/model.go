@@ -18,9 +18,12 @@ import (
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
+	"github.com/ezemacchi/ekanban/internal/orchestrator"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
+	"github.com/ezemacchi/ekanban/internal/stack"
 	"github.com/ezemacchi/ekanban/internal/store"
+	"github.com/ezemacchi/ekanban/internal/ticket"
 )
 
 type mode int
@@ -40,6 +43,8 @@ const (
 	modeHandoff
 	modeConfirm
 	modeBroadcast
+	modeChooser
+	modeCloseReason
 )
 
 // space is one row of the board: a directory, whatever the user recorded about
@@ -204,6 +209,14 @@ type Model struct {
 	ask *question
 	// bc is the broadcast to the orchestrators (broadcast.go).
 	bc broadcastState
+	// ap is the chooser, open over the board or the broadcast
+	// (chooser.go).
+	ap chooserState
+	// questionsCfg is [questions]: what Reply types, which agents Discuss
+	// starts (questions.go).
+	questionsCfg orchestrator.Questions
+	// closingQ is the question being closed without an answer (close.go).
+	closingQ ticket.Question
 
 	landed bool   // the cursor has been placed on a space at least once
 	status string // transient message shown in the footer
@@ -246,6 +259,10 @@ type Model struct {
 	zones screen.Zones
 	// busyText is the status naming work still running; see working.
 	busyText string
+	// placeOff is, for a card moved by hand, a column the board computed once
+	// that differs from the one it was moved away from. Seen twice in a row,
+	// the placement is dropped; once may be a read that failed halfway.
+	placeOff map[string]string
 	// agentSeen is each space's agent statuses at the last load, by pane,
 	// so a change can be announced.
 	agentSeen      map[string]map[string]string
@@ -259,8 +276,16 @@ type Model struct {
 
 	// jr is the Jira side of the pipeline board (jira.go).
 	jr jiraState
+	// stk is stacked cards (stack.go); nil when [stack] names no source.
+	// stackCache holds each card's stack until the next rebuild, and
+	// bindings the [keys] last applied, for when the stack's actions join them.
+	stk        *stack.Stacks
+	stackCache map[string]stackRoom
+	bindings   map[string][]string
 	// bb is Bitbucket's verdict on each pull request; see bitbucket.go.
 	bb bitbucketState
+	// rv is the pull requests waiting on your review; see reviews.go.
+	rv reviewState
 }
 
 // New builds the initial model.
@@ -518,6 +543,7 @@ func (m *Model) syncTokens() tea.Cmd {
 // liveness (Herdr's, which decides main list vs archive).
 func (m *Model) rebuild() {
 	selected := m.selectedKey()
+	m.stackCache = nil // whatever the stacks read has probably changed
 
 	spaces := map[string]*space{}
 	for _, ws := range m.live {
@@ -551,6 +577,7 @@ func (m *Model) rebuild() {
 		spaces[key] = &space{Key: key}
 	}
 	m.addJiraCards(spaces)
+	m.addReviewCards(spaces)
 
 	for key, entry := range m.board.Entries {
 		sp, ok := spaces[key]

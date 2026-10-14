@@ -52,6 +52,20 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// APIError is a refusal from Herdr, with the code that says why, such as
+// agent_blocked.
+type APIError struct {
+	Method, Code, Message string
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("%s: %s (%s)", e.Method, e.Message, e.Code) }
+
+// HasCode is whether err is Herdr refusing with code.
+func HasCode(err error, code string) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Code == code
+}
+
 type response struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result"`
@@ -100,7 +114,7 @@ func (c *Client) requestWithin(limit time.Duration, method string, params any, o
 		return fmt.Errorf("decode %s: %w", method, err)
 	}
 	if resp.Error != nil {
-		return fmt.Errorf("%s: %s (%s)", method, resp.Error.Message, resp.Error.Code)
+		return &APIError{Method: method, Code: resp.Error.Code, Message: resp.Error.Message}
 	}
 	if out != nil {
 		if err := json.Unmarshal(resp.Result, out); err != nil {

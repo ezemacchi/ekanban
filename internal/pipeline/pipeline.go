@@ -62,6 +62,10 @@ type Info struct {
 	Lost    bool // a role was dispatched but has neither agent nor result
 	// Agents are the run's live agents with their Herdr status and title.
 	Agents []ticket.Agent
+	// Questions are the run's open questions for other people; ForYou those
+	// for the user.
+	Questions []ticket.Question
+	ForYou    []ticket.Question
 
 	PR       int
 	PROpen   bool
@@ -69,6 +73,9 @@ type Info struct {
 	MergedTo string // master or predev
 	// Deployed names the publish that includes the merge ("dev #212").
 	Deployed string
+	// Diverged: the merge names this branch but does not hold the
+	// worktree's commit, so the worktree differs from what merged.
+	Diverged bool
 	// Unknown explains a column chosen without full data (build server offline).
 	Unknown string
 }
@@ -99,6 +106,16 @@ type Settings struct {
 	// FastForward brings the local target branches up to their remote after
 	// each fetch; see Sync.
 	FastForward bool
+	// NoHandMoves keeps every card in its computed column: the board then
+	// refuses to move one by hand ([pipeline] manual_moves = false).
+	NoHandMoves bool
+}
+
+// HandMoves says whether a card may be moved by hand over its computed
+// column. The placement is the user's, kept by the board, not a Fact: the
+// rules never see it.
+func (s *Source) HandMoves() bool {
+	return s != nil && !s.set.NoHandMoves
 }
 
 // CIName names the build server on the board, "CI" when there is none.
@@ -267,13 +284,22 @@ func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live
 	}
 
 	if info.PR > 0 {
-		// The merge must contain the worktree's own commit: a run can name a
-		// pull request of the branch it was stacked on.
+		// The merge is this ticket's when it contains the worktree's own
+		// commit, or when its subject names the worktree's branch: a branch
+		// rebased on the server before merging leaves the worktree on commits
+		// the merge does not hold. Anything else is a pull request of the
+		// branch this one was stacked on.
 		head := s.gitIn(ctx, worktree, "rev-parse", "HEAD")
-		sha, target := s.mergeOf(ctx, info.PR)
-		if sha != "" && (head == "" || !s.isAncestor(ctx, head, sha)) {
-			info.PR, info.PROpen, info.Build = 0, false, ""
-			sha = ""
+		sha, subject, target := s.mergeOf(ctx, info.PR)
+		if sha != "" {
+			switch {
+			case head != "" && s.isAncestor(ctx, head, sha):
+			case s.set.Host.NamesBranch(subject, branch):
+				info.Diverged = true
+			default:
+				info.PR, info.PROpen, info.Build = 0, false, ""
+				sha = ""
+			}
 		}
 		if sha != "" {
 			info.MergedTo = target
@@ -329,6 +355,8 @@ func notStarted(run *ticket.Run) bool {
 
 func describeRun(info *Info, run *ticket.Run) {
 	info.Agents = run.Agents()
+	info.Questions = append([]ticket.Question(nil), run.Questions...)
+	info.ForYou = append([]ticket.Question(nil), run.ForYou...)
 	if run.OrchestratorStatus == "blocked" {
 		info.Waiting = true
 	}
@@ -443,30 +471,32 @@ func (s *Source) prFromMergeCommit(ctx context.Context, branch string) int {
 	return numberIn(out)
 }
 
-// mergeOf finds the merge commit of a pull request and the branch it went into.
-func (s *Source) mergeOf(ctx context.Context, pr int) (sha, target string) {
+// mergeOf finds the merge commit of a pull request, its subject and the branch
+// it went into.
+func (s *Source) mergeOf(ctx context.Context, pr int) (sha, subject, target string) {
 	refs := s.targetRefs()
 	subjects := s.set.Host.MergeSubjects(pr)
 	if len(refs) == 0 || len(subjects) == 0 {
-		return "", ""
+		return "", "", ""
 	}
-	args := append(append([]string{"log"}, refs...), "--format=%H", "-F")
+	args := append(append([]string{"log"}, refs...), "--format=%H%x00%s", "-F")
 	for _, subject := range subjects {
 		args = append(args, "--grep", subject)
 	}
 	out := s.git(ctx, append(args, "-1")...)
 	if out == "" {
-		return "", ""
+		return "", "", ""
 	}
-	sha = strings.Fields(out)[0]
+	sha, subject, _ = strings.Cut(out, "\x00")
+	sha = strings.TrimSpace(sha)
 	// Targets are listed most-downstream first: a merge into one that later
 	// flows into another belongs to the first that contains it.
 	for _, t := range s.set.Targets {
 		if s.isAncestor(ctx, sha, "origin/"+t.Branch) {
-			return sha, t.Branch
+			return sha, subject, t.Branch
 		}
 	}
-	return "", ""
+	return "", "", ""
 }
 
 func (s *Source) deployedIn(ctx context.Context, pr int, sha, target string) string {

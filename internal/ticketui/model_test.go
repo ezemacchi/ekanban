@@ -76,3 +76,12 @@ func TestCursorLeavesColumnEmptiedByRefresh(t *testing.T) {
 		t.Fatalf("an empty first column must not hold the cursor, got %d", m.col)
 	}
 }
+
+// questions are lines of "## Open decisions" as the parser reads them.
+func questions(lines ...string) []ticket.Question {
+	out := make([]ticket.Question, len(lines))
+	for i, l := range lines {
+		out[i] = ticket.NewQuestion(l)
+	}
+	return out
+}

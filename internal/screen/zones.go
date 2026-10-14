@@ -21,6 +21,9 @@ const (
 	// OnControl is something the board handles itself rather than through a
 	// key: ID names it ("fold" with Col, "clear-search", a section's name).
 	OnControl
+	// OnStack is a strip of a card's stack: Col, Row for the card, and
+	// Choice for the strip's index.
+	OnStack
 )
 
 // Zone is a rectangle of the screen a click can act on. Every frame records

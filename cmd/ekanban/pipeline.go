@@ -70,7 +70,8 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	host, hostProblems := pipeline.Host(cfg.Pipeline.CodeHost)
 	key, keyProblems := pipeline.TicketKey(cfg.Pipeline.TicketKey)
 	set := pipeline.Settings{CI: ci, Host: host, TicketKey: key, Rules: rules, Teams: teams, Orchestrator: cfg.Orchestrator, Columns: cols, Layout: &cfg.Layout,
-		SpecRoot: cfg.SpecClone, FastForward: cfg.Pipeline.FastForward}
+		SpecRoot: cfg.SpecClone, FastForward: cfg.Pipeline.FastForward,
+		NoHandMoves: cfg.Pipeline.ManualMoves != nil && !*cfg.Pipeline.ManualMoves}
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
@@ -86,19 +87,20 @@ func ticketSettings(cfg config.Settings) ticketui.Settings {
 	cols, colProblems := columns.Merge(ticket.DefaultColumns, cfg.Ticket.Columns, false)
 	problems = slices.Concat(cfg.Problems, problems, colProblems)
 	return ticketui.Settings{
-		Options:  ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Orchestrator: cfg.Orchestrator, Layout: &cfg.Layout},
-		Columns:  cols,
-		Keys:     cfg.KeysFor("ticket"),
-		Icons:    cfg.Icons,
-		Problems: append(problems, unknownKeys(cfg)...),
+		Options:   ticket.Options{SpecRoot: cfg.SpecClone, Teams: teams, Orchestrator: cfg.Orchestrator, Layout: &cfg.Layout},
+		Columns:   cols,
+		Keys:      cfg.KeysFor("ticket"),
+		Icons:     cfg.Icons,
+		Questions: cfg.Questions,
+		Problems:  append(problems, unknownKeys(cfg)...),
 	}
 }
 
 // unknownKeys reports [keys] names that no screen has, and [keys.board] or
 // [keys.ticket] names that board does not have.
 func unknownKeys(cfg config.Settings) []string {
-	out := keys.Unknown(cfg.Keys, ui.BoardActions, ui.PipelineActions, ui.ArchiveActions, ticketui.Actions)
-	for _, p := range keys.Unknown(cfg.ScreenKeys["board"], ui.BoardActions, ui.PipelineActions, ui.ArchiveActions) {
+	out := keys.Unknown(cfg.Keys, ui.BoardActions, ui.PipelineActions, ui.StackActions, ui.ArchiveActions, ticketui.Actions)
+	for _, p := range keys.Unknown(cfg.ScreenKeys["board"], ui.BoardActions, ui.PipelineActions, ui.StackActions, ui.ArchiveActions) {
 		out = append(out, strings.Replace(p, "[keys]", "[keys.board]", 1))
 	}
 	for _, p := range keys.Unknown(cfg.ScreenKeys["ticket"], ticketui.Actions) {
@@ -117,7 +119,7 @@ func showKeys() {
 		actions []keys.Action
 	}{
 		{"board (outside a repository)", "board", ui.BoardActions},
-		{"board (in a repository: computed columns)", "board", ui.PipelineActions},
+		{"board (in a repository: computed columns)", "board", append(append([]keys.Action(nil), ui.PipelineActions...), ui.StackActions...)},
 		{"archive of accepted tickets", "board", ui.ArchiveActions},
 		{"ticket board", "ticket", ticketui.Actions},
 	}
@@ -126,8 +128,11 @@ func showKeys() {
 		fmt.Println(s.name)
 		for _, a := range km.Actions() {
 			fixed := ""
+			if a.Scope != "" {
+				fixed = "  (on a " + a.Scope + " only)"
+			}
 			if a.Fixed {
-				fixed = "  (fixed)"
+				fixed += "  (fixed)"
 			}
 			fmt.Printf("  %-18s %-16s %s%s\n", a.Name, keys.Display(a.Keys), a.Help, fixed)
 		}

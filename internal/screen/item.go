@@ -238,7 +238,13 @@ func Arrow(folded bool) string {
 // Section is a foldable heading, "▾ Open questions 2"; a click on it folds or
 // unfolds it. count < 0 leaves the count out.
 func Section(title string, count int, folded bool, id string) Item {
-	text := look.Head.Render(Arrow(folded) + " " + title)
+	return SectionIn(title, count, folded, id, look.Head)
+}
+
+// SectionIn is Section with its title in style: a section that asks for the
+// user, say, in the attention colour.
+func SectionIn(title string, count int, folded bool, id string, style lipgloss.Style) Item {
+	text := style.Render(Arrow(folded) + " " + title)
 	if count >= 0 {
 		text += look.Dim.Render(" " + strconv.Itoa(count))
 	}

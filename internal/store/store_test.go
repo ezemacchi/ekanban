@@ -32,6 +32,26 @@ func TestLoadCreatesDefaults(t *testing.T) {
 	}
 }
 
+func TestPlacedRoundTrip(t *testing.T) {
+	b := loadTemp(t)
+	b.Place("/tmp/ticket", "on_review", "ready_qa")
+	if err := b.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := again.Entries["/tmp/ticket"].Placed
+	if p == nil || p.Stage != "on_review" || p.Over != "ready_qa" || p.At.IsZero() {
+		t.Fatalf("placement did not survive the round trip: %+v", p)
+	}
+	again.Unplace("/tmp/ticket")
+	if again.Entries["/tmp/ticket"].Placed != nil {
+		t.Fatal("Unplace kept the placement")
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)

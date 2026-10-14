@@ -201,6 +201,103 @@ func (c *Client) Review(ctx context.Context, project, repo string, n int) (Revie
 	return r, nil
 }
 
+// Awaiting is an open pull request asking the token's user for a review.
+type Awaiting struct {
+	Number   int
+	Title    string
+	Branch   string // the branch it comes from
+	Target   string // the branch it goes into
+	Author   string
+	MyStatus string // the user's own verdict so far: UNAPPROVED or NEEDS_WORK
+	Link     string // its page on the server, "" when the server gave none
+	Updated  time.Time
+}
+
+// awaitingStatuses are the verdicts that still owe a review. An approval
+// does not: the pull request is no longer waiting on the user.
+var awaitingStatuses = []string{"UNAPPROVED", "NEEDS_WORK"}
+
+// maxPages bounds how far a list is followed, so a server that keeps saying
+// there is more cannot hold a read open for ever.
+const maxPages = 10
+
+// AwaitingReview lists the open pull requests into project/repo where the
+// token's user is a reviewer and has not approved. The dashboard answers for
+// that user, so no user name is configured.
+func (c *Client) AwaitingReview(ctx context.Context, project, repo string) ([]Awaiting, error) {
+	if !pathPart.MatchString(project) || !pathPart.MatchString(repo) {
+		return nil, fmt.Errorf("not a Bitbucket repository: %q/%q", project, repo)
+	}
+	var out []Awaiting
+	seen := map[int]bool{}
+	for _, status := range awaitingStatuses {
+		start := 0
+		for page := 0; page < maxPages; page++ {
+			var raw struct {
+				Values []struct {
+					ID      int    `json:"id"`
+					Title   string `json:"title"`
+					Updated int64  `json:"updatedDate"`
+					FromRef struct {
+						Name string `json:"displayId"`
+					} `json:"fromRef"`
+					ToRef struct {
+						Name       string `json:"displayId"`
+						Repository struct {
+							Slug    string `json:"slug"`
+							Project struct {
+								Key string `json:"key"`
+							} `json:"project"`
+						} `json:"repository"`
+					} `json:"toRef"`
+					Author struct {
+						User struct {
+							Name    string `json:"displayName"`
+							Account string `json:"name"`
+						} `json:"user"`
+					} `json:"author"`
+					Links struct {
+						Self []struct {
+							Href string `json:"href"`
+						} `json:"self"`
+					} `json:"links"`
+				} `json:"values"`
+				IsLastPage    bool `json:"isLastPage"`
+				NextPageStart int  `json:"nextPageStart"`
+			}
+			q := url.Values{"role": {"REVIEWER"}, "state": {"OPEN"}, "participantStatus": {status},
+				"limit": {"100"}, "start": {strconv.Itoa(start)}}
+			if err := c.get(ctx, "/rest/api/latest/dashboard/pull-requests?"+q.Encode(), &raw); err != nil {
+				return nil, err
+			}
+			for _, v := range raw.Values {
+				to := v.ToRef.Repository
+				if !strings.EqualFold(to.Project.Key, project) || !strings.EqualFold(to.Slug, repo) || seen[v.ID] {
+					continue
+				}
+				seen[v.ID] = true
+				a := Awaiting{Number: v.ID, Title: v.Title, Branch: v.FromRef.Name, Target: v.ToRef.Name,
+					Author: v.Author.User.Name, MyStatus: status}
+				if a.Author == "" {
+					a.Author = v.Author.User.Account
+				}
+				if len(v.Links.Self) > 0 && strings.HasPrefix(v.Links.Self[0].Href, "https://") {
+					a.Link = v.Links.Self[0].Href
+				}
+				if v.Updated > 0 {
+					a.Updated = time.UnixMilli(v.Updated)
+				}
+				out = append(out, a)
+			}
+			if raw.IsLastPage || raw.NextPageStart <= start {
+				break
+			}
+			start = raw.NextPageStart
+		}
+	}
+	return out, nil
+}
+
 // metricValue is a report figure as text: a percentage keeps its sign.
 func metricValue(raw json.RawMessage, kind string) string {
 	var s string

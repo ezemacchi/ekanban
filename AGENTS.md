@@ -78,16 +78,17 @@ There are two settings files, both optional:
 
 | File | Holds | Shared? |
 |---|---|---|
-| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agent a board starts (`[orchestrator] kind`, `args`), keys, the specifications clone, `[pipeline] fast_forward` | never |
-| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[orchestrator]` prompt, `[broadcast]` presets | the team decides |
+| `config.toml` in the plugin's config folder (`herdr plugin config-dir ekanban`) | personal choices: icons, the agents a board starts (`[orchestrator] kind`, `args`; `[questions] small`, `large`), keys, the specifications clone, `[pipeline] fast_forward` | never |
+| `.ekanban.toml` at the root of a repository | that project's process: tracker and pull request links, build server, target branches, `[run]` layout, the `[orchestrator]` prompt, `[broadcast]` presets, the `[questions]` messages | the team decides |
 
 `ekanban.exe config --init` writes a commented `config.toml` with every setting.
 `ekanban.exe config`, run inside a repository, prints which files are in force.
 
 The repository file is read over `config.toml` when a board opens in that
 repository or any of its worktrees. A value replaces the personal one; a list
-replaces the whole list. `[orchestrator] kind` and `args` are ignored there,
-because they choose a program to start, and so is `[pipeline] fast_forward`,
+replaces the whole list. `[orchestrator] kind` and `args`, and `[questions]
+small` and `large`, are ignored there, because they choose a program to start,
+and so is `[pipeline] fast_forward`,
 which moves the reader's own checkouts. `[lead]` is the old name of
 `[orchestrator]`; it still works, but write `[orchestrator]`.
 
@@ -113,8 +114,9 @@ e-mail of its account, kept in two environment variables that `email_env` and
 `token_env` name (`JIRA_EMAIL` and `JIRA_API_TOKEN` by default). The user
 creates and sets them; never ask for the value in chat, write it to a file, or
 print it. `[jira] url`, `email_env`, `token_env` and `handoff.command` are
-ignored in `.ekanban.toml`. If any other setting seems to need a token, stop
-and ask.
+ignored in `.ekanban.toml`. `[reviews] kind` and `command` are ignored there
+too: the kind decides where a token goes, and the command is a program to
+start. If any other setting seems to need a token, stop and ask.
 
 ### 5. Teams
 
@@ -186,18 +188,20 @@ Package map:
 
 | Package | Job |
 |---|---|
-| `cmd/ekanban` | entry points: board, tab, sidebar, open (the show action), ticket, watch, startup, config |
+| `cmd/ekanban` | entry points: board, tab, sidebar, open (the show action), ticket, watch, startup, config, questions (list or close a run's questions with no board and no agent) |
 | `internal/config` | `config.toml` and `.ekanban.toml` |
 | `internal/ui` | the plain board and the global board in a repository |
 | `internal/ticketui` | the ticket board |
 | `internal/screen` | what both boards draw alike: columns, cards, footer buttons, click zones, keys in messages |
 | `internal/keys` | actions, their default keys, and `[keys]` rebinding |
-| `internal/ticket` | reading a run folder: roles, agents, questions, `[run]` layout |
+| `internal/ticket` | reading a run folder: roles, agents, questions (for you and for others) and their briefs, `[run]` layout |
 | `internal/team` | team definitions |
 | `internal/pipeline` | delivery columns from git and the build server |
-| `internal/orchestrator` | going to, or starting, the agent that runs a ticket |
+| `internal/orchestrator` | going to, or starting, the agent that runs a ticket; Reply's message and Discuss, an agent on one question's brief (`[questions]`) |
 | `internal/jira` | read-only Jira client: ticket list, linked tests, comments, `[jira]` column mapping and handoff command |
+| `internal/stack` | stacked cards: related tickets drawn under a card. `Source` interface, `Register`, `[stack]`, the cursor, and the built-in `failed-tests` source. Off unless `[stack]` names a source; imports nothing from the boards, which reach it through `internal/ui/stack.go` only |
 | `internal/bitbucket` | read-only Bitbucket Server client: a pull request's merge checks, reviewers and Code Insights reports (SonarQube), and `Judge`, which says fit / waiting / blocked |
+| `internal/reviews` | the pull requests waiting on the user's review, whatever the code host: `Source` and `Request`, the `[reviews]` table, and the built-in kinds (`bitbucket`, `command`). The board depends on `Source` only; `cmd/ekanban` picks the kind |
 | `internal/herdr` | the Herdr socket API |
 | `internal/gh` | pull requests through the `gh` CLI |
 | `internal/store` | the board's own state file |

@@ -36,7 +36,7 @@ func (m *Model) SetProblems(problems []string) {
 	if m.status != "" {
 		problems = append([]string{m.status}, problems...)
 	}
-	m.status = strings.Join(problems, " · ")
+	m.status = strings.Join(uniq(problems), " · ")
 }
 
 // SetPipeline turns pipeline mode on with src as its source.
@@ -168,6 +168,10 @@ func (m *Model) applyPipeline(msg pipelineMsg) tea.Cmd {
 			m.board.SetPR(key, info.PR)
 			changed = true
 		}
+		if m.settlePlacement(key, info) {
+			changed = true
+			news = append(news, orKey(info.Key, key)+" → "+m.statusLabelOf(info.Stage))
+		}
 	}
 	if changed {
 		m.save()
@@ -195,9 +199,25 @@ func orKey(ticketKey, space string) string {
 }
 
 // pipelineStage is a space's column, and whether it belongs on the board.
+// With [stack] column set, a card whose stack says it is not finished goes
+// back to that column (stack.go).
 func (m *Model) pipelineStage(sp *space) (string, bool) {
+	stage, ok := m.computedStage(sp)
+	if ok && m.stk.On() {
+		if col := m.stackColumn(sp); col != "" {
+			return col, true
+		}
+	}
+	return stage, ok
+}
+
+// computedStage is a space's column before any stack moves it.
+func (m *Model) computedStage(sp *space) (string, bool) {
 	if k, ok := jiraCardKey(sp.Key); ok {
 		return m.jiraStage(k)
+	}
+	if id, ok := reviewCardKey(sp.Key); ok {
+		return m.reviewStage(id)
 	}
 	if e, ok := m.board.Entries[sp.Key]; ok && e.Accepted != nil {
 		return "", false
@@ -214,27 +234,139 @@ func (m *Model) pipelineStage(sp *space) (string, bool) {
 	if info.Key == "" {
 		return "", false
 	}
+	if p, ok := m.placed(sp.Key); ok {
+		return p.Stage, true
+	}
 	return info.Stage, true
 }
 
-// computedColumns is the answer to a key that would move a card by hand.
+// settlePlacement drops a card's placement by hand when the board has caught
+// up with it: at once when the computed column is the one chosen, or when a
+// different column is computed twice in a row. A single different read is
+// held back, since a git command that failed or a run file caught mid-write
+// also changes the column. It reports whether the placement was dropped.
+func (m *Model) settlePlacement(key string, info pipeline.Info) bool {
+	p := m.board.Entries[key].Placed
+	if p == nil || info.Key == "" {
+		delete(m.placeOff, key)
+		return false
+	}
+	if m.placeOff == nil {
+		m.placeOff = map[string]string{}
+	}
+	switch {
+	case info.Stage == p.Over:
+		delete(m.placeOff, key)
+		return false
+	case info.Stage != p.Stage && m.placeOff[key] != info.Stage:
+		m.placeOff[key] = info.Stage
+		return false
+	}
+	delete(m.placeOff, key)
+	m.board.Unplace(key)
+	return true
+}
+
+// placed is the column a card was moved to by hand. Only settlePlacement
+// drops it, so it holds through a read that disagrees once.
+func (m *Model) placed(key string) (store.Placed, bool) {
+	p := m.board.Entries[key].Placed
+	info, ok := m.pipeInfo[key]
+	if p == nil || !ok || info.Key == "" || !m.pipe.HandMoves() {
+		return store.Placed{}, false
+	}
+	return *p, true
+}
+
+// statusLabelOf is a column's label with its icon.
+func (m *Model) statusLabelOf(id string) string {
+	if st, ok := m.board.StatusByID(id); ok {
+		return m.statusLabel(st)
+	}
+	return m.columns.Label(id)
+}
+
+// whyNotPlace is why sp cannot be moved by hand, "" when it can.
+func (m *Model) whyNotPlace(sp *space) string {
+	if !m.pipe.HandMoves() {
+		return m.computedColumns()
+	}
+	if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
+		return "a ticket with no worktree follows its Jira status"
+	}
+	if _, review := reviewCardKey(sp.Key); review {
+		return "a pull request to review stays where review requests go"
+	}
+	if info, ok := m.pipeInfo[sp.Key]; !ok || info.Key == "" {
+		return "the board has not worked out this card's column yet"
+	}
+	return ""
+}
+
+// placeByHand puts a card in dest over its computed column. Moving it to the
+// computed column drops the placement. It reports whether the card moved.
+func (m *Model) placeByHand(sp *space, dest store.Status) bool {
+	if why := m.whyNotPlace(sp); why != "" {
+		m.status = why
+		return false
+	}
+	info := m.pipeInfo[sp.Key]
+	name := orKey(info.Key, sp.Key)
+	delete(m.placeOff, sp.Key)
+	if dest.ID == info.Stage {
+		m.board.Unplace(sp.Key)
+		m.status = name + " → " + m.statusLabel(dest)
+		return true
+	}
+	m.board.Place(sp.Key, dest.ID, info.Stage)
+	m.status = name + " → " + m.glyph(look.Hand, m.statusLabel(dest)) + m.press("follow-board", "to undo")
+	return true
+}
+
+// followBoard drops the selected card's placement by hand.
+func (m *Model) followBoard() {
+	sp := m.selected()
+	if sp == nil {
+		m.status = "no card selected"
+		return
+	}
+	if _, ok := m.placed(sp.Key); !ok {
+		m.status = "not moved by hand"
+		return
+	}
+	stage := m.pipeInfo[sp.Key].Stage
+	if st, ok := m.board.StatusByID(stage); ok && m.placeByHand(sp, st) {
+		m.save()
+		m.rebuild()
+		m.restoreColumnCursor(sp.Key)
+	}
+}
+
+// computedColumns is the answer to a key the computed board does not take.
 func (m *Model) computedColumns() string {
 	return "columns are computed from the run, " + m.pipe.CIName() + " and git"
 }
 
 // handlePipelineKey takes the keys whose meaning changes in pipeline mode:
-// everything that would set a column by hand is refused, a accepts, A opens
-// the archive, r also rereads the build server.
+// editing the statuses is refused, since the columns are the board's; the
+// picker, grab and 1-9 move a card by hand (see placeByHand) unless that is
+// turned off; a accepts, A opens the archive, r also rereads the build server.
 func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 	switch key {
-	case "s", "S":
+	case "S":
 		m.status = m.computedColumns()
 		return true, m, nil
-	case "h", "left", "l", "right":
-		if m.grabbed != "" {
-			m.status = m.computedColumns()
-			return true, m, nil
+	case "s":
+		if sp := m.selected(); sp != nil {
+			if why := m.whyNotPlace(sp); why != "" {
+				m.status = why
+				return true, m, nil
+			}
 		}
+		return false, m, nil // the picker, as on the plain board
+	case "follow-board":
+		m.followBoard()
+		return true, m, nil
 	case "a":
 		model, cmd := m.acceptSelected()
 		return true, model, cmd
@@ -246,6 +378,8 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, m.goOrchestrator()
 	case "handoff":
 		return true, m, m.startHandoff()
+	case "questions":
+		return true, m, m.openQuestions()
 	case "B":
 		return true, m, m.startBroadcast()
 	case "U":
@@ -261,11 +395,7 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 		return true, m, m.openPrototype()
 	case "r":
 		m.branchesAt = time.Time{}
-		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true))
-	}
-	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
-		m.status = m.computedColumns()
-		return true, m, nil
+		return true, m, tea.Batch(m.refresh(), m.loadBranches(), m.loadPipeline(true), m.loadJira(true), m.loadBitbucket(true), m.loadReviews(true))
 	}
 	return false, m, nil
 }
@@ -275,6 +405,9 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 func (m *Model) openPipelinePR(sp *space) tea.Cmd {
 	info := m.pipeInfo[sp.Key]
 	if info.PR == 0 {
+		if r, ok := m.reviewFor(sp); ok {
+			return m.openReview(r)
+		}
 		m.status = "no pull request for " + m.spaceName(sp) + " yet"
 		return nil
 	}
@@ -398,7 +531,8 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	info := m.pipeInfo[sp.Key]
-	if info.Stage != pipeline.ReadyQA {
+	// The column on screen, which may be one the card was moved to by hand.
+	if sp.StatusID != pipeline.ReadyQA {
 		m.status = "only tickets in " + m.columns.Label(pipeline.ReadyQA) + " can be accepted"
 		return m, nil
 	}

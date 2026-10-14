@@ -253,14 +253,42 @@ func (c *Client) SendToAgent(paneID, text string) error {
 	}, nil)
 }
 
-// SubmitToAgent types text into an agent's input and presses enter, so the
-// agent gets it as a message: what a broadcast does to each orchestrator.
+// SubmitToAgent gives an agent text as a message: what a broadcast does to
+// each orchestrator.
+//
+// It goes through agent.prompt rather than typing into the pane, because
+// agent.prompt is Herdr's own submission: it honours the pane's bracketed
+// paste, writes the text and its enter as one ordered submission, and refuses
+// an agent waiting at an approval or question dialog (agent_blocked) before
+// sending anything -- where a typed enter could answer that dialog for the
+// person. IsBlocked tells that refusal apart.
 func (c *Client) SubmitToAgent(paneID, text string) error {
-	return c.Request("pane.send_input", map[string]any{
-		"pane_id": paneID,
-		"text":    text,
-		"keys":    []string{"enter"},
+	return c.Request("agent.prompt", map[string]any{
+		"target": paneID,
+		"text":   text,
 	}, nil)
+}
+
+// IsBlocked is whether err is Herdr refusing to send because the agent is
+// waiting at a dialog for the person.
+func IsBlocked(err error) bool { return HasCode(err, "agent_blocked") }
+
+// ReadPane is the last lines of a pane's output, with its colours: what a
+// picker shows of an agent so you can tell which is which. It only reads.
+func (c *Client) ReadPane(paneID string, lines int) (string, error) {
+	var res struct {
+		Read struct {
+			Text string `json:"text"`
+		} `json:"read"`
+	}
+	err := c.Request("pane.read", map[string]any{
+		"pane_id":    paneID,
+		"source":     "recent",
+		"lines":      lines,
+		"format":     "ansi",
+		"strip_ansi": false,
+	}, &res)
+	return res.Read.Text, err
 }
 
 // FocusAgent brings an agent's pane to the foreground.

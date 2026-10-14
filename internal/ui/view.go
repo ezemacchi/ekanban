@@ -50,6 +50,19 @@ func (m *Model) viewFrame() string {
 		return m.viewHandoff(base)
 	}
 
+	if m.mode == modeChooser {
+		// The chooser sits over whatever it was opened from.
+		return m.viewChooser()
+	}
+
+	if m.mode == modeCloseReason {
+		m.mode = modeNormal
+		base := m.viewFrame()
+		m.mode = modeCloseReason
+		m.resetZones()
+		return m.viewCloseReason(base)
+	}
+
 	if m.mode == modeBroadcast {
 		// The broadcast sits over the board it was opened from.
 		m.mode = modeNormal
@@ -227,6 +240,16 @@ func (m *Model) viewFooter() string {
 	}
 
 	k := m.hintKey
+	pair := func(a, b string) string {
+		if k(a) == "" || k(b) == "" {
+			return ""
+		}
+		return k(a) + "/" + k(b)
+	}
+	if m.pipelineOn() && m.mode == modeStatusPick {
+		// The numbered columns are buttons too, for the mouse.
+		return " " + m.statusLegend() + "\n" + screen.Say(" "+pickerHelp+" · or click one", dimStyle, m.width-1)
+	}
 	if m.pipelineOn() {
 		hints := []hint{
 			{Key: k("filter"), Label: "Search"}, {Key: k("detail"), Label: "Detail"},
@@ -234,11 +257,36 @@ func (m *Model) viewFooter() string {
 			{Key: k("broadcast"), Label: "Broadcast"}, {Key: k("sync"), Label: "Update branches"},
 			{Key: k("refresh"), Label: "Refresh"},
 		}
+		// On a ticket with open questions, Q is there to read them: its hint
+		// comes in after Orchestrator, and only there (the questions scope).
+		if q := m.hintKey("questions"); q != "" {
+			label := "Questions"
+			if sp := m.selected(); sp != nil && len(m.forYouOf(sp.Key)) > 0 {
+				label = "Questions for you"
+			}
+			hints = append(hints[:3:3], append([]hint{{Key: q, Label: label}}, hints[3:]...)...)
+		}
+		if m.pipe.HandMoves() {
+			hints = append(hints[:2:2], append([]hint{{Key: k("status-picker"), Label: "Move"}}, hints[2:]...)...)
+		}
+		switch {
+		case m.grabbed != "" && m.layout == layoutKanban:
+			hints = []hint{{Key: pair("left", "right"), Label: "Move by hand"}, {Key: pair("down", "up"), Label: "Reorder"}, {Key: k("jump"), Label: "Drop"}}
+		case m.grabbed != "":
+			hints = []hint{{Key: pair("down", "up"), Label: "Move (across a column, by hand)"}, {Key: k("jump"), Label: "Drop"}}
+		}
 		state := m.spinner.Frame() + " reading " + m.pipe.CIName() + " and git"
 		if !m.pipeAt.IsZero() {
 			state = m.pipe.CIName() + " and git read at " + m.pipeAt.Local().Format("15:04")
+			if m.icons {
+				// The clock says when the build server and git were read.
+				state = m.glyph(look.Clock, m.pipeAt.Local().Format("15:04"))
+			}
 			if m.pipeLoading {
-				state = m.spinner.Frame() + " " + state + ", reading again"
+				state = m.spinner.Frame() + " " + state
+				if !m.icons {
+					state += ", reading again"
+				}
 			}
 		}
 		// What a fast-forward had to leave alone stays said until it is fixed.
@@ -261,12 +309,6 @@ func (m *Model) viewFooter() string {
 		return m.pickerBar(0, m.width) + "\n" + screen.Say(help, dimStyle, m.width-1)
 	}
 
-	pair := func(a, b string) string {
-		if k(a) == "" || k(b) == "" {
-			return ""
-		}
-		return k(a) + "/" + k(b)
-	}
 	var hints []hint
 	switch {
 	case m.grabbed != "" && m.layout == layoutKanban:
@@ -611,8 +653,8 @@ var helpLayout = []screen.HelpSection{
 	}},
 	{Title: "The selected card", Rows: [][]string{
 		{"jump"}, {"detail"}, {"menu"}, {"open-issue"}, {"prototype"}, {"open-pull-request"}, {"open-pr"},
-		{"orchestrator"}, {"yank"}, {"note"}, {"accept"}, {"handoff"}, {"status-picker"}, {"set-status"},
-		{"grab"}, {"rename"}, {"message"}, {"send-failure"}, {"forget"},
+		{"orchestrator"}, {"questions"}, {"reply"}, {"discuss"}, {"close"}, {"yank"}, {"note"}, {"accept"}, {"handoff"}, {"status-picker"}, {"set-status"},
+		{"grab"}, {"follow-board"}, {"rename"}, {"message"}, {"send-failure"}, {"forget"},
 	}},
 }
 
@@ -622,8 +664,13 @@ var helpLayout = []screen.HelpSection{
 var wideOnly = map[string]bool{"layout": true, "sort": true, "detail": true}
 
 // notComputed are actions the computed board refuses: its columns are not
-// set by hand, and its pull requests do not come from GitHub.
-var notComputed = map[string]bool{"status-picker": true, "set-status": true, "statuses": true, "open-pr": true, "send-failure": true}
+// edited, and its pull requests do not come from GitHub.
+var notComputed = map[string]bool{"statuses": true, "open-pr": true, "send-failure": true}
+
+// handMoves are the actions that move a card to another column by hand,
+// which the computed board refuses when [pipeline] manual_moves is off. Grab
+// stays: it still reorders a column.
+var handMoves = map[string]bool{"status-picker": true, "set-status": true, "follow-board": true}
 
 // helpGroups are the help's sections for the screen in front.
 func (m *Model) helpGroups() []screen.HelpGroup {
@@ -632,7 +679,7 @@ func (m *Model) helpGroups() []screen.HelpGroup {
 		km, _ = keys.New(m.defaultActions(), nil)
 	}
 	return screen.HelpFor(km, helpLayout, func(name string) bool {
-		return m.sidebar && wideOnly[name] || m.pipelineOn() && notComputed[name]
+		return m.sidebar && wideOnly[name] || m.pipelineOn() && (notComputed[name] || handMoves[name] && !m.pipe.HandMoves())
 	})
 }
 
@@ -643,10 +690,11 @@ func (m *Model) helpNotes() []string {
 		"a column's ▾ folds it · its name shows it alone · ✕ lifts a search or a filter",
 	}
 	if m.pipelineOn() {
-		return append([]string{
-			"columns come from the run, " + m.pipe.CIName() + " and git; they are not moved by hand",
-			"in the Archive" + screen.Plain(m.archiveKeysNote()),
-		}, notes...)
+		columns := "columns come from the run, " + m.pipe.CIName() + " and git; they are not moved by hand"
+		if m.pipe.HandMoves() {
+			columns = "columns come from the run, " + m.pipe.CIName() + " and git · a card moved by hand is marked until the board catches up"
+		}
+		return append([]string{columns, "in the Archive" + screen.Plain(m.archiveKeysNote())}, notes...)
 	}
 	return append([]string{"status is yours; the dim right column is Herdr's agent state"}, notes...)
 }

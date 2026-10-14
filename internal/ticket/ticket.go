@@ -262,8 +262,14 @@ type Run struct {
 
 	Objective   []string
 	CurrentStep []string
-	Questions   []string
-	Landed      bool
+	// Questions are the open questions for other people; ForYou those for
+	// the user (question.go).
+	Questions []Question
+	ForYou    []Question
+	// Closed are the questions already answered: the bullets of the closed
+	// sections, then the settled bullets left in the open ones.
+	Closed []string
+	Landed bool
 
 	// Orchestrator is the team's orchestrator definition; OrchestratorStatus and OrchestratorPane are its live
 	// agent, empty when none is open.
@@ -362,7 +368,9 @@ func Load(worktree string, opts Options, live Live) (*Run, error) {
 	r.Prototype = findPrototype(opts.SpecRoot, l.prototypeDir(r.Spec), r.Spec)
 	r.Objective = firstLines(r.section(l.objective), 3)
 	r.CurrentStep = firstLines(r.section(l.currentStep), 4)
-	r.Questions = r.openQuestions()
+	r.ForYou, r.Questions, r.Closed = r.questions()
+	r.readBriefs(r.ForYou)
+	r.readBriefs(r.Questions)
 	landed := strings.Join(r.section(l.landed), "\n")
 	// The landing check writes its report here whether it passed or not.
 	r.Landed = strings.TrimSpace(landed) != "" && !l.notLanded.MatchString(landed)
@@ -423,28 +431,48 @@ func (r *Run) section(re *regexp.Regexp) []string {
 	return nil
 }
 
-// openQuestions collects the bullets of every "open" section that are not
-// already marked settled. It is a hint for the person, not a verdict.
-func (r *Run) openQuestions() []string {
-	var out []string
+// questions collects the bullets of every open section that are not already
+// marked settled -- those of the sections for the user apart, as forYou --
+// and the closed ones: every bullet of a closed section, then the settled
+// bullets of the open ones. It is a hint for the person, not a verdict.
+func (r *Run) questions() (forYou, open []Question, closed []string) {
+	l := r.Layout()
 	headings := make([]string, 0, len(r.sections))
 	for h := range r.sections {
 		headings = append(headings, h)
 	}
 	sort.Strings(headings)
-	for _, h := range headings {
-		if !r.layout.questions.MatchString(h) || r.layout.notQuestion.MatchString(h) {
-			continue
-		}
-		for _, l := range r.sections[h] {
-			t := strings.TrimSpace(l)
-			if !strings.HasPrefix(t, "- ") || r.layout.settled.MatchString(t) {
-				continue
+	bullets := func(h string) []string {
+		var out []string
+		for _, line := range r.sections[h] {
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "- ") {
+				out = append(out, strings.TrimSpace(t[2:]))
 			}
-			out = append(out, strings.TrimSpace(t[2:]))
+		}
+		return out
+	}
+	var settled []string
+	for _, h := range headings {
+		isForYou := l.forYou != nil && l.forYou.MatchString(h)
+		switch {
+		case l.closed != nil && l.closed.MatchString(h):
+			closed = append(closed, bullets(h)...)
+		case isForYou || l.questions.MatchString(h) && !l.notQuestion.MatchString(h):
+			for _, b := range bullets(h) {
+				q := l.newQuestion(b, isForYou)
+				switch {
+				case l.settledLine(q):
+					settled = append(settled, b)
+				case isForYou:
+					forYou = append(forYou, q)
+				default:
+					open = append(open, q)
+				}
+			}
 		}
 	}
-	return out
+	return forYou, open, append(closed, settled...)
 }
 
 // agentsIn are the ticket's agents: those in its workspace, wherever their

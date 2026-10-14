@@ -103,6 +103,38 @@ func TestHostSubjects(t *testing.T) {
 	}
 }
 
+// A merge's subject names the branch merged in each host's own words, and a
+// longer branch that starts the same is not taken for it.
+func TestHostNamesBranch(t *testing.T) {
+	bb, _ := Host("bitbucket")
+	gh, _ := Host("github")
+	anyHost, _ := Host("")
+	bbSubject := "Merge pull request #7 in PROJ/repo from feat/ABC-1-x to main"
+	ghSubject := "Merge pull request #7 from someone/feat/ABC-1-x"
+	cases := []struct {
+		host    CodeHost
+		subject string
+		branch  string
+		want    bool
+	}{
+		{bb, bbSubject, "feat/ABC-1-x", true},
+		{bb, bbSubject, "feat/ABC-1", false},
+		{bb, ghSubject, "feat/ABC-1-x", false},
+		{gh, ghSubject, "feat/ABC-1-x", true},
+		{gh, ghSubject, "ABC-1-x", false},
+		{gh, ghSubject, "feat/ABC-1", false},
+		{gh, bbSubject, "feat/ABC-1-x", false},
+		{anyHost, bbSubject, "feat/ABC-1-x", true},
+		{anyHost, ghSubject, "feat/ABC-1-x", true},
+		{anyHost, ghSubject, "", false},
+	}
+	for _, c := range cases {
+		if got := c.host.NamesBranch(c.subject, c.branch); got != c.want {
+			t.Errorf("NamesBranch(%q, %q) = %v, want %v", c.subject, c.branch, got, c.want)
+		}
+	}
+}
+
 func TestTicketKey(t *testing.T) {
 	s := New(t.TempDir(), Settings{}, nil)
 	if got := s.keyIn("feature/abc-12-thing"); got != "ABC-12" {

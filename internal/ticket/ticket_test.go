@@ -112,8 +112,11 @@ func TestLoadPlacesRoles(t *testing.T) {
 	if r.Key != "ABC-1" || r.Team != "Full team" || r.Target != "master" {
 		t.Fatalf("header: %+v", r)
 	}
-	if len(r.Questions) != 1 || r.Questions[0] != "Which caption? (for the orchestrator)" {
-		t.Fatalf("questions: %q", r.Questions)
+	if len(r.Questions) != 1 || r.Questions[0].Line != "Which caption? (for the orchestrator)" {
+		t.Fatalf("questions: %+v", r.Questions)
+	}
+	if len(r.Closed) != 1 || r.Closed[0] != "Old one (decided: keep)" {
+		t.Fatalf("closed: %q", r.Closed)
 	}
 	if r.Landed {
 		t.Fatal("empty Landed section must not count")
@@ -214,5 +217,21 @@ func TestOwnsIsTrueOnlyForTheWorktreeOfARun(t *testing.T) {
 	bare := t.TempDir()
 	if Owns(bare, l) {
 		t.Fatal("a folder with no repository is nobody's")
+	}
+}
+
+// A closed section's bullets are closed questions, listed before the settled
+// bullets of the open ones; "Closed questions" is closed even though it says
+// "question".
+func TestClosedQuestions(t *testing.T) {
+	r := &Run{layout: DefaultLayout()}
+	r.parse("## Open decisions\n- Which caption?\n- Old one (answered: keep)\n\n## Decisions\n- Stays hidden? Closed by Ana (chat): yes.\n\n## Closed questions\n- Trigger? Closed by the lead (spec): the card.\n")
+	_, open, closed := r.questions()
+	if len(open) != 1 || open[0].Line != "Which caption?" {
+		t.Fatalf("open: %+v", open)
+	}
+	want := []string{"Trigger? Closed by the lead (spec): the card.", "Stays hidden? Closed by Ana (chat): yes.", "Old one (answered: keep)"}
+	if strings.Join(closed, "|") != strings.Join(want, "|") {
+		t.Fatalf("closed: %q, want %q", closed, want)
 	}
 }

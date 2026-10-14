@@ -45,6 +45,13 @@ type Handoff struct {
 	// Command is the program and its arguments, run without a shell.
 	// Placeholders: {key} {summary} {target} {team} {type} {repo}.
 	Command []string `toml:"command"`
+	// ReworkCommand is run instead of Command when a card with a worktree
+	// has a stack of failed tests (stacked cards): the fix is made on a new
+	// branch, with the tests and what QA said. Placeholders are the same,
+	// plus {tests} (the keys, comma-separated) and {evidence} (what QA wrote
+	// about them, one line each). Unset: H on such a card only says the
+	// ticket has a worktree.
+	ReworkCommand []string `toml:"rework_command"`
 	// Teams are the choices offered for {team}.
 	Teams []string `toml:"teams"`
 	// FixTypes are the issue types {type} calls "fix"; any other is "feat".
@@ -111,8 +118,17 @@ func (h Handoff) Type(issueType string) string {
 // Args is the command with the placeholders filled. Each value stays one
 // argument, whatever it contains, since no shell reads it.
 func (h Handoff) Args(values map[string]string) []string {
-	out := make([]string, len(h.Command))
-	for i, a := range h.Command {
+	return fill(h.Command, values)
+}
+
+// ReworkArgs is ReworkCommand with the placeholders filled.
+func (h Handoff) ReworkArgs(values map[string]string) []string {
+	return fill(h.ReworkCommand, values)
+}
+
+func fill(command []string, values map[string]string) []string {
+	out := make([]string, len(command))
+	for i, a := range command {
 		for k, v := range values {
 			a = strings.ReplaceAll(a, "{"+k+"}", v)
 		}

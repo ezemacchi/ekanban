@@ -43,6 +43,34 @@ type Entry struct {
 	// takes the space off the board and into the archive, and outlives the
 	// worktree so a past ticket can still be looked up.
 	Accepted *Accepted `json:"accepted,omitempty"`
+	// Placed is a column chosen by hand on the computed board. It holds only
+	// while the computed column is still the one it overrode.
+	Placed *Placed `json:"placed,omitempty"`
+}
+
+// Placed is a card moved by hand on the computed board: the column chosen,
+// and the computed column it was chosen over.
+type Placed struct {
+	Stage string    `json:"stage"`
+	Over  string    `json:"over"`
+	At    time.Time `json:"at"`
+}
+
+// Place records a column chosen by hand over the computed one; Unplace drops
+// it, so the card follows the computed column again.
+func (b *Board) Place(key, stage, over string) {
+	e := b.Entries[key]
+	e.Placed = &Placed{Stage: stage, Over: over, At: time.Now().UTC()}
+	b.Entries[key] = e
+}
+
+func (b *Board) Unplace(key string) {
+	e, ok := b.Entries[key]
+	if !ok || e.Placed == nil {
+		return
+	}
+	e.Placed = nil
+	b.Entries[key] = e
 }
 
 // Accepted is the archive record of one finished ticket.

@@ -110,6 +110,17 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 		lines = append(lines, field...)
 	}
 
+	// A card with a stack says where the cursor is in it, and where the keys
+	// lead, before anything else. On a strip, the strip's own detail is what
+	// the modal is about, so it replaces the card's.
+	if stackLines, onStrip := m.stackDetail(sp, width); len(stackLines) > 0 {
+		lines = append(lines, stackLines...)
+		if onStrip {
+			return lines
+		}
+		lines = append(lines, detailLine{})
+	}
+
 	// What the card is about comes first, as on the card.
 	if h := m.headline(sp); h != "" {
 		for _, l := range screen.Wrap(h, width) {
@@ -138,15 +149,16 @@ func (m *Model) detailBody(sp *space, width int) []detailLine {
 	field("ticket", append(byKind[kindTicket], m.jiraTests(key, value)...))
 	field("agent", byKind[kindAgent])
 	if m.pipelineOn() {
-		field("pull req", append(byKind[kindPR], m.bitbucketDetailLines(m.pipeInfo[sp.Key], value)...))
+		pr := append(byKind[kindPR], m.reviewDetailLines(sp, value)...)
+		field("pull req", append(pr, m.bitbucketDetailLines(m.pipeInfo[sp.Key], value)...))
 	} else if pr, ok := m.prFor(sp.Key); ok {
 		field("pull req", prDetailLines(pr, value))
 	}
 	field("info", byKind[""])
 	field("comment", m.jiraComment(key, value))
 
-	if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
-		return lines // a ticket with no folder, branch or workspace yet
+	if noWorktree(sp.Key) {
+		return lines // no folder, branch or workspace of yours
 	}
 	var where []string
 	for _, line := range screen.Wrap(m.glyph(look.Folder, abbreviate(sp.Key)), value) {
@@ -297,9 +309,7 @@ func (m *Model) modalTitle(sp *space, width int) string {
 	name := truncate(m.spaceLabel(sp), width-4-lipgloss.Width(right))
 	title := titleStyle.Render(name)
 	if m.icons {
-		edge := lipgloss.NewStyle().Foreground(look.PillColor)
-		fill := lipgloss.NewStyle().Background(look.PillColor).Foreground(lipgloss.Color("231")).Bold(true)
-		title = edge.Render(look.PillLeft) + fill.Render(" "+name+" ") + edge.Render(look.PillRight)
+		title = screen.Pill(name, look.PillColor, true)
 	}
 	return screen.JoinEnds(title, right, width)
 }

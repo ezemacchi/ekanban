@@ -6,6 +6,7 @@ package look
 import (
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -55,14 +56,52 @@ const (
 	Brush     = "\uf1fc" // prototype
 	Team      = "\uf0c0" // phase of the team
 	PullReq   = "\uf407"
+	Eye       = "\uf06e" // a review asked of you
 	Wifi      = "\uf1eb" // partial data, offline source
 	Archive   = "\uf187"
 	Pause     = "\uf04c" // workspace closed
+	Hand      = "\uf256" // moved by hand
 	Flask     = "\uf0c3" // linked test cases
 	Comment   = "\uf075"
 	PillLeft  = "\ue0b6" // rounded ends of a title pill
 	PillRight = "\ue0b4"
+	Cross     = "\uf00d" // failed
+	Chat      = "\uf086" // a chat to answer a question in
+	Story     = "\uf02e" // issue types
+	Bug       = "\uf188"
+	Task      = "\uf14a"
+	Epic      = "\uf0e7"
 )
+
+// IssueType is the glyph of a tracker's issue type, "" for one it does not
+// know.
+func IssueType(name string) string {
+	switch strings.ToLower(name) {
+	case "story", "user story":
+		return Story
+	case "bug", "defect":
+		return Bug
+	case "task", "sub-task", "subtask":
+		return Task
+	case "epic":
+		return Epic
+	}
+	return ""
+}
+
+// Build is the look of a build's result, as the build server words it:
+// SUCCESS, FAILURE, UNSTABLE or RUNNING. Any other has no glyph.
+func Build(result string) AgentLook {
+	switch result {
+	case "SUCCESS":
+		return AgentLook{Check, "green", lipgloss.NewStyle().Foreground(lipgloss.Color("78"))}
+	case "FAILURE", "UNSTABLE":
+		return AgentLook{Cross, strings.ToLower(result), lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)}
+	case "RUNNING":
+		return AgentLook{Clock, "running", lipgloss.NewStyle().Foreground(lipgloss.Color("214"))}
+	}
+	return AgentLook{Style: Dim}
+}
 
 // AgentLook is how a Herdr agent status is drawn.
 type AgentLook struct {

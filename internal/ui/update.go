@@ -9,6 +9,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
+	"github.com/ezemacchi/ekanban/internal/screen"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
@@ -31,19 +32,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spacesChanged(), m.loadPipeline(false))
 
 	case pipelineMsg:
-		return m, tea.Batch(m.applyPipeline(msg), m.loadJira(false), m.loadBitbucket(false), m.ensureDetail())
+		return m, tea.Batch(m.applyPipeline(msg), m.loadJira(false), m.loadBitbucket(false), m.loadReviews(false), m.ensureDetail())
 
 	case bitbucketMsg:
 		m.applyBitbucket(msg)
 		return m, nil
 
+	case reviewsMsg:
+		m.applyReviews(msg)
+		return m, nil
+
 	case jiraMsg:
 		m.applyJira(msg)
-		return m, m.ensureDetail()
+		return m, tea.Batch(m.ensureDetail(), m.loadStackDetails())
 
 	case jiraDetailMsg:
 		m.applyDetail(msg)
-		return m, nil
+		return m, m.loadStackDetails()
 
 	case yankMsg:
 		if msg.err != nil {
@@ -63,6 +68,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case broadcastMsg:
 		m.applyBroadcast(msg)
 		return m, nil
+
+	case pickRowsMsg:
+		return m, m.applyPickRows(msg)
+
+	case previewMsg:
+		m.applyPreview(msg)
+		return m, nil
+
+	case chooserTickMsg:
+		return m, m.onChooserTick()
+
+	case needAgentMsg:
+		return m, m.askWhichAgent(msg)
+
+	case closePlanMsg:
+		return m, m.applyClosePlan(msg)
+
+	case questionClosedMsg:
+		return m, m.applyQuestionClosed(msg)
 
 	case syncedMsg:
 		return m, m.applySynced(msg)
@@ -90,7 +114,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Herdr's events, but a dropped subscription loses whatever happened
 		// while it was down, and a workspace opened in that gap would stay
 		// off the board until it was restarted.
-		return m, tea.Batch(m.refresh(), m.loadPRs(), m.loadBranches(), m.loadPipeline(false), m.loadJira(false), m.loadBitbucket(false), tick())
+		return m, tea.Batch(m.refresh(), m.loadPRs(), m.loadBranches(), m.loadPipeline(false), m.loadJira(false), m.loadBitbucket(false), m.loadReviews(false), tick())
 
 	case prLoadedMsg:
 		return m, m.applyPRs(msg)
@@ -191,6 +215,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeBroadcast {
 		return m.clickBroadcast(msg.X, msg.Y)
+	}
+	if m.mode == modeChooser {
+		return m.clickChooser(msg.X, msg.Y)
+	}
+	if m.mode == modeCloseReason {
+		if z, ok := m.zoneAt(msg.X, msg.Y); ok && z.Kind == zoneButton {
+			return m.handleCloseKey(screen.KeyMsg(z.Key))
+		}
+		return m, nil
 	}
 	if m.mode == modeConfirm {
 		// Only its answers and its ✕ act: a stray click must not answer.
@@ -334,6 +367,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.answer(msg.String())
 	case modeBroadcast:
 		return m.handleBroadcastKey(msg)
+	case modeChooser:
+		return m.handleChooserKey(msg)
+	case modeCloseReason:
+		return m.handleCloseKey(msg)
 	case modeNote, modeRename, modeMessage, modeFilter, modeManageAdd, modeManageRename:
 		return m.handleInputKey(msg)
 	case modeHelp:
@@ -354,9 +391,13 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
 	// The key map turns a rebound key into the default key switched on below.
-	key := m.keyMap().Resolve(msg.String())
+	key := m.keyMap().Resolve(msg.String(), m.keyScopes()...)
 	if key == "" {
 		return m, nil
+	}
+	key, cmd, done := m.stackKey(key)
+	if done {
+		return m, cmd
 	}
 	if m.pipelineOn() {
 		if m.archiveView {
@@ -682,7 +723,13 @@ func (m *Model) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The modal's keys are the board's, rebindings included, so its buttons
 	// and the board's footer name the same keys.
-	switch key := m.keyMap().Resolve(msg.String()); key {
+	key := m.keyMap().Resolve(msg.String(), m.keyScopes()...)
+	// On a card with a stack the modal walks the stack first, then the board.
+	key, stackCmd, stacked := m.stackKey(key)
+	if stacked {
+		return m, stackCmd
+	}
+	switch key {
 	case "esc", "q", "d":
 		m.mode = modeNormal
 
@@ -696,7 +743,7 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "s":
-		if m.pipelineOn() {
+		if m.pipelineOn() && !m.pipe.HandMoves() {
 			m.status = m.computedColumns()
 			return m, nil
 		}
@@ -752,7 +799,7 @@ func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// close it and do what they do on the board.
 		if sp := m.selected(); sp != nil {
 			for _, a := range m.cardActions(sp) {
-				if k := m.hintKey(a.action); k != "" && m.keyMap().Resolve(k) == key {
+				if k := m.hintKey(a.action); k != "" && m.keyMap().Resolve(k, m.keyScopes()...) == key {
 					m.mode = modeNormal
 					return m.handleNormalKey(msg)
 				}
@@ -846,6 +893,13 @@ func (m *Model) applyStatus(st store.Status) (tea.Model, tea.Cmd) {
 	sp := m.selected()
 	if sp == nil {
 		return m, nil
+	}
+	if m.pipelineOn() {
+		if m.placeByHand(sp, st) {
+			m.save()
+			m.rebuild()
+		}
+		return m, m.syncTokens()
 	}
 	m.board.SetStatus(sp.Key, st.ID, sp.Label)
 	m.save()

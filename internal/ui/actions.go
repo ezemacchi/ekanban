@@ -31,7 +31,7 @@ var (
 		{Name: "status-picker", Keys: []string{"s"}, Help: "status picker", Short: "status picker"},
 		{Name: "note", Keys: []string{"n"}, Help: "edit note — who or what you are waiting on", Short: "edit note"},
 		{Name: "rename", Keys: []string{"R"}, Help: "rename the space — renames the Herdr workspace too", Short: "rename space"},
-		{Name: "message", Keys: []string{"m"}, Help: "type a message into that space's agent, then go there to send it", Short: "message agent"},
+		{Name: "message", Keys: []string{"m"}, Help: "type a message into the ticket's orchestrator (or the space's one agent), then go there to send it; not into one waiting at a prompt", Short: "message agent"},
 		{Name: "fold", Keys: []string{" ", "tab"}, Help: "fold or unfold the group, or the column on the kanban", Short: "fold"},
 		{Name: "menu", Keys: []string{"."}, Help: "everything you can do with the selected card, in a menu (its ⋯ button)", Short: "card menu"},
 		{Name: "attention", Keys: []string{"!"}, Help: "go to the next card that needs you", Short: "needs you"},
@@ -52,7 +52,11 @@ var (
 	// PipelineActions are the computed board's: a accepts instead of showing
 	// archived spaces, A opens the archive of accepted tickets, and o goes to
 	// a ticket's orchestrator, so sorting the table moves to ctrl+o.
-	PipelineActions = append(withKeys(commonActions, "sort", "ctrl+o"),
+	PipelineActions = append(withHelp(withHelp(withHelp(withKeys(commonActions, "sort", "ctrl+o"),
+		"grab", "grab a card, then move it to another column by hand: it is marked so until the board catches up"),
+		"set-status", "move to that column by hand, 1 being the first: marked so until the board catches up"),
+		"status-picker", "move the card to a column by hand: pick one, or click it; the board's own column is marked"),
+		keys.Action{Name: "follow-board", Keys: []string{"b"}, Canon: "follow-board", Help: "a card moved by hand: undo the move, back to the column the board computes", Short: "undo the move"},
 		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
 		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"},
@@ -63,7 +67,12 @@ var (
 		keys.Action{Name: "open-pull-request", Keys: []string{"P"}, Canon: "open-pull-request", Help: "open the selected ticket's pull request in the browser", Short: "pull request"},
 		keys.Action{Name: "broadcast", Keys: []string{"B"}, Help: "say one message to every open orchestrator, or the ones you tick: each gets it as a message of its own", Short: "broadcast"},
 		keys.Action{Name: "sync", Keys: []string{"U"}, Help: "bring the local target branches up to their remote now: only by fast-forward, never over changes or commits of their own", Short: "update branches"},
-		keys.Action{Name: "handoff", Keys: []string{"H"}, Canon: "handoff", Help: "a Jira ticket with no worktree: choose the target branch and team, then start the work (needs [jira])", Short: "hand off"})
+		keys.Action{Name: "handoff", Keys: []string{"H"}, Canon: "handoff", Help: "a Jira ticket with no worktree: choose the target branch and team, then start the work (needs [jira])", Short: "hand off"},
+		keys.Action{Name: "questions", Keys: []string{"Q"}, Canon: "questions", Scope: scopeQuestions, Help: "on a ticket with open questions: read the ticket's open questions, and open the chat a question carries (once you say yes)", Short: "questions"},
+		// On a question, in the questions reader (Q).
+		keys.Action{Name: "reply", Keys: []string{"r"}, Scope: scopeQuestion, Help: "in the questions reader: type into the orchestrator the opening of an answer naming the question's brief, unsent", Short: "reply"},
+		keys.Action{Name: "discuss", Keys: []string{"D"}, Scope: scopeQuestion, Help: "in the questions reader: discuss the question with an agent of its own, started from its brief", Short: "discuss"},
+		keys.Action{Name: "close", Keys: []string{"x"}, Scope: scopeQuestion, Help: "in the questions reader: close the question without an answer, it is no longer needed: the board closes it in the run once you say yes, no agent asked", Short: "close question"})
 
 	// ArchiveActions are the archive list's.
 	ArchiveActions = []keys.Action{
@@ -93,6 +102,17 @@ func withKeys(actions []keys.Action, name string, ks ...string) []keys.Action {
 	return out
 }
 
+// withHelp is a copy of actions with name's help replaced.
+func withHelp(actions []keys.Action, name, help string) []keys.Action {
+	out := append([]keys.Action(nil), actions...)
+	for i, a := range out {
+		if a.Name == name {
+			out[i].Help = help
+		}
+	}
+	return out
+}
+
 // keyMaps are the screens' maps with the user's bindings.
 type keyMaps struct {
 	board, pipeline, archive *keys.Map
@@ -100,13 +120,14 @@ type keyMaps struct {
 
 // SetKeys applies config.toml's [keys]; conflicts go to the status line.
 func (m *Model) SetKeys(bindings map[string][]string) {
+	m.bindings = bindings
 	var problems []string
 	add := func(actions []keys.Action) *keys.Map {
 		km, p := keys.New(actions, bindings)
 		problems = append(problems, p...)
 		return km
 	}
-	m.keys = keyMaps{board: add(BoardActions), pipeline: add(PipelineActions), archive: add(ArchiveActions)}
+	m.keys = keyMaps{board: add(BoardActions), pipeline: add(m.pipelineActions()), archive: add(ArchiveActions)}
 	for name, ks := range bindings {
 		for _, k := range ks {
 			if k == "g" {
@@ -130,13 +151,26 @@ func (m *Model) keyMap() *keys.Map {
 	return m.keys.board
 }
 
-// hintKey is the current key of an action on the screen in front.
+// hintKey is the key that does an action on the screen in front, where the
+// cursor is now; "" when nothing does, so its hint is left out.
 func (m *Model) hintKey(name string) string {
 	km := m.keyMap()
 	if km == nil {
 		km, _ = keys.New(m.defaultActions(), nil)
 	}
-	return km.Key(name)
+	return km.KeyIn(name, m.keyScopes()...)
+}
+
+// scopeQuestions is the scope of a selected ticket that has open questions:
+// Q reads them there, and its hint shows only there.
+const scopeQuestions = "questions"
+
+// keyScope is the scope in force: what the selected card has to act on.
+func (m *Model) keyScope() string {
+	if sp := m.selected(); sp != nil && len(m.questionsOf(sp.Key))+len(m.forYouOf(sp.Key)) > 0 {
+		return scopeQuestions
+	}
+	return ""
 }
 
 // pipelineKey is action's key on the computed board, whichever screen is in
@@ -188,7 +222,7 @@ func (m *Model) defaultActions() []keys.Action {
 	case m.pipelineOn() && m.archiveView:
 		return ArchiveActions
 	case m.pipelineOn():
-		return PipelineActions
+		return m.pipelineActions()
 	}
 	return BoardActions
 }

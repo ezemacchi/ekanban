@@ -24,8 +24,8 @@ func (m *Model) inScope(key string) bool {
 	if m.scope == "" {
 		return true
 	}
-	if _, ok := jiraCardKey(key); ok {
-		return true // a ticket, not a folder
+	if noWorktree(key) {
+		return true // a ticket or a pull request, not a folder
 	}
 	ans, ok := m.scopeOf[key]
 	// A "yes" is kept: a worktree does not move to another repository. A "no"

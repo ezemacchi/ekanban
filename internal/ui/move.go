@@ -30,7 +30,16 @@ func (m *Model) toggleGrab() {
 	}
 	m.grabbed = m.selected().Key
 	k := func(action string) string { return screen.Key(m.hintKey(action)) }
-	m.status = "moving — " + k("down") + "/" + k("up") + " to move, across a group to change status, " + k("jump") + " to drop"
+	across := "to change status"
+	if m.pipelineOn() {
+		across = "to move it by hand"
+	}
+	if m.layout == layoutKanban {
+		m.status = "moving — " + k("left") + "/" + k("right") + " to another column " + across + ", " +
+			k("down") + "/" + k("up") + " to reorder, " + k("jump") + " to drop"
+		return
+	}
+	m.status = "moving — " + k("down") + "/" + k("up") + " to move, across a group " + across + ", " + k("jump") + " to drop"
 }
 
 // moveGrabbed shifts the held space by one position along the axis that
@@ -114,8 +123,16 @@ func (m *Model) crossBoundary(sp *space, delta int, atTop bool) {
 		destGroup = append(destGroup, sp)
 	}
 
-	m.ensureEntry(sp)
-	m.board.SetStatus(sp.Key, dest.ID, sp.Label)
+	// On the computed board the column is the board's: a move is a placement
+	// by hand over it, and the plain board's status is left alone.
+	if m.pipelineOn() {
+		if !m.placeByHand(sp, dest) {
+			return
+		}
+	} else {
+		m.ensureEntry(sp)
+		m.board.SetStatus(sp.Key, dest.ID, sp.Label)
+	}
 	sp.StatusID = dest.ID
 
 	// A row must never disappear because it was moved into a folded group.
@@ -134,7 +151,9 @@ func (m *Model) crossBoundary(sp *space, delta int, atTop bool) {
 	m.applyOrder(destGroup)
 	m.save()
 	m.rebuild()
-	m.status = sp.Label + " → " + dest.Label
+	if !m.pipelineOn() {
+		m.status = sp.Label + " → " + dest.Label // placeByHand said it already
+	}
 }
 
 // applyOrder writes a group's arrangement back as 1-based ranks. Neighbours

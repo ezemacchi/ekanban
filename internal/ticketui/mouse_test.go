@@ -72,7 +72,7 @@ func tall() *Model {
 	}
 	m := boardWith(cols...)
 	for i := range 20 {
-		m.run.Questions = append(m.run.Questions, strings.Repeat("q", i+1))
+		m.run.Questions = append(m.run.Questions, ticket.NewQuestion(strings.Repeat("q", i+1)))
 	}
 	m.run.Key = "KEY-1"
 	m.width, m.height = 100, 20

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/keys"
+	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/nav"
 	"github.com/ezemacchi/ekanban/internal/orchestrator"
@@ -39,6 +41,10 @@ var (
 	errStyle    = look.Err
 	waitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	doneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108"))
+	// landedGround is the landed pill's: done, said loudly.
+	landedGround = lipgloss.Color("29")
+	// keyGround is the ticket key's pill in the header.
+	keyGround = look.PillColor
 )
 
 // Model is the bubbletea model for one ticket.
@@ -89,6 +95,28 @@ type Model struct {
 	folded map[string]bool
 	// helping is whether the help is open over the board.
 	helping bool
+	// asks are the links the open questions carry, as last drawn; menu is
+	// the choice among them, nil when closed; sure is the link the board asks
+	// whether to open, nil when it is not asking.
+	asks []links.Link
+	menu *screen.Menu
+	sure *links.Link
+
+	// The cursor goes on from the roles down to the questions: onQuestion is
+	// whether it is on one, q which (the open ones first, then the closed ones
+	// when unfolded). qButtons is whether the selected question was drawn
+	// with its buttons, a line under its text.
+	onQuestion bool
+	q          int
+	qButtons   bool
+	// closing is the question being closed without an answer, nil for none
+	// (close.go).
+	closing *closing
+	// questionsCfg is [questions]: what Reply types, which agents Discuss starts.
+	questionsCfg orchestrator.Questions
+	// questionProblems says how many questions something is wrong with, as
+	// last drawn; "" for none.
+	questionProblems string
 }
 
 // click selects the card under the pointer; a second click on it goes to its
@@ -100,6 +128,25 @@ func (m *Model) click(x, y int) tea.Cmd {
 		return nil
 	}
 	z, ok := m.zones.At(x, y)
+	if m.closing != nil {
+		if ok && z.Kind == screen.OnButton {
+			return m.closeKey(screen.KeyMsg(z.Key))
+		}
+		return nil
+	}
+	if m.sure != nil {
+		if ok && z.Kind == screen.OnButton {
+			return m.answer(z.Key)
+		}
+		return nil
+	}
+	if m.menu != nil {
+		m.menu = nil
+		if ok && z.Kind == screen.OnChoice {
+			return m.openAsk(z.Choice)
+		}
+		return nil
+	}
 	if !ok {
 		return nil
 	}
@@ -111,16 +158,33 @@ func (m *Model) click(x, y int) tea.Cmd {
 		switch {
 		case z.ID == "fold":
 			m.toggle(m.columnFold(z.Col))
+			m.clamp()
 		case strings.HasPrefix(z.ID, "section:"):
 			m.toggle(z.ID)
+			m.clamp()
+		case strings.HasPrefix(z.ID, "ask:"):
+			if i, err := strconv.Atoi(strings.TrimPrefix(z.ID, "ask:")); err == nil {
+				return m.openAsk(i)
+			}
+		case strings.HasPrefix(z.ID, "q:"):
+			// Like a card: a click selects the question, a second one asks
+			// to open its link.
+			if i, err := strconv.Atoi(strings.TrimPrefix(z.ID, "q:")); err == nil {
+				already := m.onQuestion && m.q == i
+				m.onQuestion, m.q = true, i
+				m.status = ""
+				if already {
+					return m.askSelected()
+				}
+			}
 		}
 	case screen.OnColumn:
 		if m.cardCount(z.Col) > 0 {
-			m.col, m.row = z.Col, 0
+			m.col, m.row, m.onQuestion = z.Col, 0, false
 		}
 	case screen.OnCard:
-		already := m.col == z.Col && m.row == z.Row
-		m.col, m.row = z.Col, z.Row
+		already := !m.onQuestion && m.col == z.Col && m.row == z.Row
+		m.col, m.row, m.onQuestion = z.Col, z.Row, false
 		m.status = ""
 		if already {
 			return m.focusSelected()
@@ -137,16 +201,22 @@ const activityKept = 5
 var Actions = []keys.Action{
 	{Name: "left", Keys: []string{"h", "left"}, Help: "previous column"},
 	{Name: "right", Keys: []string{"l", "right"}, Help: "next column"},
-	{Name: "down", Keys: []string{"j", "down"}, Help: "next role"},
-	{Name: "up", Keys: []string{"k", "up"}, Help: "previous role"},
-	{Name: "top", Keys: []string{"gg"}, Help: "first role", Fixed: true},
-	{Name: "bottom", Keys: []string{"G"}, Help: "last role"},
-	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab"},
+	{Name: "down", Keys: []string{"j", "down"}, Help: "next role; past the last, the questions"},
+	{Name: "up", Keys: []string{"k", "up"}, Help: "previous role or question"},
+	{Name: "top", Keys: []string{"gg"}, Help: "first role, or first question", Fixed: true},
+	{Name: "bottom", Keys: []string{"G"}, Help: "last role, or last question"},
+	{Name: "jump", Keys: []string{"enter"}, Help: "go to the role's tab; on a question, open its link once you say yes"},
+	{Name: "yank", Keys: []string{"y"}, Help: "copy the selected question's text"},
+	{Name: "reply", Keys: []string{"r"}, Scope: scopeQuestion, Help: "reply: type into the orchestrator the opening of an answer naming the question's brief, unsent; you add the answer and send it"},
+	{Name: "discuss", Keys: []string{"D"}, Scope: scopeQuestion, Help: "discuss the question with an agent of its own, started from its brief: a light model when the brief says needs: small"},
+	{Name: "close", Keys: []string{"x"}, Scope: scopeQuestion, Help: "close the question without an answer, it is no longer needed: the board closes it in the run once you say yes, no agent asked"},
 	{Name: "fold", Keys: []string{" ", "tab"}, Help: "fold or unfold the column"},
 	{Name: "orchestrator", Keys: []string{"o"}, Help: "go to the orchestrator (the agent running the team), or open one"},
 	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
+	{Name: "ask", Keys: []string{"a"}, Help: "open a link from the open questions, once you say yes: a chat with the question already written, say"},
+	{Name: "closed", Keys: []string{"c"}, Help: "show or hide the closed questions: who answered each, and how"},
 	{Name: "help", Keys: []string{"?"}, Help: "this help"},
 	{Name: "quit", Keys: []string{"q"}, Help: "quit"},
 }
@@ -155,30 +225,34 @@ var Actions = []keys.Action{
 // action's own help, above.
 var helpLayout = []screen.HelpSection{
 	{Title: "Move", Rows: [][]string{{"left", "right"}, {"down", "up"}, {"top", "bottom"}}},
-	{Title: "The selected role", Rows: [][]string{{"jump"}}},
-	{Title: "The run", Rows: [][]string{{"orchestrator"}, {"open-issue"}, {"prototype"}, {"fold"}, {"refresh"}, {"help"}, {"quit"}}},
+	{Title: "The selected role or question", Rows: [][]string{{"jump"}}},
+	{Title: "On a question", Rows: [][]string{{"reply"}, {"discuss"}, {"close"}, {"yank"}}},
+	{Title: "The run", Rows: [][]string{{"orchestrator"}, {"open-issue"}, {"prototype"}, {"ask"}, {"closed"}, {"fold"}, {"refresh"}, {"help"}, {"quit"}}},
 }
 
 // helpNotes explain the board rather than drive it.
 var helpNotes = []string{
-	"mouse: click selects · click again goes to the role's tab · every button does what its key does",
-	"a column's ▾ folds it, and so does a section's: Now, Activity, Open questions",
+	"mouse: click selects a role or a question · click again goes to the role's tab, or opens the question's link · every button does what its key does",
+	"a column's ▾ folds it, and so does a section's: Now, Activity, Open questions, Closed questions (folded at first)",
 }
 
 // Settings is what config.toml says about the ticket board.
 type Settings struct {
-	Options  ticket.Options      // where prototypes are, which teams exist
-	Columns  columns.Set         // nil: ticket.DefaultColumns
-	Keys     map[string][]string // [keys]: action name -> keys
-	Icons    bool                // Nerd Font glyphs
-	Problems []string            // configuration complaints, shown until the first key
+	Options   ticket.Options         // where prototypes are, which teams exist
+	Columns   columns.Set            // nil: ticket.DefaultColumns
+	Keys      map[string][]string    // [keys]: action name -> keys
+	Icons     bool                   // Nerd Font glyphs
+	Questions orchestrator.Questions // [questions]: Reply's message, Discuss's agents
+	Problems  []string               // configuration complaints, shown until the first key
 }
 
 // New builds the board for the run in worktree.
 func New(client *herdr.Client, worktree string, s Settings) *Model {
 	km, problems := keys.New(Actions, s.Keys)
 	return &Model{client: client, worktree: worktree, opts: s.Options, cols: s.Columns, keys: km, follow: true,
-		icons: look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(append(s.Problems, problems...), " · ")}
+		folded: map[string]bool{closedFold: true},
+		icons:  look.Icons{On: s.Icons}, spinner: look.NewSpinner(), status: strings.Join(append(s.Problems, problems...), " · "),
+		questionsCfg: s.Questions.WithDefaults()}
 }
 
 func (m *Model) keyMap() *keys.Map {
@@ -186,6 +260,27 @@ func (m *Model) keyMap() *keys.Map {
 		m.keys, _ = keys.New(Actions, nil)
 	}
 	return m.keys
+}
+
+// The scopes of the ticket board's actions: what the cursor is on.
+const (
+	scopeRole     = "role"
+	scopeQuestion = "question"
+)
+
+// keyScope is the scope in force: a question's actions while one is
+// selected, a role's otherwise.
+func (m *Model) keyScope() string {
+	if m.onQuestion {
+		return scopeQuestion
+	}
+	return scopeRole
+}
+
+// hintKey is the key that does name where the cursor is now, for a hint or a
+// button; "" when nothing does, so the hint is left out.
+func (m *Model) hintKey(name string) string {
+	return m.keyMap().KeyIn(name, m.keyScope())
 }
 
 func (m *Model) columns() columns.Set {
@@ -345,6 +440,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settledMsg:
 		m.settling = false
 		return m, m.reload()
+	case closedMsg:
+		if msg.err != nil {
+			m.status = "could not close it: " + msg.err.Error()
+			return m, nil
+		}
+		m.status = "closed without an answer: " + look.Truncate(msg.words, 60)
+		return m, m.reload()
 	case orchestratorMsg:
 		m.opening = false
 		if msg.err != nil {
@@ -356,6 +458,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case look.SpinMsg:
 		return m, m.spinner.Update(msg, m.run == nil && m.err == nil || m.isBusy())
 	case tea.KeyMsg:
+		if m.closing != nil {
+			return m, m.closeKey(msg)
+		}
 		return m, m.key(msg.String())
 	case tea.MouseMsg:
 		switch {
@@ -395,9 +500,24 @@ func (m *Model) key(k string) tea.Cmd {
 		m.helping = false // any key closes the help
 		return nil
 	}
+	if m.sure != nil {
+		return m.answer(k)
+	}
+	if m.menu != nil {
+		chosen, done := m.menu.Key(k)
+		if done {
+			m.menu = nil
+			if chosen >= 0 {
+				return m.openAsk(chosen)
+			}
+		}
+		return nil
+	}
 	if m.chord == "g" {
 		m.chord = ""
-		if k == "g" {
+		if k == "g" && m.onQuestion {
+			m.q = 0
+		} else if k == "g" {
 			m.row = 0
 		}
 		return nil
@@ -408,24 +528,38 @@ func (m *Model) key(k string) tea.Cmd {
 	if k == "ctrl+c" {
 		return tea.Quit
 	}
-	if k = m.keyMap().Resolve(k); k == "" {
+	if k = m.keyMap().Resolve(k, m.keyScope()); k == "" {
 		return nil
 	}
 	switch k {
 	case "q":
 		return tea.Quit
 	case "h", "left":
+		m.onQuestion = false
 		m.stepColumn(-1)
 	case "l", "right":
+		m.onQuestion = false
 		m.stepColumn(1)
 	case "j", "down":
-		m.row++
+		m.down()
 	case "k", "up":
-		m.row--
+		m.up()
 	case "g":
 		m.chord = "g"
 	case "G":
-		m.row = 1 << 30
+		if m.onQuestion {
+			m.q = 1 << 30
+		} else {
+			m.row = 1 << 30
+		}
+	case "y":
+		return m.yank()
+	case "reply":
+		return m.reply()
+	case "discuss":
+		return m.discuss()
+	case "close":
+		return m.startClose()
 	case "r":
 		return tea.Batch(m.working(refreshing), m.reload())
 	case "o":
@@ -448,11 +582,18 @@ func (m *Model) key(k string) tea.Cmd {
 		m.status = "opening the prototype"
 		return func() tea.Msg { _ = look.OpenURL(page); return nil }
 	case "enter":
+		if m.onQuestion {
+			return m.askSelected()
+		}
 		return m.focusSelected()
 	case " ":
 		m.toggle(m.columnFold(m.col))
 	case "?":
 		m.helping = true
+	case "a":
+		return m.ask()
+	case "c":
+		m.toggle(closedFold)
 	}
 	m.clamp()
 	return nil
@@ -498,6 +639,12 @@ func (m *Model) clamp() {
 	}
 	if m.row < 0 {
 		m.row = 0
+	}
+	// A refresh or a fold can take the questions away from under it.
+	if n := m.questionCount(); n == 0 {
+		m.onQuestion, m.q = false, 0
+	} else {
+		m.q = min(max(m.q, 0), n-1)
 	}
 }
 
@@ -569,7 +716,7 @@ func (m *Model) View() string {
 		width = 100
 	}
 	if m.err != nil && m.run == nil {
-		return errStyle.Render(" No run found in "+m.worktree+": "+m.err.Error()) + "\n" + screen.Say(" Looking for "+m.lookingFor()+keyHint(m.keyMap().Key("quit"), "quit"), dimStyle, width-1)
+		return errStyle.Render(" No run found in "+m.worktree+": "+m.err.Error()) + "\n" + screen.Say(" Looking for "+m.lookingFor()+keyHint(m.hintKey("quit"), "quit"), dimStyle, width-1)
 	}
 	if m.run == nil {
 		return dimStyle.Render(" " + m.spinner.Frame() + " loading")
@@ -582,7 +729,13 @@ func (m *Model) View() string {
 		team = "unknown team"
 	}
 	right := fmt.Sprintf("%s · %s · %s ", team, m.icons.With(look.Target, orDash(r.Target)), m.icons.With(look.Branch, orDash(r.Branch)))
-	header := screen.JoinEnds(" "+titleStyle.Render(r.Key), dimStyle.Render(right), width)
+	key := titleStyle.Render(r.Key)
+	if m.icons.On {
+		// The glyphs say what each is; the key heads the board in a pill.
+		right = fmt.Sprintf("%s  %s  %s ", m.icons.With(look.Team, team), m.icons.With(look.Target, orDash(r.Target)), m.icons.With(look.Branch, orDash(r.Branch)))
+		key = screen.Pill(r.Key, keyGround, true)
+	}
+	header := screen.JoinEnds(" "+key, dimStyle.Render(right), width)
 
 	lines := strings.Split(strings.TrimSuffix(m.body(width, headerLines), "\n"), "\n")
 	height := len(lines)
@@ -604,6 +757,15 @@ func (m *Model) View() string {
 	footer := m.footer(width, len(lines)-end)
 	m.zones.PlaceFooter(screen.LinesIn(b.String()))
 	b.WriteString(footer)
+	if m.closing != nil {
+		return m.closeView(b.String(), width, max(m.height, screen.LinesIn(b.String())+1))
+	}
+	if m.sure != nil {
+		return m.confirmView(b.String(), width, max(m.height, screen.LinesIn(b.String())+1))
+	}
+	if m.menu != nil {
+		return m.menu.Over(&m.zones, b.String(), width/3, max(m.height, 1)/3, width, max(m.height, screen.LinesIn(b.String())+1))
+	}
 	if m.helping {
 		groups := screen.HelpFor(m.keyMap(), helpLayout, nil)
 		return screen.HelpOver(b.String(), groups, helpNotes, width, max(m.height, screen.LinesIn(b.String())+1))
@@ -623,7 +785,29 @@ const (
 // card (with its column's header, for the first card) in view while
 // following. Zones are still unscrolled here.
 func (m *Model) scrollTo(total, height int) {
-	if m.follow {
+	if m.follow && m.onQuestion {
+		// The selected question's lines, and its buttons under them.
+		first, last, id := -1, -1, "q:"+strconv.Itoa(m.q)
+		for _, z := range m.zones {
+			if z.Kind == screen.OnControl && z.ID == id {
+				if first < 0 {
+					first = z.Y - headerLines
+				}
+				last = z.Y - headerLines
+			}
+		}
+		if m.qButtons {
+			last++
+		}
+		if first >= 0 {
+			if last >= m.scroll+height {
+				m.scroll = last - height + 1
+			}
+			if first < m.scroll {
+				m.scroll = first
+			}
+		}
+	} else if m.follow {
 		first, last := -1, -1
 		for _, z := range m.zones {
 			if z.Kind == screen.OnCard && z.Col == m.col && z.Row == m.row {
@@ -654,7 +838,7 @@ func (m *Model) body(width, top int) string {
 	r := m.run
 	ic := m.icons
 	text := width - 2
-	k := m.keyMap().Key
+	k := m.hintKey
 	var b strings.Builder
 	y := func() int { return top + screen.LinesIn(b.String()) }
 	line := func(s string) { b.WriteString(" " + s + "\n") }
@@ -666,14 +850,20 @@ func (m *Model) body(width, top int) string {
 			line(screen.Inline(w, lipgloss.NewStyle(), text))
 		}
 	}
-	links := []screen.Item{screen.Button(screen.Hint{Key: k("open-issue"), Label: ic.With(look.Jira, "Ticket "+r.Key+" ↗")})}
+	// With glyphs the key is in the header's pill and the brush says
+	// prototype, so the buttons need neither.
+	ticketLabel, protoLabel := "Ticket "+r.Key+" ↗", "Prototype "+orDash(r.Spec)+" ↗"
+	if ic.On {
+		ticketLabel, protoLabel = "Ticket ↗", orDash(r.Spec)+" ↗"
+	}
+	refs := []screen.Item{screen.Button(screen.Hint{Key: k("open-issue"), Label: ic.With(look.Jira, ticketLabel)})}
 	switch {
 	case r.Prototype != "":
-		links = append(links, screen.Button(screen.Hint{Key: k("prototype"), Label: ic.With(look.Brush, "Prototype "+orDash(r.Spec)+" ↗")}))
+		refs = append(refs, screen.Button(screen.Hint{Key: k("prototype"), Label: ic.With(look.Brush, protoLabel)}))
 	case r.Spec != "":
-		links = append(links, screen.Text(dimStyle.Render(ic.With(look.Brush, "no prototype for "+r.Spec))))
+		refs = append(refs, screen.Text(dimStyle.Render(ic.With(look.Brush, "no prototype for "+r.Spec))))
 	}
-	items(links, nil)
+	items(refs, nil)
 	b.WriteString("\n")
 
 	// Who runs the team, and the way to them.
@@ -688,7 +878,15 @@ func (m *Model) body(width, top int) string {
 			style = al.Style
 		}
 	}
-	orch := titleStyle.Render(ic.With(look.Sitemap, orDash(r.Orchestrator.Label))) + "  " + style.Render(state)
+	said := style.Render(state)
+	if al := look.Agent(r.OrchestratorStatus); ic.On && r.OrchestratorPane != "" && al.Glyph != "" {
+		// The glyph, in its colour, says what the word did.
+		said = al.Style.Render(al.Glyph)
+		if r.OrchestratorTitle != "" {
+			said += " " + dimStyle.Render(r.OrchestratorTitle)
+		}
+	}
+	orch := titleStyle.Render(ic.With(look.Sitemap, orDash(r.Orchestrator.Label))) + "  " + said
 	items([]screen.Item{screen.Text(orch)}, []screen.Item{screen.Button(screen.Hint{Key: k("orchestrator"), Label: button})})
 	b.WriteString("\n")
 
@@ -702,30 +900,46 @@ func (m *Model) body(width, top int) string {
 		}
 		col := m.columnAt(i)
 		for j, card := range m.cardsIn(col) {
-			cols[i].Cards = append(cols[i].Cards, m.roleCard(card, col, i == m.col && j == m.row))
+			cols[i].Cards = append(cols[i].Cards, m.roleCard(card, col, !m.onQuestion && i == m.col && j == m.row))
 		}
 	}
 	b.WriteString(screen.Draw(&m.zones, cols, widths, from, end, y(), screen.Tallest(cols)))
 
 	// What the run says it is doing and asking, each a section that folds.
-	section := func(title string, count int, lines []string) {
+	sectionIn := func(title string, count int, rows [][]screen.Item, style lipgloss.Style) {
 		id := "section:" + title
 		b.WriteString("\n")
-		items([]screen.Item{screen.Section(title, count, m.isFolded(id), id)}, nil)
+		items([]screen.Item{screen.SectionIn(title, count, m.isFolded(id), id, style)}, nil)
 		if m.isFolded(id) {
 			return
 		}
-		for _, l := range lines {
-			line("  " + l)
+		for _, row := range rows {
+			items(row, nil)
 		}
+	}
+	section := func(title string, count int, rows [][]screen.Item) { sectionIn(title, count, rows, look.Head) }
+	plain := func(lines []string) [][]screen.Item {
+		rows := make([][]screen.Item, len(lines))
+		for i, l := range lines {
+			rows[i] = []screen.Item{screen.Text("  " + l)}
+		}
+		return rows
 	}
 	inline := func(s string, style lipgloss.Style) string { return screen.Inline(s, style, text-2) }
 	if len(r.CurrentStep) > 0 {
+		// Each line wrapped, up to nowLines of it: what the run is doing is
+		// read in full, not cut at the edge.
 		var now []string
 		for _, l := range r.CurrentStep {
-			now = append(now, inline(l, lipgloss.NewStyle()))
+			wrapped := screen.Wrap(l, text-2)
+			if len(wrapped) > nowLines {
+				wrapped = append(wrapped[:nowLines-1:nowLines-1], look.Truncate(wrapped[nowLines-1]+"…", text-2))
+			}
+			for _, w := range wrapped {
+				now = append(now, inline(w, lipgloss.NewStyle()))
+			}
 		}
-		section("Now", -1, now)
+		section("Now", -1, plain(now))
 	}
 	if len(m.activity) > 0 {
 		var act []string
@@ -736,29 +950,111 @@ func (m *Model) body(width, top int) string {
 			}
 			act = append(act, style.Render(look.Truncate(l, text-2)))
 		}
-		section("Activity", len(m.activity), act)
+		section("Activity", len(m.activity), plain(act))
 	}
-	var qs []string
+	// A question's links -- a chat with the question already written, say --
+	// are buttons after it, its long URLs left out. The cursor reaches each
+	// question in the order drawn: those for you, the others', the closed.
+	more := func(n int) [][]screen.Item {
+		return plain([]string{dimStyle.Render(fmt.Sprintf("and %d more in %s", n-questionsShown, r.Layout().State))})
+	}
+	m.asks = m.asks[:0]
+	m.qButtons = false
+	forYou, others, _ := m.questionSpan()
+	if len(r.ForYou) > 0 {
+		var mine [][]screen.Item
+		for i, q := range r.ForYou {
+			if m.isFolded(forYouFold) {
+				break
+			}
+			if i == questionsShown {
+				mine = append(mine, more(len(r.ForYou))...)
+				break
+			}
+			mine = append(mine, m.questionRows(i, q, kindForYou, text)...)
+		}
+		sectionIn(forYouTitle, len(r.ForYou), mine, look.Attention)
+	}
+	// The others' questions, under who answers each when more than one does.
+	var qs [][]screen.Item
 	if len(r.Questions) == 0 {
-		qs = append(qs, dimStyle.Render("none in "+r.Layout().State))
+		qs = plain([]string{dimStyle.Render("none in " + r.Layout().State)})
 	}
-	for i, q := range r.Questions {
-		if i == questionsShown {
-			qs = append(qs, dimStyle.Render(fmt.Sprintf("and %d more in %s", len(r.Questions)-questionsShown, r.Layout().State)))
+	list := m.others()
+	people := map[string]bool{}
+	for _, q := range list {
+		people[q.To] = true
+	}
+	who := "-"
+	for i, q := range list {
+		if m.isFolded(openFold) {
 			break
 		}
-		qs = append(qs, "- "+screen.Inline(q, lipgloss.NewStyle(), text-4))
+		if i == questionsShown {
+			qs = append(qs, more(len(list))...)
+			break
+		}
+		if len(people) > 1 && q.To != who {
+			who = q.To
+			name := who
+			if name == "" {
+				name = "others"
+			}
+			qs = append(qs, plain([]string{dimStyle.Render(name)})...)
+		}
+		qs = append(qs, m.questionRows(forYou+i, q, kindOther, text)...)
 	}
-	section("Open questions", len(r.Questions), qs)
+	section(openTitle, len(r.Questions), qs)
+	// Closed questions say who answered and how; their links are left out,
+	// since the chat they open is over.
+	if len(r.Closed) > 0 {
+		var done [][]screen.Item
+		for i, c := range r.Closed {
+			if m.isFolded(closedFold) {
+				break
+			}
+			if i == questionsShown {
+				done = append(done, more(len(r.Closed))...)
+				break
+			}
+			words, _ := links.InText(c)
+			done = append(done, m.questionRows(forYou+others+i, ticket.Question{Line: c, Words: words}, kindClosed, text)...)
+		}
+		section(closedTitle, len(r.Closed), done)
+	}
+	if problems := r.Problems(); len(problems) > 0 {
+		n := fmt.Sprintf("%d questions have a problem", len(problems))
+		if len(problems) == 1 {
+			n = "1 question has a problem"
+		}
+		m.questionProblems = n
+	} else {
+		m.questionProblems = ""
+	}
 	if r.Landed {
 		b.WriteString("\n")
-		line(doneStyle.Render(ic.With(look.Rocket, "Landed: the pull request is ready for review")))
+		if ic.On {
+			line(screen.Pill(look.Rocket+" landed", landedGround, true) + " " + dimStyle.Render("the pull request is ready for review"))
+		} else {
+			line(doneStyle.Render("Landed: the pull request is ready for review"))
+		}
 	}
 	return b.String()
 }
 
-// questionsShown is how many open questions the board lists.
-const questionsShown = 8
+// questionsShown is how many open, or closed, questions the board lists;
+// nowLines how many lines each line of Now may wrap to.
+const (
+	questionsShown = 8
+	nowLines       = 3
+)
+
+// The closed questions' section starts folded: they are history, and the open
+// ones are what needs the person.
+const (
+	closedTitle = "Closed questions"
+	closedFold  = "section:" + closedTitle
+)
 
 // isFolded is whether a column ("col:<id>") or a section ("section:<title>")
 // is folded.
@@ -798,15 +1094,22 @@ func (m *Model) kanbanColumns() []screen.Column {
 const defaultColumnColor = "111"
 
 // roleCard is a role as a card. A finished role has nothing more to say than
-// that it finished, so it takes one line unless it is selected; a role
-// waiting on you, or stuck, asks for you.
+// that it finished, so it takes one line, selected or not; a role waiting on
+// you, or stuck, asks for you.
 func (m *Model) roleCard(card ticket.Card, col ticket.Column, selected bool) screen.Card {
 	ic := m.icons
 	c := screen.Card{
 		Title:     ic.With(card.Role.Icon, card.Role.Label),
 		Selected:  selected,
 		Attention: col == ticket.Waiting || card.Stuck,
-		Flat:      col == ticket.Done && !selected,
+		// Only a role with something to say gets a box: one finished or not
+		// started yet is a line, unless stuck. Selected, the line's marker
+		// shows the cursor.
+		Flat: (col == ticket.Done || col == ticket.Pending) && !card.Stuck,
+	}
+	if c.Flat && col == ticket.Pending {
+		c.Badge = dimStyle.Render("○")
+		return c
 	}
 	if c.Flat {
 		c.Badge = doneStyle.Render("✓")
@@ -822,7 +1125,7 @@ func (m *Model) roleCard(card ticket.Card, col ticket.Column, selected bool) scr
 			state += " · " + card.Title
 		}
 		c.Body = append(c.Body, al.Style.Render(ic.With(al.Glyph, state)))
-		c.Actions = []screen.Hint{{Key: m.keyMap().Key("jump"), Label: "Go to its tab"}}
+		c.Actions = []screen.Hint{{Key: m.hintKey("jump"), Label: "Go to its tab"}}
 	}
 	if card.Note != "" {
 		note, style := card.Note, dimStyle
@@ -839,11 +1142,17 @@ func (m *Model) roleCard(card ticket.Card, col ticket.Column, selected bool) scr
 // screen.
 func (m *Model) footer(width, below int) string {
 	state := "run read at " + m.loadedAt.Format("15:04")
+	if m.icons.On {
+		state = m.icons.With(look.Clock, m.loadedAt.Format("15:04"))
+	}
 	if m.scroll > 0 {
 		state += fmt.Sprintf(" · ↑ %d more", m.scroll)
 	}
 	if below > 0 {
 		state += fmt.Sprintf(" · ↓ %d more", below)
+	}
+	if m.questionProblems != "" {
+		state += " · " + m.questionProblems
 	}
 	if s := m.statusText(); s != "" {
 		state += " · " + s
@@ -852,12 +1161,22 @@ func (m *Model) footer(width, below int) string {
 	if m.err != nil {
 		first = errStyle.Render(" " + look.Truncate(m.err.Error(), width-2))
 	}
-	k := m.keyMap().Key
-	hints := []screen.Hint{
-		{Key: k("jump"), Label: "Go"}, {Key: k("orchestrator"), Label: "Orchestrator"},
-		{Key: k("open-issue"), Label: "Ticket"}, {Key: k("prototype"), Label: "Prototype"},
-		{Key: k("refresh"), Label: "Refresh"},
+	k := m.hintKey
+	jump := "Go"
+	if _, kind, ok := m.selectedQuestion(); ok {
+		jump = "Open" // the question's link
+		if kind == kindForYou {
+			jump = "Reply" // it has no chat
+		}
 	}
+	hints := []screen.Hint{
+		{Key: k("jump"), Label: jump}, {Key: k("orchestrator"), Label: "Orchestrator"},
+		{Key: k("open-issue"), Label: "Ticket"}, {Key: k("prototype"), Label: "Prototype"},
+	}
+	if len(m.asks) > 0 {
+		hints = append(hints, screen.Hint{Key: k("ask"), Label: "Ask"})
+	}
+	hints = append(hints, screen.Hint{Key: k("refresh"), Label: "Refresh"})
 	right := []screen.Item{screen.Button(screen.Hint{Key: k("help"), Label: "Help"}), screen.Button(screen.Hint{Key: k("quit"), Label: "Quit"})}
 	return screen.Footer(&m.zones, first, hints, right, width)
 }

@@ -20,6 +20,9 @@ import (
 	"github.com/ezemacchi/ekanban/internal/bitbucket"
 	"github.com/ezemacchi/ekanban/internal/columns"
 	"github.com/ezemacchi/ekanban/internal/jira"
+	"github.com/ezemacchi/ekanban/internal/orchestrator"
+	"github.com/ezemacchi/ekanban/internal/reviews"
+	"github.com/ezemacchi/ekanban/internal/stack"
 	"github.com/ezemacchi/ekanban/internal/team"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 )
@@ -62,8 +65,17 @@ type Config struct {
 	// Bitbucket is the server whose pull requests the board judges: whether
 	// each one may merge, SonarQube's quality gate included.
 	Bitbucket bitbucket.Config `toml:"bitbucket"`
+	// Reviews is where the pull requests waiting on the user's review come
+	// from, and where their cards go.
+	Reviews reviews.Config `toml:"reviews"`
 	// Broadcast is what the global board offers to say to every orchestrator.
 	Broadcast BroadcastConfig `toml:"broadcast"`
+	// Questions is how the boards answer a run's open questions: the message
+	// Reply types into the orchestrator, and the agents Discuss starts.
+	Questions orchestrator.Questions `toml:"questions"`
+	// Stack is stacked cards: related tickets drawn under a card. Off unless
+	// it names a source.
+	Stack stack.Config `toml:"stack"`
 }
 
 // BroadcastConfig is the [broadcast] table.
@@ -110,6 +122,10 @@ type PipelineConfig struct {
 	// each fetch, never over changes or commits of their own. It moves your
 	// checkouts, so it is read from config.toml only.
 	FastForward bool `toml:"fast_forward"`
+	// ManualMoves lets a card be moved by hand over its computed column, until
+	// that column changes. Unset means on; a team can turn it off in its
+	// repository file.
+	ManualMoves *bool `toml:"manual_moves"`
 }
 
 // CIConfig is the [pipeline.ci] table.
@@ -148,7 +164,10 @@ type Settings struct {
 	Layout        ticket.Layout                  // [run]
 	Jira          jira.Config                    // [jira], defaults filled
 	Bitbucket     bitbucket.Config               // [bitbucket], defaults filled
+	Reviews       reviews.Config                 // [reviews]
 	Broadcast     []string                       // [broadcast] presets, defaults filled
+	Questions     orchestrator.Questions         // [questions], defaults filled
+	Stack         stack.Config                   // [stack]; no sources means off
 	// Path is where config.toml was read from, whether or not it existed.
 	Path string
 	// RepoPath is the repository's .ekanban.toml read over it, "" for none.
@@ -201,28 +220,43 @@ func LoadFor(dir string) Settings {
 		// decoding over a slice rewrites its elements in place, which would
 		// rewrite the snapshot and let the repository file through.
 		orchestrator, account, server, ff := c.Orchestrator, c.Jira, c.Bitbucket, c.Pipeline.FastForward
+		reviewKind, reviewCommand := c.Reviews.Kind, slices.Clone(c.Reviews.Command)
+		small, large := c.Questions.Small, c.Questions.Large
+		small.Args, large.Args = slices.Clone(small.Args), slices.Clone(large.Args)
 		orchestrator.Args = slices.Clone(orchestrator.Args)
 		account.Handoff.Command = slices.Clone(account.Handoff.Command)
+		account.Handoff.ReworkCommand = slices.Clone(account.Handoff.ReworkCommand)
 		s.Problems = decodeOver(&c, s.RepoPath, s.Problems)
 		s.Problems = foldLead(&c, s.RepoPath, s.Problems)
 		if c.Orchestrator.Kind != orchestrator.Kind || !slices.Equal(c.Orchestrator.Args, orchestrator.Args) {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [orchestrator] kind and args are only read from config.toml — ignored", s.RepoPath))
 			c.Orchestrator.Kind, c.Orchestrator.Args = orchestrator.Kind, orchestrator.Args
 		}
-		if c.Jira.URL != account.URL || c.Jira.EmailEnv != account.EmailEnv || c.Jira.TokenEnv != account.TokenEnv || !slices.Equal(c.Jira.Handoff.Command, account.Handoff.Command) {
-			s.Problems = append(s.Problems, fmt.Sprintf("%s: [jira] url, email_env, token_env and handoff.command are only read from config.toml — ignored", s.RepoPath))
+		if c.Jira.URL != account.URL || c.Jira.EmailEnv != account.EmailEnv || c.Jira.TokenEnv != account.TokenEnv || !slices.Equal(c.Jira.Handoff.Command, account.Handoff.Command) || !slices.Equal(c.Jira.Handoff.ReworkCommand, account.Handoff.ReworkCommand) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [jira] url, email_env, token_env and handoff.command and rework_command are only read from config.toml — ignored", s.RepoPath))
 			c.Jira.URL, c.Jira.EmailEnv, c.Jira.TokenEnv = account.URL, account.EmailEnv, account.TokenEnv
-			c.Jira.Handoff.Command = account.Handoff.Command
+			c.Jira.Handoff.Command, c.Jira.Handoff.ReworkCommand = account.Handoff.Command, account.Handoff.ReworkCommand
 		}
 		// It moves the reader's own checkouts, so it is theirs to turn on.
 		if c.Pipeline.FastForward != ff {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [pipeline] fast_forward is only read from config.toml — ignored", s.RepoPath))
 			c.Pipeline.FastForward = ff
 		}
+		// They choose programs to start, like [orchestrator] kind and args.
+		if !sameAgent(c.Questions.Small, small) || !sameAgent(c.Questions.Large, large) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [questions] small and large are only read from config.toml — ignored", s.RepoPath))
+			c.Questions.Small, c.Questions.Large = small, large
+		}
 		// The token goes to this address, so a repository cannot pick it.
 		if c.Bitbucket != server {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [bitbucket] url and token_env are only read from config.toml — ignored", s.RepoPath))
 			c.Bitbucket = server
+		}
+		// The kind chooses where a token goes, and the command a program to
+		// start.
+		if c.Reviews.Kind != reviewKind || !slices.Equal(c.Reviews.Command, reviewCommand) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [reviews] kind and command are only read from config.toml — ignored", s.RepoPath))
+			c.Reviews.Kind, c.Reviews.Command = reviewKind, reviewCommand
 		}
 	}
 	return resolve(c, s)
@@ -304,6 +338,9 @@ func resolve(c Config, s Settings) Settings {
 	}
 	s.Jira = c.Jira.WithDefaults()
 	s.Bitbucket = c.Bitbucket.WithDefaults()
+	s.Reviews = c.Reviews
+	s.Questions = c.Questions.WithDefaults()
+	s.Stack = c.Stack
 	s.Broadcast = c.Broadcast.Presets
 	if len(s.Broadcast) == 0 {
 		s.Broadcast = DefaultPresets
@@ -444,6 +481,12 @@ icons = false
 # alone and the board says so. U does it at once. Read from this file only.
 # fast_forward = true
 
+# Let a card be moved by hand to another column. It is marked as moved by
+# hand, says where the board would put it, and follows the board again once
+# the board agrees or computes another column twice in a row. false keeps
+# every card where it is computed.
+# manual_moves = true
+
 # Branches pull requests merge into, most downstream first. publish is the
 # build server job that deploys the branch; env is how the card names it.
 # [[pipeline.target]]
@@ -496,6 +539,9 @@ icons = false
 # questions = '(?i)open|pending|blocker|question'
 # not_question = '(?i)defect'
 # settled = '(?i)\b(decided|ruled|answered|settled|deferred|closed)\b|defects: none|^-\s*none\b'
+# closed = '(?i)^(decisions?|closed)\b'   # sections of answered questions
+# for_you = '(?i)\bfor (you|me)\b'       # sections of questions for you, not another person
+# asked = '^[^:(]*\(([^)]+)\)'          # who answers a question: "Product (Ana): ..." -> Ana
 # A story code in the run's files, and the folder under spec_clone holding its
 # HTML prototypes ({1}, {2}... are the code's groups). Off unless set.
 # spec_code = '(?i)\b(E\d+)[_-](US|TS)[_-](\d+)'
@@ -528,6 +574,9 @@ icons = false
 # command = ["pwsh", "-NoProfile", "-File", "handoff.ps1", "-Key", "{key}", "-Summary", "{summary}", "-Target", "{target}", "-Team", "{team}", "-Type", "{type}"]
 # teams = ["standalone", "small-team", "full-team"]
 # fix_types = ["Bug", "Defect", "Defect Candidate"]
+# With [stack] on, H on a card with a worktree and failed tests runs this, with
+# the same placeholders plus {tests} (keys, comma-separated) and {evidence}.
+# rework_command = ["pwsh", "-NoProfile", "-File", "handoff.ps1", "-Key", "{key}", "-Rework", "-Tests", "{tests}", "-QaComment", "{evidence}", "-Target", "{target}", "-Team", "{team}"]
 
 # Bitbucket, read only: Jenkins turning green does not mean a pull request may
 # merge, because Bitbucket also holds the reports other tools post on the
@@ -536,6 +585,24 @@ icons = false
 # merge, or what is in the way. The project and repository are taken from
 # pipeline.pr_url. The token is read from an environment variable, never from
 # a file, and is sent only to url; both are read from this file only.
+
+# Review requests, read only: the open pull requests waiting on your review.
+# A card whose ticket has one says so and asks for you; one with no card gets
+# a card of its own in column (on_review unless set; "" only marks the cards
+# already there). kind picks where they come from: "bitbucket" uses
+# [bitbucket] and the repository in pipeline.pr_url; "command" runs command
+# without a shell, in the repository, and reads a JSON array of objects with
+# id, title, branch, target, author, status, url and updated (only id is
+# required). kind and command are read from this file only.
+# [reviews]
+# kind = "bitbucket"
+# column = "on_review"
+# GitHub, through the gh CLI:
+# kind = "command"
+# command = ["gh", "pr", "list", "--search", "review-requested:@me", "--json", "number,title,headRefName,baseRefName,author,url,updatedAt", "--jq", "[.[] | {id: .number, title, branch: .headRefName, target: .baseRefName, author: .author.login, url, updated: .updatedAt}]"]
+# GitLab, through the glab CLI and jq:
+# command = ["pwsh", "-NoProfile", "-Command", "glab mr list --reviewer=@me -F json | jq '[.[] | {id: .iid, title, branch: .source_branch, target: .target_branch, author: .author.username, url: .web_url, updated: .updated_at}]'"]
+
 # The global board's broadcast (B) says one message to every orchestrator
 # open, each getting it as a message of its own. presets are ready-made ones;
 # {target} is each ticket's target branch and {key} its key. A repository's
@@ -546,14 +613,51 @@ icons = false
 #   "Stop where you are and tell me in two lines what is done and what is left.",
 # ]
 
+# A run's open questions. r on a question (Reply) types reply, or reply_you
+# for a question for you, into the ticket's orchestrator, unsent: {to} is who
+# answers it, {brief} its brief's path from the worktree, {question} its words.
+# D on a question with a brief (Discuss) opens a tab, starts small or large by
+# the brief's needs, and tells it to read discuss ({brief} is the brief's full
+# path, the rest as in [orchestrator] prompt). small and large are read from
+# this file only; the messages can also go in a repository's .ekanban.toml.
+# [questions]
+# reply = "Answer from {to} to the open question {brief}: "
+# reply_you = "My answer to the open question {brief}: "
+# discuss = "Read {brief} in full. It is the context of one open question on {key}. Follow its ## Kickoff."
+# tab = "question"
+# small = { kind = "cursor", args = ["--model", "some-small-model"] }
+# large = { kind = "cursor", args = ["--model", "some-large-model"] }
+
 # [bitbucket]
 # url = "https://bitbucket.example.com"
 # token_env = "BITBUCKET_TOKEN"   # a personal access token that can read the repository
+
+# Stacked cards: related tickets drawn as strips under a card. j/k and the
+# arrow keys walk through them before leaving the card, a click selects one,
+# and the detail shows the same stack. Off until sources names one; a source
+# is where a stack comes from. Known: failed-tests.
+# [stack]
+# sources = ["failed-tests"]
+# max_items = 8       # strips a card draws; the rest show as "+N more"
+# collapse = true     # a card that is not selected shows "+N failed" instead of its strips
+# column = "todo"     # a card with a stack moves to this column; "" leaves it where it is
+# failed-tests: the tests linked to the card's ticket that QA failed or blocked.
+# from = "comment" reads QA's comments (a test named by its key, or by the
+# code in its summary, on a line that says failed or blocked; a later line that
+# says passed takes it off); from = "linked" takes every linked test, for teams
+# that only link a test once it failed. The words are regular expressions.
+# [stack.source.failed-tests]
+# from = "comment"
+# failed = '(?i)\bfail(ed|s|ing|ure)?\b'
+# blocked = '(?i)\bblock(ed|s|ing)?\b'
+# passed = '(?i)\bpass(ed|es)?\b'
 
 # Keys, by action name: one key or a list. A rebound action stops answering
 # its old key, and an empty list turns it off. The help screen (?) shows the
 # current keys and the names are listed by ` + "`ekanban keys`" + `. gg, gp,
 # gf and 1-9 are fixed. [keys.board] and [keys.ticket] apply to one board only.
+# Some actions belong to what is selected (a question, say): bound by name like
+# the rest, their keys win there over the board's, and only there.
 # [keys]
 # accept = "Z"
 # archive = ["A", "z"]
@@ -584,3 +688,5 @@ func WriteExample() (string, error) {
 	_, err = f.WriteString(Example)
 	return path, err
 }
+
+func sameAgent(a, b orchestrator.Agent) bool { return a.Kind == b.Kind && slices.Equal(a.Args, b.Args) }

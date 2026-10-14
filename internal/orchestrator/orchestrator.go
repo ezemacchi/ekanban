@@ -83,6 +83,19 @@ func freeName(run *ticket.Run, agents []herdr.Agent) string {
 	}
 }
 
+// freeAgentName is base, or base numbered: agent names are unique in Herdr.
+func freeAgentName(base string, agents []herdr.Agent) string {
+	taken := map[string]bool{}
+	for _, a := range agents {
+		taken[strings.ToLower(a.Name)] = true
+	}
+	name := base
+	for i := 2; taken[name]; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	return name
+}
+
 // Expand fills a prompt's placeholders from run.
 func Expand(prompt string, run *ticket.Run) string {
 	return strings.NewReplacer(

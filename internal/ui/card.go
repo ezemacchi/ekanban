@@ -31,6 +31,15 @@ type fact struct {
 	attention bool
 	url       string // what a click on it opens in the detail
 	kind      string // which field of the detail it belongs to
+	// short is the fact on a card when glyphs are on, already styled: the
+	// glyph says what text spells out ("Jira:", "Jenkins green"). Empty, the
+	// card says text.
+	short string
+}
+
+// said is a short form: glyph and text in style.
+func said(glyph, text string, style lipgloss.Style) string {
+	return style.Render(glyph + " " + text)
 }
 
 // Fact weights.
@@ -54,15 +63,88 @@ func (m *Model) line(f fact, width int) string {
 	return screen.Say(m.glyph(f.glyph, f.text), f.style, width)
 }
 
+// cardLine draws the fact on a card: its short form when glyphs are on.
+func (m *Model) cardLine(f fact, width int) string {
+	if m.icons && f.short != "" {
+		return screen.TruncateStyled(f.short, width)
+	}
+	return m.line(f, width)
+}
+
+// badge is the fact as its glyph alone, in its colour; "" without glyphs.
+func (m *Model) badge(f fact) string {
+	if !m.icons || f.glyph == "" {
+		return ""
+	}
+	return f.style.Render(f.glyph)
+}
+
+// statusLine is what a card at rest says about its work on one line: its
+// heaviest fact, then the others as badges at the right, so every state shows
+// at a glance and selecting the card spells them out. Badges give way, the
+// lightest first, before the heaviest fact is cut below minFactWidth.
+func (m *Model) statusLine(facts []fact, width int) string {
+	if len(facts) == 0 {
+		return ""
+	}
+	top := 0
+	for i, f := range facts {
+		if f.weight > facts[top].weight {
+			top = i
+		}
+	}
+	type mark struct {
+		text   string
+		weight int
+	}
+	var marks []mark
+	seen := map[string]bool{}
+	for i, f := range facts {
+		if b := m.badge(f); i != top && b != "" && !seen[b] {
+			seen[b] = true
+			marks = append(marks, mark{b, f.weight})
+		}
+	}
+	room := func() int { return width - 2*len(marks) }
+	for len(marks) > 0 && room() < minFactWidth {
+		light := 0
+		for i, k := range marks {
+			if k.weight < marks[light].weight {
+				light = i
+			}
+		}
+		marks = append(marks[:light], marks[light+1:]...)
+	}
+	if len(marks) == 0 {
+		return m.cardLine(facts[top], width)
+	}
+	right := make([]string, len(marks))
+	for i, k := range marks {
+		right[i] = k.text
+	}
+	badges := strings.Join(right, " ")
+	left := m.cardLine(facts[top], width-lipgloss.Width(badges)-1)
+	return screen.JoinEnds(left, badges, width)
+}
+
+// minFactWidth is the least a card's heaviest fact keeps before its badges.
+const minFactWidth = 12
+
 // facts is what the board knows about a card's work, in reading order.
 func (m *Model) facts(sp *space) []fact {
 	if !m.pipelineOn() {
 		return m.spaceFacts(sp)
 	}
+	if _, ok := reviewCardKey(sp.Key); ok {
+		return m.reviewFacts(sp)
+	}
 	if k, ok := jiraCardKey(sp.Key); ok {
 		var out []fact
 		if f, ok := m.jiraFact(k); ok {
 			out = append(out, f)
+		}
+		if r, ok := m.reviewFor(sp); ok {
+			out = append(out, m.reviewFact(r))
 		}
 		text := "no worktree" + strings.TrimRight(pressWith(m.hintKey("handoff"), "to start it"), " ")
 		return append(out, fact{glyph: look.Pause, text: text, style: dimStyle, weight: weightState, kind: kindTicket})
@@ -75,6 +157,21 @@ func (m *Model) facts(sp *space) []fact {
 	if f, ok := m.jiraFact(info.Key); ok {
 		out = append(out, f)
 	}
+	if r, ok := m.reviewFor(sp); ok {
+		out = append(out, m.reviewFact(r))
+	}
+	if f, ok := m.forYouFact(sp.Key); ok {
+		out = append(out, f)
+	}
+	if f, ok := m.questionsFact(sp.Key); ok {
+		out = append(out, f)
+	}
+	if _, ok := m.placed(sp.Key); ok {
+		// Where the board would put it; the badge already says it was moved.
+		board := m.statusLabelOf(info.Stage)
+		out = append(out, fact{glyph: look.Hand, text: "board: " + board, style: dimStyle, weight: weightState,
+			short: said(look.Hand, board, dimStyle)})
+	}
 	if !sp.Live {
 		// No workspace, so no agents: waiting and lost do not apply.
 		info.Waiting, info.Lost = false, false
@@ -86,11 +183,15 @@ func (m *Model) facts(sp *space) []fact {
 	}
 	if a, ok := ticket.Loudest(info.Agents); ok && sp.Live {
 		al := look.Agent(a.Status)
-		text := a.Who + " " + al.Word
+		text, short := a.Who+" "+al.Word, a.Who
 		if a.Title != "" {
 			text += " · " + a.Title
+			short += " · " + a.Title
 		}
 		f := fact{glyph: al.Glyph, text: text, style: al.Style, weight: weightAgent, kind: kindAgent}
+		if al.Glyph != "" {
+			f.short = said(al.Glyph, short, al.Style)
+		}
 		switch a.Status {
 		case "blocked":
 			f.weight, f.attention = weightYou, true
@@ -106,7 +207,7 @@ func (m *Model) facts(sp *space) []fact {
 	if info.Lost {
 		out = append(out, fact{glyph: look.Warning, text: "agents were lost", style: look.Attention, weight: weightYou, attention: true, kind: kindAgent})
 	}
-	if info.Phase != "" && info.Stage == pipeline.InProgress {
+	if info.Phase != "" && sp.StatusID == pipeline.InProgress {
 		out = append(out, fact{glyph: look.Team, text: info.Phase, style: dimStyle, weight: weightContext, kind: kindAgent})
 	}
 	if info.PR > 0 {
@@ -116,14 +217,45 @@ func (m *Model) facts(sp *space) []fact {
 			out = append(out, f)
 		}
 	}
+	if info.Diverged {
+		out = append(out, fact{glyph: look.Warning, text: divergedText, style: dimStyle, weight: weightContext, kind: kindPR})
+	}
 	if info.Deployed != "" {
-		out = append(out, fact{glyph: look.Rocket, text: "shipped to " + info.Deployed, style: prPassStyle, weight: weightContext, kind: kindPR})
+		out = append(out, fact{glyph: look.Rocket, text: "shipped to " + info.Deployed, style: prPassStyle, weight: weightContext, kind: kindPR,
+			short: said(look.Rocket, info.Deployed, prPassStyle)})
 	}
 	if info.Unknown != "" {
 		out = append(out, fact{glyph: look.Wifi, text: info.Unknown, style: dimStyle, weight: weightAside})
 	}
 	return out
 }
+
+func (m *Model) isPlaced(key string) bool {
+	_, ok := m.placed(key)
+	return ok
+}
+
+// handBadge marks a card moved by hand in its border: the Nerd Font hand, or
+// one that any font draws.
+func handBadge(icons bool) string {
+	if icons {
+		return look.Hand
+	}
+	return "✋"
+}
+
+// placedText says, for the copied context, that a card was moved by hand and
+// where the board would put it. Another session reads it, so it is spelt out.
+func (m *Model) placedText(key string) (string, bool) {
+	if _, ok := m.placed(key); !ok {
+		return "", false
+	}
+	return "moved by hand; the board says " + m.columns.Label(m.pipeInfo[key].Stage), true
+}
+
+// divergedText is said of a merge that names the branch but does not hold the
+// worktree's commit: the branch was rewritten on the server before merging.
+const divergedText = "differs from the merge"
 
 // prFact is the pull request with its build.
 func (m *Model) prFact(info pipeline.Info) fact {
@@ -142,6 +274,14 @@ func (m *Model) prFact(info pipeline.Info) fact {
 	}
 	if info.MergedTo != "" {
 		f.text += " · in " + info.MergedTo
+	}
+	// #180 ✓  master: the build is its glyph, where it went the target's.
+	f.short = said(look.PullReq, fmt.Sprintf("#%d", info.PR), f.style)
+	if b := look.Build(info.Build); b.Glyph != "" {
+		f.short += " " + b.Style.Render(b.Glyph)
+	}
+	if info.MergedTo != "" {
+		f.short += "  " + said(look.Target, info.MergedTo, dimStyle)
 	}
 	return f
 }
@@ -172,11 +312,14 @@ func (m *Model) bitbucketFact(info pipeline.Info) (fact, bool) {
 		if r.Target != "" {
 			text += " into " + r.Target
 		}
-		return fact{glyph: look.Check, text: text, style: prPassStyle, weight: weightState, kind: kindPR}, true
+		return fact{glyph: look.Check, text: text, style: prPassStyle, weight: weightState, kind: kindPR,
+			short: said(look.Check, "mergeable", prPassStyle)}, true
 	case bitbucket.Waiting:
-		return fact{glyph: look.Clock, text: "waiting: " + j.Why[0] + more, style: prPendingStyle, weight: weightState, kind: kindPR}, true
+		return fact{glyph: look.Clock, text: "waiting: " + j.Why[0] + more, style: prPendingStyle, weight: weightState, kind: kindPR,
+			short: said(look.Clock, j.Why[0]+more, prPendingStyle)}, true
 	}
-	return fact{glyph: look.Warning, text: "blocked: " + j.Why[0] + more, style: prFailStyle, weight: weightYou, attention: true, kind: kindPR}, true
+	return fact{glyph: look.Warning, text: "blocked: " + j.Why[0] + more, style: prFailStyle, weight: weightYou, attention: true, kind: kindPR,
+		short: said(look.Warning, j.Why[0]+more, prFailStyle)}, true
 }
 
 // jiraFact is the ticket's status in Jira, false when Jira is off or the
@@ -186,8 +329,9 @@ func (m *Model) jiraFact(key string) (fact, bool) {
 	if !m.jiraOn() || !ok {
 		return fact{}, false
 	}
-	return fact{glyph: look.Jira, text: "Jira: " + i.Status, style: jiraStatusStyle(i.Category), weight: weightContext,
-		url: links.Issue(key), kind: kindTicket}, true
+	style := jiraStatusStyle(i.Category)
+	return fact{glyph: look.Jira, text: "Jira: " + i.Status, style: style, weight: weightContext,
+		url: links.Issue(key), kind: kindTicket, short: said(look.Jira, i.Status, style)}, true
 }
 
 // spaceFacts are a card's facts on the manual board: its pull request and
@@ -223,7 +367,7 @@ func (m *Model) attention(sp *space) string {
 			return screen.Plain(f.text)
 		}
 	}
-	return ""
+	return m.stackAttention(sp)
 }
 
 // needingYou are the cards that ask for you, in board order.
@@ -315,7 +459,14 @@ func (m *Model) headline(sp *space) string {
 	if info, ok := m.pipeInfo[sp.Key]; ok && info.Title != "" {
 		return info.Title
 	}
-	return m.summaryOf(sp)
+	if s := m.summaryOf(sp); s != "" {
+		return s
+	}
+	if _, ok := reviewCardKey(sp.Key); ok {
+		r, _ := m.reviewFor(sp)
+		return r.Title
+	}
+	return ""
 }
 
 // Lines of the headline a card shows: at rest, and selected.
@@ -341,10 +492,20 @@ func (m *Model) card(sp *space, selected bool, width int) screen.Card {
 		c.Badge = look.Attention.Render("●")
 	case m.hasBell(sp.Key):
 		c.Badge = bellGlyph
+	case m.pipelineOn() && m.isPlaced(sp.Key):
+		// A card moved by hand says so even at rest, where it shows one fact.
+		c.Badge = dimStyle.Render(handBadge(m.icons))
 	default:
 		if i, ok := m.jr.issues[m.ticketOf(sp)]; ok && i.Type != "" {
 			c.Badge = dimStyle.Render(i.Type)
+			if g := look.IssueType(i.Type); m.icons && g != "" {
+				c.Badge = dimStyle.Render(g)
+			}
 		}
+	}
+	// Open questions show from across the board, whatever else the border says.
+	if q := m.questionMark(sp.Key); q != "" {
+		c.Badge = strings.TrimSpace(q + " " + c.Badge)
 	}
 
 	headLines, noteLines := headlineAtRest, noteAtRestLines
@@ -357,13 +518,20 @@ func (m *Model) card(sp *space, selected bool, width int) screen.Card {
 		c.Body = append(c.Body, clip(note, noteLines, text, noteStyle)...)
 	}
 
+	// At rest, one line: the heaviest fact and the others' badges. Selected,
+	// each fact on its own.
 	facts := m.facts(sp)
-	if f, ok := m.heaviest(sp); ok && !selected {
-		facts = []fact{f}
+	if !selected {
+		if l := m.statusLine(facts, text); l != "" {
+			c.Body = append(c.Body, l)
+		}
+	} else {
+		for _, f := range facts {
+			c.Body = append(c.Body, m.cardLine(f, text))
+		}
 	}
-	for _, f := range facts {
-		c.Body = append(c.Body, m.line(f, text))
-	}
+
+	m.stackOnCard(&c, sp, selected)
 
 	if selected && m.mode == modeStatusPick {
 		picker := m.pickerLines(text)
@@ -405,6 +573,23 @@ type cardAction struct {
 // cardActions are what can be done with sp, in the order its menu lists
 // them.
 func (m *Model) cardActions(sp *space) []cardAction {
+	own := m.ticketActions(sp)
+	extra := m.stackActions(sp)
+	if len(extra) == 0 {
+		return own
+	}
+	// The stack's open action does the ticket's: it takes its place.
+	kept := own[:0:0]
+	for _, a := range own {
+		if a.action != "open-issue" {
+			kept = append(kept, a)
+		}
+	}
+	return append(kept, extra...)
+}
+
+// ticketActions are cardActions without the stack's.
+func (m *Model) ticketActions(sp *space) []cardAction {
 	if !m.pipelineOn() {
 		out := []cardAction{
 			{"jump", "Go", true, "Go to the space"},
@@ -424,14 +609,28 @@ func (m *Model) cardActions(sp *space) []cardAction {
 			cardAction{"message", "Message", false, "Message the agent"},
 			cardAction{"forget", "Forget", false, "Forget it"})
 	}
+	if _, review := reviewCardKey(sp.Key); review {
+		out := []cardAction{{"open-pull-request", "Review", true, "Open the pull request to review it"}}
+		if m.ticketOf(sp) != "" {
+			out = append(out, cardAction{"open-issue", "Ticket", true, "Open the ticket"})
+		}
+		return append(out,
+			cardAction{"detail", "Detail", false, "Detail"},
+			cardAction{"yank", "Copy", false, "Copy context"},
+			cardAction{"note", "Note", false, "Edit the note"})
+	}
 	if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly {
-		return []cardAction{
+		out := []cardAction{
 			{"handoff", "Hand off", true, "Hand off: start the work"},
 			{"open-issue", "Ticket", true, "Open the ticket"},
-			{"detail", "Detail", false, "Detail"},
-			{"yank", "Copy", false, "Copy context"},
-			{"note", "Note", false, "Edit the note"},
 		}
+		if _, ok := m.reviewFor(sp); ok {
+			out = append(out, cardAction{"open-pull-request", "Review", true, "Open the pull request to review it"})
+		}
+		return append(out,
+			cardAction{"detail", "Detail", false, "Detail"},
+			cardAction{"yank", "Copy", false, "Copy context"},
+			cardAction{"note", "Note", false, "Edit the note"})
 	}
 	info := m.pipeInfo[sp.Key]
 	out := []cardAction{{"jump", "Go", true, "Go to the workspace"}}
@@ -441,8 +640,17 @@ func (m *Model) cardActions(sp *space) []cardAction {
 	if info.PR > 0 {
 		out = append(out, cardAction{"open-pull-request", "PR", true, "Open the pull request"})
 	}
-	if info.Stage == pipeline.ReadyQA {
+	if _, ok := m.placed(sp.Key); ok {
+		out = append(out, cardAction{"follow-board", "Undo", true, "Undo the move: back to " + m.columns.Label(info.Stage)})
+	}
+	if sp.StatusID == pipeline.ReadyQA {
 		out = append(out, cardAction{"accept", "Accept", false, "Accept: move it to the Archive"})
+	}
+	if m.whyNotPlace(sp) == "" {
+		out = append(out, cardAction{"status-picker", "Move", false, "Move to another column by hand"})
+	}
+	if len(m.questionsOf(sp.Key))+len(m.forYouOf(sp.Key)) > 0 {
+		out = append(out, cardAction{"questions", "Questions", false, "Read the open questions"})
 	}
 	if info.Key != "" {
 		out = append(out,

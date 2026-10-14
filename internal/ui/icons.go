@@ -65,6 +65,9 @@ func (m *Model) spaceName(sp *space) string {
 	if k, ok := jiraCardKey(sp.Key); ok {
 		return k
 	}
+	if _, ok := reviewCardKey(sp.Key); ok {
+		return m.reviewLabel(sp)
+	}
 	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
 		return m.ticketName(sp.Key, info.Key)
 	}
@@ -81,6 +84,9 @@ func (m *Model) spaceName(sp *space) string {
 func (m *Model) spaceLabel(sp *space) string {
 	if k, ok := jiraCardKey(sp.Key); ok {
 		return m.glyph(look.Jira, k)
+	}
+	if _, ok := reviewCardKey(sp.Key); ok {
+		return m.glyph(look.Eye, m.reviewLabel(sp))
 	}
 	if info, ok := m.pipeInfo[sp.Key]; ok && m.pipelineOn() && info.Key != "" {
 		return m.glyph(look.Branch, m.ticketName(sp.Key, info.Key))

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
 	"github.com/ezemacchi/ekanban/internal/screen"
@@ -35,7 +37,20 @@ type recipient struct {
 	stage                     string
 	openPR                    bool
 	on                        bool
+	// ws are its workspaces, where the chooser looks for an agent when it has
+	// no orchestrator; via names the agent chosen there.
+	ws  []string
+	via string
 }
+
+// missing is whether the ticket has no orchestrator open: it is listed, and
+// ticking it asks which agent gets the message instead.
+func (r recipient) missing() bool { return r.pane == "" }
+
+// blocked is whether the orchestrator waits at a dialog for the person: a
+// message would not reach it, and its enter could answer the dialog, so it is
+// never ticked. Herdr refuses it too, should it block after the list was read.
+func (r recipient) blocked() bool { return r.status == "blocked" }
 
 type broadcastState struct {
 	presets []string
@@ -54,23 +69,27 @@ type recipientsMsg struct {
 	err error
 }
 
-type broadcastMsg struct{ sent, failed []string }
+type broadcastMsg struct{ sent, blocked, failed []string }
 
 // startBroadcast opens the box and looks for the orchestrators of the
 // tickets the board shows, a search or a column filter narrowing them.
 func (m *Model) startBroadcast() tea.Cmd {
 	var worktrees []string
 	cards := map[string]pipeline.Info{}
+	spaces := map[string][]string{}
 	for _, st := range m.board.Statuses {
 		if m.statusFilter != "" && st.ID != m.statusFilter {
 			continue
 		}
 		for _, sp := range m.groups[st.ID] {
-			if _, jiraOnly := jiraCardKey(sp.Key); jiraOnly || !sp.Live || m.pipeInfo[sp.Key].Key == "" {
+			if noWorktree(sp.Key) || !sp.Live || m.pipeInfo[sp.Key].Key == "" {
 				continue
 			}
 			worktrees = append(worktrees, sp.Key)
-			cards[sp.Key] = m.pipeInfo[sp.Key]
+			info := m.pipeInfo[sp.Key]
+			info.Stage = st.ID // the column on screen, which may be one it was moved to by hand
+			cards[sp.Key] = info
+			spaces[sp.Key] = append([]string(nil), sp.WorkspaceIDs...)
 		}
 	}
 	m.bc.to, m.bc.loading, m.bc.list, m.bc.idx, m.bc.preset = nil, true, false, 0, -1
@@ -89,12 +108,14 @@ func (m *Model) startBroadcast() tea.Cmd {
 		var to []recipient
 		for _, wt := range worktrees {
 			run, err := src.Run(wt, live)
-			if err != nil || run.OrchestratorPane == "" {
+			if err != nil {
 				continue
 			}
 			info := cards[wt]
-			to = append(to, recipient{key: run.Key, pane: run.OrchestratorPane, status: run.OrchestratorStatus, target: run.Target,
-				stage: info.Stage, openPR: info.PR > 0 && info.MergedTo == "", on: true})
+			r := recipient{key: run.Key, pane: run.OrchestratorPane, status: run.OrchestratorStatus, target: run.Target,
+				stage: info.Stage, openPR: info.PR > 0 && info.MergedTo == "", ws: spaces[wt]}
+			r.on = !r.blocked() && !r.missing()
+			to = append(to, r)
 		}
 		sort.Slice(to, func(i, j int) bool { return to[i].key < to[j].key })
 		return recipientsMsg{to: to}
@@ -164,12 +185,10 @@ func (m *Model) handleBroadcastKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.usePreset(next)
 			return m, nil
 		}
-		m.broadcastListKey(k)
-		return m, nil
+		return m, m.broadcastListKey(k)
 	default:
 		if m.bc.list {
-			m.broadcastListKey(k)
-			return m, nil
+			return m, m.broadcastListKey(k)
 		}
 	}
 	var cmd tea.Cmd
@@ -179,17 +198,16 @@ func (m *Model) handleBroadcastKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // broadcastListKey moves through and ticks the orchestrators. Like a
 // picker's, these keys are the box's own.
-func (m *Model) broadcastListKey(k string) {
+func (m *Model) broadcastListKey(k string) tea.Cmd {
 	n := len(m.bc.to)
+	var cmd tea.Cmd
 	switch k {
 	case "j", "down":
 		m.bc.idx++
 	case "k", "up":
 		m.bc.idx--
 	case " ":
-		if m.bc.idx < n {
-			m.bc.to[m.bc.idx].on = !m.bc.to[m.bc.idx].on
-		}
+		cmd = m.tick(m.bc.idx)
 	case "h", "left", "l", "right":
 		// Sideways goes through the quick choices, each in force as it is
 		// reached, the way sideways goes through the board's columns.
@@ -218,6 +236,7 @@ func (m *Model) broadcastListKey(k string) {
 		}
 	}
 	m.bc.idx = max(0, min(m.bc.idx, n-1))
+	return cmd
 }
 
 // pick is a quick choice of orchestrators: its key in the list, and which
@@ -237,7 +256,6 @@ func (m *Model) picks() []pick {
 		{"p", "Open PR", "78", func(r recipient) bool { return r.openPR }},
 		{"i", "Idle", "245", func(r recipient) bool { return r.status == "idle" }},
 		{"w", "Working", "214", func(r recipient) bool { return r.status == "working" }},
-		{"b", "Needs you", "203", func(r recipient) bool { return r.status == "blocked" }},
 	}
 	for _, c := range m.columns {
 		id := c.ID
@@ -259,11 +277,14 @@ func (m *Model) picks() []pick {
 	return shown
 }
 
+// ticks is whether p ticks r: one it matches that is not blocked.
+func (p pick) ticks(r recipient) bool { return p.match(r) && !r.blocked() && !r.missing() }
+
 // picked is how many orchestrators p ticks.
 func (m *Model) picked(p pick) int {
 	n := 0
 	for _, r := range m.bc.to {
-		if p.match(r) {
+		if p.ticks(r) {
 			n++
 		}
 	}
@@ -273,7 +294,7 @@ func (m *Model) picked(p pick) int {
 // inForce is whether the ticks are exactly p's.
 func (m *Model) inForce(p pick) bool {
 	for _, r := range m.bc.to {
-		if r.on != p.match(r) {
+		if r.on != p.ticks(r) {
 			return false
 		}
 	}
@@ -283,8 +304,33 @@ func (m *Model) inForce(p pick) bool {
 // choose ticks exactly the orchestrators p picks.
 func (m *Model) choose(p pick) {
 	for i := range m.bc.to {
-		m.bc.to[i].on = p.match(m.bc.to[i])
+		m.bc.to[i].on = p.ticks(m.bc.to[i])
 	}
+}
+
+// tick ticks or unticks the i-th orchestrator. One that is blocked stays
+// unticked, and the status says why; for a ticket with no orchestrator it
+// asks which agent gets the message, for this broadcast only.
+func (m *Model) tick(i int) tea.Cmd {
+	if i < 0 || i >= len(m.bc.to) {
+		return nil
+	}
+	r := m.bc.to[i]
+	switch {
+	case r.blocked():
+		m.status = r.key + "'s orchestrator is waiting at a prompt: answer it there first"
+		return nil
+	case r.missing():
+		return m.chooseAgent(r.key+": no orchestrator · which agent gets the broadcast?", r.ws, func(p pickRow) (tea.Model, tea.Cmd) {
+			if i < len(m.bc.to) && m.bc.to[i].key == r.key {
+				to := &m.bc.to[i]
+				to.pane, to.status, to.via, to.on = p.pane, p.status, p.label(), true
+			}
+			return m, nil
+		})
+	}
+	m.bc.to[i].on = !m.bc.to[i].on
+	return nil
 }
 
 func (m *Model) usePreset(i int) {
@@ -347,20 +393,34 @@ func (m *Model) sendBroadcast(text string, to []recipient) tea.Cmd {
 	return tea.Batch(start, func() tea.Msg {
 		var out broadcastMsg
 		for i, r := range to {
-			if client == nil || client.SubmitToAgent(r.pane, msgs[i]) != nil {
-				out.failed = append(out.failed, r.key)
-				continue
+			var err error
+			if client == nil {
+				err = errNoClient
+			} else {
+				err = client.SubmitToAgent(r.pane, msgs[i])
 			}
-			out.sent = append(out.sent, r.key)
+			switch {
+			case err == nil:
+				out.sent = append(out.sent, r.key)
+			case herdr.IsBlocked(err):
+				out.blocked = append(out.blocked, r.key)
+			default:
+				out.failed = append(out.failed, r.key)
+			}
 		}
 		return out
 	})
 }
 
+var errNoClient = errors.New("not connected to Herdr")
+
 func (m *Model) applyBroadcast(msg broadcastMsg) {
 	var parts []string
 	if len(msg.sent) > 0 {
 		parts = append(parts, "sent to "+strings.Join(msg.sent, ", "))
+	}
+	if len(msg.blocked) > 0 {
+		parts = append(parts, "not sent to "+strings.Join(msg.blocked, ", ")+": waiting at a prompt")
 	}
 	if len(msg.failed) > 0 {
 		parts = append(parts, "could not reach "+strings.Join(msg.failed, ", "))
@@ -428,8 +488,19 @@ func (m *Model) viewBroadcast(base string) string {
 		if r.target != "" {
 			target = dimStyle.Render(" → " + r.target)
 		}
+		word := al.Style.Render(pad(al.Word, 11))
+		switch {
+		case r.blocked():
+			mark = "[-] "
+			target += dimStyle.Render(" · answer its prompt first")
+		case r.missing():
+			word = dimStyle.Render(pad("none open", 11))
+			target += dimStyle.Render(" · ") + screen.Say(screen.Key("space")+" picks an agent", dimStyle, 0)
+		case r.via != "":
+			target += dimStyle.Render(" · to " + r.via + ", this once")
+		}
 		clickable(zone{Kind: zoneStatus, Choice: i})
-		lines = append(lines, lead+style.Render(mark+pad(r.key, 12))+al.Style.Render(pad(al.Word, 11))+target)
+		lines = append(lines, lead+style.Render(mark+pad(r.key, 12))+word+target)
 	}
 	// What the keys do depends on which part has them.
 	help := screen.Key("↑↓") + " ready-made · " + screen.Key("tab") + " to the list · or click"
@@ -471,8 +542,8 @@ func (m *Model) clickBroadcast(x, y int) (tea.Model, tea.Cmd) {
 	switch {
 	case !ok:
 	case z.Kind == zoneStatus && z.Choice < len(m.bc.to):
-		m.bc.to[z.Choice].on = !m.bc.to[z.Choice].on
 		m.bc.list, m.bc.idx = true, z.Choice
+		return m, m.tick(z.Choice)
 	case z.Kind == screen.OnControl && z.ID == "bc-message":
 		m.bc.list = false
 	case z.Kind == screen.OnControl && strings.HasPrefix(z.ID, "pick:"):

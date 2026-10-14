@@ -31,7 +31,7 @@ func TestLayoutReadsAnotherTeamsRuns(t *testing.T) {
 		t.Fatalf("run: key %q team %q objective %q", r.Key, r.Team, r.Objective)
 	}
 	if len(r.Questions) != 1 || !r.Landed {
-		t.Fatalf("questions %q landed %t", r.Questions, r.Landed)
+		t.Fatalf("questions %+v landed %t", r.Questions, r.Landed)
 	}
 	if r.StatePath() != filepath.Join(wt, "work", "XY-7", "status.md") {
 		t.Fatalf("state path %q", r.StatePath())

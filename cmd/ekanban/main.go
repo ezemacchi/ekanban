@@ -23,6 +23,7 @@ import (
 	"github.com/ezemacchi/ekanban/internal/jira"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/reviews"
 	"github.com/ezemacchi/ekanban/internal/store"
 	"github.com/ezemacchi/ekanban/internal/ticketui"
 	"github.com/ezemacchi/ekanban/internal/ui"
@@ -49,6 +50,9 @@ func run(args []string) error {
 		case "keys":
 			showKeys()
 			return nil
+
+		case "questions":
+			return questionsCmd(args[1:], os.Stdout)
 
 		case "version", "--version", "-v":
 			fmt.Println(version.Version)
@@ -178,6 +182,8 @@ func run(args []string) error {
 		set, problems := pipelineSettings(settings)
 		model.SetPipeline(pipeline.New(cwd, set, gh.HideWindow))
 		model.SetProblems(problems)
+		// Stacked cards are off until [stack] names a source.
+		model.SetProblems(model.SetStack(settings.Stack))
 		// Jira adds the tickets with no worktree and each card's Jira status.
 		// Off, with a word on the status line, until [jira] and the account's
 		// variables are set.
@@ -196,7 +202,21 @@ func run(args []string) error {
 			bc, bwhy = nil, "Bitbucket is off: pipeline.pr_url is not a Bitbucket pull request address (.../projects/P/repos/R/pull-requests/{pr})"
 		}
 		model.SetBitbucket(bc, loc, bwhy)
+		// The pull requests waiting on your review. The board only sees a
+		// reviews.Source; which code host answers is decided here.
+		var reader reviews.BitbucketReader
+		if bc != nil {
+			reader = bc
+		}
+		kinds := map[string]reviews.Builder{
+			"bitbucket": reviews.Bitbucket(reader, loc, links.PullRequest, bwhy),
+			"command":   reviews.Command(cwd, gh.HideWindow),
+		}
+		rsrc, rwhy := reviews.New(settings.Reviews, kinds)
+		keyRe, _ := pipeline.TicketKey(settings.Pipeline.TicketKey)
+		model.SetReviews(rsrc, settings.Reviews.CardColumn(pipeline.OnReview), keyRe, rwhy)
 		model.SetBroadcast(settings.Broadcast)
+		model.SetQuestions(settings.Questions)
 	} else {
 		// A watcher keeps polling GitHub after the board closes, which is the
 		// only way a notification can reach you while you are elsewhere. The

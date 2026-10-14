@@ -27,6 +27,21 @@ func TestRepoFileCannotTurnOnFastForward(t *testing.T) {
 	}
 }
 
+// Moving cards by hand is the team's process: unset means on, and the
+// repository file can turn it off over config.toml.
+func TestManualMovesComeFromTheRepository(t *testing.T) {
+	write(t, "")
+	main, wt := fakeRepo(t)
+	if LoadFor(wt).Pipeline.ManualMoves != nil {
+		t.Fatal("manual_moves set with nothing written")
+	}
+	write(t, "[pipeline]\nmanual_moves = true\n")
+	put(t, filepath.Join(main, RepoFileName), "[pipeline]\nmanual_moves = false\n")
+	if mm := LoadFor(wt).Pipeline.ManualMoves; mm == nil || *mm {
+		t.Fatalf("the repository file did not turn manual_moves off: %v", mm)
+	}
+}
+
 // The broadcast's presets come from the team's repository file, or default.
 func TestBroadcastPresetsComeFromTheRepositoryOrDefault(t *testing.T) {
 	write(t, "")

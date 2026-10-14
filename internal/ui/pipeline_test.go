@@ -44,12 +44,9 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 	}
 
 	selectSpace(t, m, tmp+"api")
-	send(t, m, key("1"))
+	send(t, m, key("S"))
 	if m.status != m.computedColumns() {
-		t.Fatalf("a number key must not retag in pipeline mode, status %q", m.status)
-	}
-	if got := labelsIn(m, pipeline.ReadyQA); !equal(got, []string{"api"}) {
-		t.Fatalf("api left Ready for QA: %v", got)
+		t.Fatalf("editing the statuses must stay refused in pipeline mode, status %q", m.status)
 	}
 
 	m.width = 200
@@ -66,6 +63,176 @@ func TestPipelineColumnsAreComputed(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("board is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// A card moved by hand sits in the chosen column, marked so, and leaves the
+// plain board's status alone. A different computed column read once is held
+// back; read twice in a row, the card follows the board again.
+func TestPlacedByHandFollowsTheBoardWhenItChanges(t *testing.T) {
+	m := pipelineBoard(t)
+	api := store.Key(tmp + "api")
+	before := m.board.Entries[api].Status
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("3")) // Reviewing
+	if got := labelsIn(m, pipeline.OnReview); !equal(got, []string{"api"}) {
+		t.Fatalf("Reviewing holds %v, want [api]", got)
+	}
+	if m.board.Entries[api].Placed == nil {
+		t.Fatal("3 did not place the card by hand")
+	}
+	if m.board.Entries[api].Status != before {
+		t.Fatalf("the plain board's status changed to %q", m.board.Entries[api].Status)
+	}
+	m.width = 200
+	if out := m.View(); !strings.Contains(out, "board: To QA") {
+		t.Fatalf("the card does not say where the board puts it:\n%s", out)
+	}
+	if text, _ := m.placedText(api); text != "moved by hand; the board says To QA" {
+		t.Fatalf("copied mark %q", text)
+	}
+
+	// The board still says To QA: the placement holds over a reclassification.
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: m.pipeInfo[api]}})
+	if got := labelsIn(m, pipeline.OnReview); !equal(got, []string{"api"}) {
+		t.Fatalf("a reclassification to the same column dropped the placement: %v", got)
+	}
+
+	// One read says Shipping: it may be a read that failed halfway.
+	info := m.pipeInfo[api]
+	info.Stage = pipeline.ToDeploy
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: info}})
+	if got := labelsIn(m, pipeline.OnReview); !equal(got, []string{"api"}) {
+		t.Fatalf("one different read dropped the placement: %v", got)
+	}
+	// The next says Shipping too: the board has learnt something.
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: info}})
+	if got := labelsIn(m, pipeline.ToDeploy); !equal(got, []string{"api"}) {
+		t.Fatalf("Shipping holds %v, want [api]", got)
+	}
+	if m.board.Entries[api].Placed != nil {
+		t.Fatal("the placement outlived a change of the computed column")
+	}
+}
+
+// A different read that is not repeated does not count: back to the column
+// it was moved away from, the placement holds, and a later single read is
+// held back again.
+func TestOneOffReadDoesNotDropThePlacement(t *testing.T) {
+	m := pipelineBoard(t)
+	api := store.Key(tmp + "api")
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("3"))
+	qa, todo := m.pipeInfo[api], m.pipeInfo[api]
+	todo.Stage = pipeline.ToDo
+	for _, info := range []pipeline.Info{todo, qa, todo} {
+		send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: info}})
+	}
+	if m.board.Entries[api].Placed == nil {
+		t.Fatal("reads that disagreed once each dropped the placement")
+	}
+}
+
+// When the board computes the column the card was moved to, it agrees: the
+// mark goes at once.
+func TestBoardCatchingUpDropsTheMarkAtOnce(t *testing.T) {
+	m := pipelineBoard(t)
+	api := store.Key(tmp + "api")
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("3")) // Reviewing, over To QA
+	info := m.pipeInfo[api]
+	info.Stage = pipeline.OnReview
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: info}})
+	if m.board.Entries[api].Placed != nil {
+		t.Fatal("the board agrees, yet the card is still marked as moved by hand")
+	}
+	if got := labelsIn(m, pipeline.OnReview); !equal(got, []string{"api"}) {
+		t.Fatalf("Reviewing holds %v, want [api]", got)
+	}
+}
+
+// The picker moves a card by hand and marks the board's own column; the card
+// then offers Undo, which puts it back.
+func TestPickerMovesByHandAndFollowBoardPutsItBack(t *testing.T) {
+	m := pipelineBoard(t)
+	api := store.Key(tmp + "api")
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("s"))
+	if m.mode != modeStatusPick {
+		t.Fatal("s did not open the picker on the computed board")
+	}
+	lines := strings.Join(m.pickerLines(60), "\n")
+	if !strings.Contains(lines, "move to:") || !strings.Contains(lines, "To QA · board") {
+		t.Fatalf("the picker does not mark the board's column:\n%s", lines)
+	}
+	send(t, m, key("2")) // Working
+	if got := labelsIn(m, pipeline.InProgress); !equal(got, []string{"api"}) {
+		t.Fatalf("Working holds %v, want [api]", got)
+	}
+	if !strings.Contains(m.status, "press "+screen.Key("b")) {
+		t.Fatalf("the move does not say how to put it back: %q", m.status)
+	}
+	sp := m.selected()
+	if c := m.card(sp, false, 40); !strings.Contains(screen.Plain(c.Badge), handBadge(false)) {
+		t.Fatalf("badge %q", c.Badge)
+	}
+	var undo bool
+	for _, a := range m.cardActions(sp) {
+		undo = undo || a.action == "follow-board" && a.onCard
+	}
+	if !undo {
+		t.Fatal("a card moved by hand has no Undo button")
+	}
+
+	send(t, m, key("b"))
+	if m.board.Entries[api].Placed != nil {
+		t.Fatal("undo kept the placement")
+	}
+	if got := labelsIn(m, pipeline.ReadyQA); !equal(got, []string{"api"}) {
+		t.Fatalf("To QA holds %v, want [api]", got)
+	}
+}
+
+// With manual_moves off the computed board refuses every move by hand.
+func TestManualMovesOffRefusesMovingByHand(t *testing.T) {
+	m := newTestModel(t)
+	m.SetPipeline(pipeline.New("", pipeline.Settings{NoHandMoves: true}, nil))
+	send(t, m, liveWorkspaces())
+	api := store.Key(tmp + "api")
+	send(t, m, pipelineMsg{infos: map[string]pipeline.Info{api: {Stage: pipeline.ReadyQA, Key: "ABC-1"}}})
+	selectSpace(t, m, tmp+"api")
+	for _, k := range []string{"1", "s"} {
+		send(t, m, key(k))
+		if m.status != m.computedColumns() || m.mode == modeStatusPick {
+			t.Fatalf("%s moved or opened the picker with manual_moves off: %q", k, m.status)
+		}
+	}
+	if m.board.Entries[api].Placed != nil {
+		t.Fatal("a placement was made with manual_moves off")
+	}
+	for _, a := range m.cardActions(m.selected()) {
+		if a.action == "status-picker" {
+			t.Fatal("the card offers Move with manual_moves off")
+		}
+	}
+}
+
+// Moving a card back to the column the board says drops the placement.
+func TestPlacingBackOnTheComputedColumnDropsIt(t *testing.T) {
+	m := pipelineBoard(t)
+	api := store.Key(tmp + "api")
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("1"))
+	if m.board.Entries[api].Placed == nil {
+		t.Fatal("1 did not place the card by hand")
+	}
+	selectSpace(t, m, tmp+"api")
+	send(t, m, key("5")) // To QA, where the board puts it
+	if m.board.Entries[api].Placed != nil {
+		t.Fatal("moving back to the computed column kept the placement")
+	}
+	if got := labelsIn(m, pipeline.ReadyQA); !equal(got, []string{"api"}) {
+		t.Fatalf("To QA holds %v, want [api]", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -20,11 +21,37 @@ type CodeHost interface {
 	// BranchSubject is a fixed string a merge commit of branch contains, or
 	// "" when the host's subjects do not name the branch usefully.
 	BranchSubject(branch string) string
+	// NamesBranch says whether a merge commit's subject names branch as the
+	// one merged. It is how a branch rewritten before merging is still
+	// matched to its merge.
+	NamesBranch(subject, branch string) bool
 }
 
 type subjects struct {
 	merge  []string // fmt patterns with %d for the pull request
 	branch string   // fmt pattern with %s for the branch, or ""
+	// owner is set for subjects that name the branch as owner/branch.
+	owner bool
+}
+
+// NamesBranch: Bitbucket writes "from <branch> to <target>", GitHub
+// "from <owner>/<branch>", where an owner has no slash.
+func (s subjects) NamesBranch(subject, branch string) bool {
+	if branch == "" {
+		return false
+	}
+	if s.branch != "" && strings.Contains(subject, fmt.Sprintf(s.branch, branch)) {
+		return true
+	}
+	if !s.owner {
+		return false
+	}
+	_, from, ok := strings.Cut(subject, " from ")
+	if !ok {
+		return false
+	}
+	_, named, ok := strings.Cut(strings.TrimSpace(from), "/")
+	return ok && named == branch
 }
 
 func (s subjects) MergeSubjects(pr int) []string {
@@ -49,8 +76,8 @@ var (
 	}
 	// GitHub's subject names owner/branch, which a fixed string cannot match
 	// without the owner; the branch is found from the build server instead.
-	github = subjects{merge: []string{"Merge pull request #%d from "}}
-	both   = subjects{merge: append(append([]string(nil), bitbucket.merge...), github.merge...), branch: bitbucket.branch}
+	github = subjects{merge: []string{"Merge pull request #%d from "}, owner: true}
+	both   = subjects{merge: append(append([]string(nil), bitbucket.merge...), github.merge...), branch: bitbucket.branch, owner: true}
 )
 
 var (

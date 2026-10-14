@@ -284,6 +284,46 @@ func TestSendToAgentAndFocusUseTarget(t *testing.T) {
 	}
 }
 
+// A broadcast submits through agent.prompt: Herdr's own submission, which
+// refuses an agent at a dialog instead of answering it with enter.
+func TestSubmitToAgentUsesAgentPrompt(t *testing.T) {
+	f := herdrtest.Start(t)
+	f.OK(map[string]any{"type": "ok"})
+	c, _ := New()
+
+	if err := c.SubmitToAgent("w1:p1", "rebase"); err != nil {
+		t.Fatal(err)
+	}
+	req := f.LastAny(t)
+	if req.Method != "agent.prompt" {
+		t.Fatalf("method = %q, want agent.prompt", req.Method)
+	}
+	params := herdrtest.Params(t, req)
+	if params["target"] != "w1:p1" || params["text"] != "rebase" {
+		t.Fatalf("params = %+v", params)
+	}
+}
+
+// Herdr's agent_blocked refusal is told apart from other errors, and the
+// message still reads as before.
+func TestSubmitToABlockedAgentIsBlocked(t *testing.T) {
+	f := herdrtest.Start(t)
+	f.Fail("agent_blocked", "agent is waiting at a dialog")
+	c, _ := New()
+
+	err := c.SubmitToAgent("w1:p1", "rebase")
+	if !IsBlocked(err) {
+		t.Fatalf("err = %v, want agent_blocked", err)
+	}
+	if err.Error() != "agent.prompt: agent is waiting at a dialog (agent_blocked)" {
+		t.Fatalf("message %q", err.Error())
+	}
+	f.Fail("pane_not_found", "no such pane")
+	if err := c.SubmitToAgent("w1:p1", "rebase"); err == nil || IsBlocked(err) {
+		t.Fatalf("another error read as blocked: %v", err)
+	}
+}
+
 func TestNotifyOmitsEmptyFields(t *testing.T) {
 	f := herdrtest.Start(t)
 	f.OK(map[string]any{"type": "notification_show"})

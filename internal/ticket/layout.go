@@ -28,6 +28,13 @@ type LayoutConfig struct {
 	Questions   string `toml:"questions"`    // sections whose bullets are open questions
 	NotQuestion string `toml:"not_question"` // ... except these sections
 	Settled     string `toml:"settled"`      // a bullet that is already answered
+	Closed      string `toml:"closed"`       // sections whose bullets are closed questions
+	// ForYou matches the sections whose questions are for the user, not for
+	// another person; tested before Questions, which it may also match.
+	ForYou string `toml:"for_you"`
+	// Asked matches a question line; its first group names who answers it
+	// ("Product (Ana): ..." -> Ana). A brief's to: wins over it.
+	Asked string `toml:"asked"`
 	// SpecCode matches a story code in the run's files; its groups, joined by
 	// "_" with numbers padded to two digits, are the code. Empty: no specs.
 	SpecCode string `toml:"spec_code"`
@@ -51,6 +58,9 @@ var DefaultLayoutConfig = LayoutConfig{
 	Questions:   `(?i)open|pending|blocker|question`,
 	NotQuestion: `(?i)defect`,
 	Settled:     `(?i)\b(decided|ruled|answered|settled|deferred|closed)\b|defects: none|^-\s*none\b`,
+	Closed:      `(?i)^(decisions?|closed)\b`,
+	ForYou:      `(?i)\bfor (you|me)\b`,
+	Asked:       `^[^:(]*\(([^)]+)\)`,
 }
 
 // Layout is a LayoutConfig with its patterns compiled.
@@ -60,7 +70,8 @@ type Layout struct {
 	Prototypes                        string
 
 	dispatch, objective, currentStep, landed, notLanded *regexp.Regexp
-	questions, notQuestion, settled, specCode           *regexp.Regexp
+	questions, notQuestion, settled, closed, specCode   *regexp.Regexp
+	forYou, asked                                       *regexp.Regexp
 }
 
 // DefaultLayout is DefaultLayoutConfig compiled.
@@ -113,6 +124,9 @@ func NewLayout(c LayoutConfig) (Layout, []string) {
 	l.questions = compile("questions", c.Questions, d.Questions)
 	l.notQuestion = compile("not_question", c.NotQuestion, d.NotQuestion)
 	l.settled = compile("settled", c.Settled, d.Settled)
+	l.closed = compile("closed", c.Closed, d.Closed)
+	l.forYou = compile("for_you", c.ForYou, d.ForYou)
+	l.asked = compile("asked", c.Asked, d.Asked)
 	l.specCode = compile("spec_code", c.SpecCode, d.SpecCode)
 	return l, problems
 }

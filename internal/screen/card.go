@@ -1,6 +1,7 @@
 package screen
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -33,6 +34,23 @@ type Card struct {
 	// Choices is the Body line of the first of NChoices choices (a picker
 	// inside the card), each an OnChoice zone.
 	Choices, NChoices int
+
+	// Stack is a strip under the card for each related ticket, drawn inside
+	// the card's own borders. StackAt is the strip under the cursor while the
+	// card is Selected: -1 is the card itself, so a board that sets a Stack
+	// must set it. StackMore counts the strips left out for want of room, and
+	// Cue is a styled line under the last strip saying where each way leads.
+	Stack     []StackLine
+	StackAt   int
+	StackMore int
+	Cue       string
+}
+
+// StackLine is one strip of a card's stack.
+type StackLine struct {
+	Key       string // the related ticket
+	Word      string // what it is to the card: "failed"
+	Attention bool   // the strip's border and word say it asks for you
 }
 
 // cardFrame is what the border and padding take from a card's width.
@@ -72,7 +90,14 @@ func (c Card) Render(width int) ([]string, []Zone) {
 		return c.flat(width)
 	}
 	inner := CardInner(width)
-	edge := lipgloss.NewStyle().Foreground(c.border())
+	// With a stack and a strip under the cursor, the card's own box is not
+	// the selected one: its border and title say so only when the cursor is
+	// on the card.
+	head := c
+	if len(c.Stack) > 0 && c.Selected && c.StackAt >= 0 {
+		head.Selected = false
+	}
+	edge := lipgloss.NewStyle().Foreground(head.border())
 
 	var lines []string
 	var zones []Zone
@@ -80,14 +105,15 @@ func (c Card) Render(width int) ([]string, []Zone) {
 		zones = append(zones, Zone{Kind: OnCard, Y: len(lines), X0: 0, X1: width})
 		lines = append(lines, line)
 	}
-	body := func(l string) {
+	row := func(l string, e lipgloss.Style) {
 		if lipgloss.Width(l) > inner {
 			l = ansi.Truncate(l, inner, "")
 		}
-		add(edge.Render("│") + " " + Pad(l, inner) + " " + edge.Render("│"))
+		add(e.Render("│") + " " + Pad(l, inner) + " " + e.Render("│"))
 	}
+	body := func(l string) { row(l, edge) }
 
-	add(c.top(width, edge))
+	add(head.top(width, edge))
 	for i, l := range c.Body {
 		y := len(lines)
 		body(l)
@@ -109,8 +135,72 @@ func (c Card) Render(width int) ([]string, []Zone) {
 		body(row)
 		zones = append(zones, buttons...)
 	}
-	add(edge.Render("╰" + strings.Repeat("─", width-2) + "╯"))
+	if len(c.Stack) == 0 {
+		add(edge.Render("╰" + strings.Repeat("─", width-2) + "╯"))
+		return lines, zones
+	}
+
+	// The strips share the card's borders: a joint where the card ends, one
+	// between strips, and the card's last line closes the lot. The cursor's
+	// strip wins the colour of the lines above and below it.
+	style := func(i int) lipgloss.Style { return lipgloss.NewStyle().Foreground(c.stackBorder(head, i)) }
+	joint := func(above, below int) {
+		e := style(above)
+		if c.rowSelected(below) {
+			e = style(below)
+		}
+		add(e.Render("├" + strings.Repeat("─", width-2) + "┤"))
+	}
+	last := -1
+	for i, s := range c.Stack {
+		joint(last, i)
+		mark, name := "  ", look.Title
+		if c.rowSelected(i) {
+			mark, name = look.Cursor.Render("❯ "), look.Cursor
+		}
+		text := mark + name.Render(s.Key)
+		if s.Word != "" {
+			word := look.Dim
+			if s.Attention {
+				word = look.Attention
+			}
+			text += " " + word.Render(s.Word)
+		}
+		zones = append(zones, Zone{Kind: OnStack, Y: len(lines), X0: 0, X1: width, Choice: i})
+		row(text, style(i))
+		// The strip's own click zone sits on top of its card zone.
+		zones[len(zones)-1], zones[len(zones)-2] = zones[len(zones)-2], zones[len(zones)-1]
+		last = i
+	}
+	if c.StackMore > 0 {
+		joint(last, last)
+		row(look.Dim.Render(fmt.Sprintf("  +%d more", c.StackMore)), style(last))
+	}
+	if c.Cue != "" && c.Selected {
+		joint(last, last)
+		row(c.Cue, style(last))
+	}
+	add(style(last).Render("╰" + strings.Repeat("─", width-2) + "╯"))
 	return lines, zones
+}
+
+// rowSelected is whether the cursor is on row i of the card: -1 the card
+// itself, 0 and up the strips.
+func (c Card) rowSelected(i int) bool { return c.Selected && c.StackAt == i }
+
+// stackBorder is the colour of row i's border: the card's own for -1.
+func (c Card) stackBorder(head Card, i int) lipgloss.Color {
+	switch {
+	case i < 0:
+		return head.border()
+	case c.Grabbed && c.rowSelected(i):
+		return look.CardGrabbed
+	case c.rowSelected(i):
+		return look.CardSelected
+	case c.Stack[i].Attention:
+		return look.CardAttention
+	}
+	return look.CardBorder
 }
 
 // top is the top border with the title in it, and the badge at its right.
