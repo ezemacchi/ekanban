@@ -130,6 +130,9 @@ func Discuss(c Herdr, run *ticket.Run, question ticket.Question, q Questions) (s
 	if err := c.PromptAgent(name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
 		return "", fmt.Errorf("send the discussion its prompt: %w", err)
 	}
+	if err := submitted(c, pane); err != nil {
+		return "", fmt.Errorf("%w; press enter in its tab", err)
+	}
 	_ = c.FocusAgent(pane)
 	return fmt.Sprintf("opened a discussion of %s (%s model) in tab %s", slug, size, tab), nil
 }

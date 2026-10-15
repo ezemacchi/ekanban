@@ -21,7 +21,17 @@ type fake struct {
 	failTab bool
 }
 
-func (f *fake) Agents() ([]herdr.Agent, error) { return f.agents, nil }
+
+// Agents are the ones given, and each one started, working on its prompt.
+func (f *fake) Agents() ([]herdr.Agent, error) {
+	out := append([]herdr.Agent(nil), f.agents...)
+	for _, s := range f.started {
+		parts := strings.Split(s, "|")
+		kind := parts[1]
+		out = append(out, herdr.Agent{Name: parts[0], PaneID: parts[2], Agent: &kind, AgentStatus: "working"})
+	}
+	return out, nil
+}
 func (f *fake) FocusAgent(p string) error      { f.focused = append(f.focused, p); return nil }
 func (f *fake) CreateTab(ws, cwd, label string) (string, string, error) {
 	if f.failTab {
@@ -34,6 +44,7 @@ func (f *fake) StartAgent(name, kind, pane string, args []string) error {
 	f.started = append(f.started, name+"|"+kind+"|"+pane+"|"+strings.Join(args, " "))
 	return nil
 }
+func (f *fake) SendKeys(string, ...string) error { return nil }
 func (f *fake) PromptAgent(target, text string) error {
 	f.prompts = append(f.prompts, target+"|"+text)
 	return nil

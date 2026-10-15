@@ -21,6 +21,7 @@ type Herdr interface {
 	CreateTab(workspaceID, cwd, label string) (tabID, paneID string, err error)
 	StartAgent(name, kind, paneID string, args []string) error
 	PromptAgent(target, text string) error
+	SendKeys(paneID string, keys ...string) error
 }
 
 // Go focuses run's orchestrator, or opens a new one. The string says what happened.
@@ -59,6 +60,9 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	// easily cut or split.
 	if err := c.PromptAgent(name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
 		return "", fmt.Errorf("send the %s its prompt: %w", label, err)
+	}
+	if err := submitted(c, pane); err != nil {
+		return "", fmt.Errorf("%w; press enter in its tab", err)
 	}
 	_ = c.FocusAgent(pane)
 	return fmt.Sprintf("opened a new %s (%s) in tab %s", label, name, run.Orchestrator.Tab), nil

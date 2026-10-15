@@ -166,7 +166,7 @@ func quit(c Relauncher, pane string) error {
 // for a few seconds after it starts, while it draws its banner, though Herdr
 // already calls it idle and ready: the text lands in the input box and its
 // enter is lost. Seen on a Cursor agent twice in a row; a later enter works.
-func submitted(c Relauncher, pane string) error {
+func submitted(c Herdr, pane string) error {
 	for try := 1; try <= submitTries; try++ {
 		for end := time.Now().Add(submitFor); time.Now().Before(end); time.Sleep(stopPoll) {
 			agents, err := c.Agents()
