@@ -137,6 +137,3 @@ func TestFreeAgentNameFitsHerdr(t *testing.T) {
 		t.Fatalf("numbered = %q", next)
 	}
 }
-
-// The tests do not wait for an agent that is only a fake.
-func init() { readyGap = 0 }

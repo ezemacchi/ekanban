@@ -26,7 +26,6 @@ var (
 	keyGap      = 800 * time.Millisecond // between the two ctrl+c a terminal agent needs to quit
 	stopPoll    = 700 * time.Millisecond
 	stopFor     = 8 * time.Second
-	readyGap    = 3 * time.Second // between starting an agent and prompting it by name
 	submitFor   = 8 * time.Second // per try: how long a sent prompt may take to start the agent working
 	submitTries = 5
 )
@@ -70,7 +69,7 @@ func Relaunch(c Relauncher, run *ticket.Run) (string, error) {
 	if err := c.StartAgent(name, run.Orchestrator.Kind, pane, run.Orchestrator.Args); err != nil {
 		return "", fmt.Errorf("start the %s in %s: %w", label, pane, err)
 	}
-	if err := promptReady(c, name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
+	if err := c.PromptAgent(name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
 		return "", fmt.Errorf("send the %s its prompt: %w", label, err)
 	}
 	if err := submitted(c, pane); err != nil {
@@ -160,14 +159,6 @@ func quit(c Relauncher, pane string) error {
 		}
 	}
 	return fmt.Errorf("still running")
-}
-
-// promptReady sends text to the agent just started under name. Herdr calls a
-// started agent ready before it will take a prompt by name (agent_not_ready),
-// so it gets a moment first.
-func promptReady(c Herdr, name, text string) error {
-	time.Sleep(readyGap)
-	return c.PromptAgent(name, text)
 }
 
 // submitted waits for the agent in pane to start working on the prompt just

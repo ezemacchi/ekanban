@@ -58,7 +58,7 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	}
 	// One line pointing at the file: long text typed into a terminal agent is
 	// easily cut or split.
-	if err := promptReady(c, name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
+	if err := c.PromptAgent(name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
 		return "", fmt.Errorf("send the %s its prompt: %w", label, err)
 	}
 	if err := submitted(c, pane); err != nil {

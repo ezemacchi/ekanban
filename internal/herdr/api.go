@@ -328,15 +328,32 @@ func (c *Client) CreateTab(workspaceID, cwd, label string) (tabID, paneID string
 // agentStartTimeout is how long Herdr may take to see a started agent come up.
 const agentStartTimeout = 60 * time.Second
 
+// agentReadyPoll is how often a started agent is asked whether it is ready.
+const agentReadyPoll = 300 * time.Millisecond
+
 // StartAgent starts an agent of a kind Herdr knows (cursor, claude, ...) in a
-// pane, under a name later calls can target. It returns once Herdr sees the
-// agent running.
+// pane, under a name later calls can target. It returns once Herdr says the
+// agent can take a prompt: agent.start itself answers as soon as the command
+// is typed, and a prompt sent by name before that is refused (agent_not_ready).
 func (c *Client) StartAgent(name, kind, paneID string, args []string) error {
 	params := map[string]any{"name": name, "kind": kind, "pane_id": paneID, "timeout_ms": agentStartTimeout.Milliseconds()}
 	if len(args) > 0 {
 		params["args"] = args
 	}
-	return c.requestWithin(agentStartTimeout+10*time.Second, "agent.start", params, nil)
+	if err := c.requestWithin(agentStartTimeout+10*time.Second, "agent.start", params, nil); err != nil {
+		return err
+	}
+	for end := time.Now().Add(agentStartTimeout); time.Now().Before(end); time.Sleep(agentReadyPoll) {
+		var res struct {
+			Agent struct {
+				Ready bool `json:"interactive_ready"`
+			} `json:"agent"`
+		}
+		if err := c.Request("agent.get", map[string]any{"target": name}, &res); err == nil && res.Agent.Ready {
+			return nil
+		}
+	}
+	return fmt.Errorf("agent %s did not become ready in %s", name, agentStartTimeout)
 }
 
 // SendKeys presses logical keys (ctrl+c, enter, esc) in a pane, as a person
