@@ -137,3 +137,30 @@ func TestFreeAgentNameFitsHerdr(t *testing.T) {
 		t.Fatalf("numbered = %q", next)
 	}
 }
+
+func TestGoResumesTheSavedConversation(t *testing.T) {
+	r := run(t)
+	r.Workspace, r.Dir = "w", t.TempDir()
+	r.Orchestrator.Kind, r.Orchestrator.Args = "cursor", []string{"--trust"}
+
+	f := &fake{}
+	if _, err := Go(f, r); err != nil || strings.Contains(f.started[0], "--resume") {
+		t.Fatalf("nothing saved, yet: err %v started %q", err, f.started)
+	}
+
+	ticket.RememberSession(r.Dir, "cursor", "abc-123")
+	f = &fake{}
+	if _, err := Go(f, r); err != nil || !strings.HasSuffix(f.started[0], "--trust --resume abc-123") {
+		t.Fatalf("err %v started %q", err, f.started)
+	}
+	if got, _ := os.ReadFile(filepath.Join(r.Dir, "orchestrator-resume.md")); !strings.Contains(string(got), "resumed on your own conversation") {
+		t.Fatalf("prompt = %q", got)
+	}
+
+	// Another kind of agent cannot be resumed with it.
+	r.Orchestrator.Kind = "codex"
+	f = &fake{}
+	if _, err := Go(f, r); err != nil || strings.Contains(f.started[0], "--resume") {
+		t.Fatalf("err %v started %q", err, f.started)
+	}
+}

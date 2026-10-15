@@ -209,6 +209,17 @@ type Agent struct {
 	// Title is what the agent last set as its terminal title, usually a few
 	// words on what it is doing; Herdr's sidebar shows it.
 	Title string `json:"terminal_title_stripped"`
+	// Session is the agent's own conversation, which it can be started again
+	// on; nil until the agent has reported one.
+	Session *AgentSession `json:"agent_session"`
+}
+
+// AgentSession names a conversation of an agent: Kind "id" means Value is its
+// id, as `cursor-agent --resume <id>` takes it.
+type AgentSession struct {
+	Agent string `json:"agent"`
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
 }
 
 // Tab is one entry from tab.list.

@@ -538,6 +538,9 @@ func (r *Run) placeOrchestrator(roles []team.Role, agents []herdr.Agent, tabLabe
 		for _, a := range agents {
 			if test(a) {
 				r.OrchestratorStatus, r.OrchestratorPane, r.OrchestratorTitle = a.AgentStatus, a.PaneID, titleOf(a)
+				if a.Session != nil && a.Session.Kind == "id" && a.Session.Value != "" && a.Agent != nil {
+					RememberSession(r.Dir, *a.Agent, a.Session.Value)
+				}
 				return
 			}
 		}

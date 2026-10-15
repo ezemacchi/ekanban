@@ -52,11 +52,22 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open the %s tab: %w", run.Orchestrator.Tab, err)
 	}
-	if err := c.StartAgent(name, run.Orchestrator.Kind, pane, run.Orchestrator.Args); err != nil {
+	args, resumed := resumeArgs(run)
+	err = c.StartAgent(name, run.Orchestrator.Kind, pane, args)
+	if err != nil && resumed {
+		// The old conversation is gone or cannot be reopened: start a new one.
+		resumed = false
+		err = c.StartAgent(name, run.Orchestrator.Kind, pane, run.Orchestrator.Args)
+	}
+	if err != nil {
 		return "", fmt.Errorf("start the %s in tab %s: %w", label, run.Orchestrator.Tab, err)
 	}
+	prompt := run.Orchestrator.Prompt
+	if resumed {
+		prompt = run.Orchestrator.ResumePrompt
+	}
 	file := filepath.Join(run.Dir, run.Orchestrator.Tab+"-resume.md")
-	if err := os.WriteFile(file, []byte(Expand(run.Orchestrator.Prompt, run)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte(Expand(prompt, run)+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("write the %s's prompt: %w", label, err)
 	}
 	// One line pointing at the file: long text typed into a terminal agent is
@@ -69,6 +80,17 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	}
 	_ = c.FocusAgent(pane)
 	return fmt.Sprintf("opened a new %s (%s) in tab %s", label, name, run.Orchestrator.Tab), nil
+}
+
+// resumeArgs are the orchestrator's arguments with --resume <id> added, when
+// the run recorded the conversation of an agent of this kind: Cursor and
+// Claude both take it. Otherwise the arguments as they are.
+func resumeArgs(run *ticket.Run) ([]string, bool) {
+	agent, id := ticket.SavedSession(run.Dir)
+	if id == "" || agent != run.Orchestrator.Kind || (agent != "cursor" && agent != "claude") {
+		return run.Orchestrator.Args, false
+	}
+	return append(append([]string(nil), run.Orchestrator.Args...), "--resume", id), true
 }
 
 // freeName is the ticket key in lower case, or that plus the tab, or a

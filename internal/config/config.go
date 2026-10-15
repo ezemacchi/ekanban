@@ -531,6 +531,11 @@ icons = false
 # unset, the board starts the orchestrator itself from kind and prompt.
 # command = ["pwsh", "-NoProfile", "-File", "C:/path/Restart-Orchestrator.ps1", "-Key", "{key}", "-Worktree", "{worktree}"]
 # relaunch_command = [..., "-Replace"]
+# The boards save the orchestrator's conversation id in the run folder
+# (orchestrator-session.json). o with none open starts a cursor or claude agent on
+# it (--resume) and sends resume_prompt instead of prompt; O always starts a new
+# conversation. If the old one cannot be reopened, a new one starts.
+# resume_prompt = "You were closed and are resumed. Read {state} again and continue."
 
 # Where a team run lives in a worktree and how its state file reads. A run is
 # <dir>/<KEY>/<state>; the boards read its header fields and "## " sections.

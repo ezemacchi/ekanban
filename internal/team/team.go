@@ -55,6 +55,9 @@ type Orchestrator struct {
 	// pointed at. Placeholders: {label} {key} {team} {target} {branch}
 	// {worktree} {run} {state} {workspace} {issue}.
 	Prompt string `toml:"prompt"`
+	// ResumePrompt is sent instead of Prompt when the new orchestrator is
+	// started on the conversation the last one had (o with none open).
+	ResumePrompt string `toml:"resume_prompt"`
 	// Command is a program that starts the orchestrator instead of the board
 	// doing it (o with none open), and RelaunchCommand one that replaces it
 	// (O). Run without a shell, in the worktree; placeholders as in Prompt.
@@ -69,6 +72,10 @@ type Orchestrator struct {
 // DefaultPrompt is a new orchestrator's prompt when the team and config.toml give none.
 const DefaultPrompt = "You are the {label} of ticket {key}, team {team}. The run's folder is {run}. " +
 	"Read {state} in full, then continue the run from where it stopped. Work only in {worktree}."
+
+// DefaultResumePrompt is sent to an orchestrator started on its old conversation.
+const DefaultResumePrompt = "You were closed and are resumed on your own conversation. Time has passed: read {state} and LOG.md again, " +
+	"check git status and `herdr tab list`, and do not redo a step whose result already exists. Say in one line where you continue from."
 
 // Matches reports whether text (lower case) names the orchestrator.
 func (l Orchestrator) Matches(text string) bool { return l.re != nil && l.re.MatchString(text) }
@@ -100,6 +107,9 @@ func (l Orchestrator) Over(o Orchestrator) Orchestrator {
 	if o.Prompt != "" {
 		l.Prompt = o.Prompt
 	}
+	if o.ResumePrompt != "" {
+		l.ResumePrompt = o.ResumePrompt
+	}
 	if o.Command != nil {
 		l.Command = o.Command
 	}
@@ -118,6 +128,9 @@ func (l *Orchestrator) compile() error {
 	}
 	if l.Prompt == "" {
 		l.Prompt = DefaultPrompt
+	}
+	if l.ResumePrompt == "" {
+		l.ResumePrompt = DefaultResumePrompt
 	}
 	l.re = nil
 	if l.Match == "" {
