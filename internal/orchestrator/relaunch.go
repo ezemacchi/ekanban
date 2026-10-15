@@ -46,6 +46,9 @@ func Relaunch(c Relauncher, run *ticket.Run) (string, error) {
 	if run.Workspace == "" {
 		return "", fmt.Errorf("no Herdr workspace is open on %s, so there is nowhere to relaunch the %s", run.Worktree, label)
 	}
+	if text, ran, err := viaCommand(run, run.Orchestrator.RelaunchCommand); ran {
+		return text, err
+	}
 	if run.Orchestrator.Kind == "" {
 		return "", fmt.Errorf("set kind in config.toml's [orchestrator] (e.g. kind = \"cursor\") to relaunch the %s", label)
 	}

@@ -55,6 +55,13 @@ type Orchestrator struct {
 	// pointed at. Placeholders: {label} {key} {team} {target} {branch}
 	// {worktree} {run} {state} {workspace} {issue}.
 	Prompt string `toml:"prompt"`
+	// Command is a program that starts the orchestrator instead of the board
+	// doing it (o with none open), and RelaunchCommand one that replaces it
+	// (O). Run without a shell, in the worktree; placeholders as in Prompt.
+	// Unset, or a program that cannot be started: the board starts the
+	// orchestrator itself, from Kind and Prompt.
+	Command         []string `toml:"command"`
+	RelaunchCommand []string `toml:"relaunch_command"`
 
 	re *regexp.Regexp
 }
@@ -92,6 +99,12 @@ func (l Orchestrator) Over(o Orchestrator) Orchestrator {
 	}
 	if o.Prompt != "" {
 		l.Prompt = o.Prompt
+	}
+	if o.Command != nil {
+		l.Command = o.Command
+	}
+	if o.RelaunchCommand != nil {
+		l.RelaunchCommand = o.RelaunchCommand
 	}
 	return l
 }

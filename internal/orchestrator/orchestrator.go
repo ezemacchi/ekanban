@@ -36,6 +36,9 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	if run.Workspace == "" {
 		return "", fmt.Errorf("no Herdr workspace is open on %s, so there is nowhere to open the %s", run.Worktree, label)
 	}
+	if text, ran, err := viaCommand(run, run.Orchestrator.Command); ran {
+		return text, err
+	}
 	if run.Orchestrator.Kind == "" {
 		return "", fmt.Errorf("no %s is open; set kind in config.toml's [orchestrator] (e.g. kind = \"cursor\") to open one", label)
 	}

@@ -524,6 +524,13 @@ icons = false
 # kind = "cursor"
 # args = ["--model", "some-model"]
 # prompt = "You are the {label} of {key}. Read {state} in full and continue the run."
+# command / relaunch_command: a program that starts the orchestrator in place of
+# the board (o with none open / O), run without a shell in the worktree, with the
+# same placeholders. Its last JSON line, or last line, is shown as the result.
+# Once it has run its answer is final; if it cannot be started at all, or is
+# unset, the board starts the orchestrator itself from kind and prompt.
+# command = ["pwsh", "-NoProfile", "-File", "C:/path/Restart-Orchestrator.ps1", "-Key", "{key}", "-Worktree", "{worktree}"]
+# relaunch_command = [..., "-Replace"]
 
 # Where a team run lives in a worktree and how its state file reads. A run is
 # <dir>/<KEY>/<state>; the boards read its header fields and "## " sections.
