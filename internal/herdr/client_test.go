@@ -284,6 +284,26 @@ func TestSendToAgentAndFocusUseTarget(t *testing.T) {
 	}
 }
 
+// Keys go to a pane, not to an agent: after an agent exits there is none to name.
+func TestSendKeysPressesLogicalKeysInThePane(t *testing.T) {
+	f := herdrtest.Start(t)
+	f.OK(map[string]any{"type": "ok"})
+	c, _ := New()
+
+	if err := c.SendKeys("w1:p1", "ctrl+c", "enter"); err != nil {
+		t.Fatal(err)
+	}
+	req := f.LastAny(t)
+	if req.Method != "pane.send_keys" {
+		t.Fatalf("method = %q, want pane.send_keys", req.Method)
+	}
+	params := herdrtest.Params(t, req)
+	keys, _ := params["keys"].([]any)
+	if params["pane_id"] != "w1:p1" || len(keys) != 2 || keys[0] != "ctrl+c" || keys[1] != "enter" {
+		t.Fatalf("params = %+v", params)
+	}
+}
+
 // A broadcast submits through agent.prompt: Herdr's own submission, which
 // refuses an agent at a dialog instead of answering it with enter.
 func TestSubmitToAgentUsesAgentPrompt(t *testing.T) {

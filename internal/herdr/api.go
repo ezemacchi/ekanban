@@ -80,6 +80,11 @@ func (c *Client) RenameTab(id, label string) error {
 	return c.Request("tab.rename", map[string]any{"tab_id": id, "label": label}, nil)
 }
 
+// CloseTab closes a tab and its panes.
+func (c *Client) CloseTab(id string) error {
+	return c.Request("tab.close", map[string]any{"tab_id": id}, nil)
+}
+
 // OpenPluginPane launches one of a plugin's [[panes]] entrypoints; params are
 // plugin.pane.open's (placement, workspace_id, target_pane_id, cwd, focus).
 func (c *Client) OpenPluginPane(pluginID, entrypoint string, params map[string]any) error {
@@ -332,6 +337,13 @@ func (c *Client) StartAgent(name, kind, paneID string, args []string) error {
 		params["args"] = args
 	}
 	return c.requestWithin(agentStartTimeout+10*time.Second, "agent.start", params, nil)
+}
+
+// SendKeys presses logical keys (ctrl+c, enter, esc) in a pane, as a person
+// would. It goes by pane rather than agent: a pane whose agent has exited
+// has no agent to name, and the keys are still how you find that out.
+func (c *Client) SendKeys(paneID string, keys ...string) error {
+	return c.Request("pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys}, nil)
 }
 
 // PromptAgent submits text to an agent, as if typed and sent.

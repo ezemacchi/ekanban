@@ -173,6 +173,11 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) err
 		return err
 	}
 
+	// A worktree that went without being accepted leaves no other trace, so
+	// write it down on the first poll that sees it gone. This only reads the
+	// board; an open board is the one that rewrites it.
+	_, _ = board.RecordVanished(time.Now())
+
 	// Watch every space the board knows about: the live ones, plus stored
 	// entries whose workspace is currently closed. A PR you are waiting on
 	// matters whether or not its window happens to be open.

@@ -68,3 +68,19 @@ func TestNewTabs(t *testing.T) {
 		t.Fatalf("new tabs %v, want [c]", got)
 	}
 }
+
+func TestDeadBoardsAreBareShellsInBoardTabs(t *testing.T) {
+	agent := "cursor"
+	tabs := []herdr.Tab{{ID: "t1", Label: "board"}, {ID: "t2", Label: "board"}, {ID: "t3", Label: "board"}, {ID: "t4", Label: "notes"}, {ID: "t5", Label: "board"}}
+	panes := []herdr.Pane{
+		{PaneID: "p1", TabID: "t1"},                  // restored shell
+		{PaneID: "p2", TabID: "t2", Label: "Ticket"}, // live board
+		{PaneID: "p3", TabID: "t3", Agent: &agent},   // an agent
+		{PaneID: "p4", TabID: "t4"},                  // not a board tab
+		{PaneID: "p5", TabID: "t5"}, {PaneID: "p6", TabID: "t5"}, // a layout of the person's own
+	}
+	got := deadBoards(tabs, panes)
+	if len(got) != 1 || got[0].PaneID != "p1" {
+		t.Fatalf("deadBoards = %+v, want only p1", got)
+	}
+}

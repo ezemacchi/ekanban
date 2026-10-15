@@ -71,7 +71,11 @@ type Model struct {
 	settling bool      // an event is waiting out settle
 	loadedAt time.Time // the last load finished
 	stamp    string    // the run folder as last read, see runStamp
-	opening  bool      // the orchestrator is being opened
+	opening  bool      // the orchestrator is being opened or relaunched
+
+	// relaunching is whether the board is asking yes or no to relaunch the
+	// orchestrator (relaunch.go).
+	relaunching bool
 
 	events    chan herdr.Event
 	subCancel context.CancelFunc
@@ -131,6 +135,12 @@ func (m *Model) click(x, y int) tea.Cmd {
 	if m.closing != nil {
 		if ok && z.Kind == screen.OnButton {
 			return m.closeKey(screen.KeyMsg(z.Key))
+		}
+		return nil
+	}
+	if m.relaunching {
+		if ok && z.Kind == screen.OnButton {
+			return m.answerRelaunch(z.Key)
 		}
 		return nil
 	}
@@ -212,6 +222,7 @@ var Actions = []keys.Action{
 	{Name: "close", Keys: []string{"x"}, Scope: scopeQuestion, Help: "close the question without an answer, it is no longer needed: the board closes it in the run once you say yes, no agent asked"},
 	{Name: "fold", Keys: []string{" ", "tab"}, Help: "fold or unfold the column"},
 	{Name: "orchestrator", Keys: []string{"o"}, Help: "go to the orchestrator (the agent running the team), or open one"},
+	{Name: "relaunch", Keys: []string{"O"}, Help: "relaunch the orchestrator once you say yes: the one running is quit with ctrl+c and a new one starts in its tab, resuming from the run's files; use it when the orchestrator is dead, hung, or on the wrong model"},
 	{Name: "open-issue", Keys: []string{"t"}, Help: "open the ticket in the tracker"},
 	{Name: "prototype", Keys: []string{"p"}, Help: "open the prototype"},
 	{Name: "refresh", Keys: []string{"r"}, Help: "refresh"},
@@ -227,7 +238,7 @@ var helpLayout = []screen.HelpSection{
 	{Title: "Move", Rows: [][]string{{"left", "right"}, {"down", "up"}, {"top", "bottom"}}},
 	{Title: "The selected role or question", Rows: [][]string{{"jump"}}},
 	{Title: "On a question", Rows: [][]string{{"reply"}, {"discuss"}, {"close"}, {"yank"}}},
-	{Title: "The run", Rows: [][]string{{"orchestrator"}, {"open-issue"}, {"prototype"}, {"ask"}, {"closed"}, {"fold"}, {"refresh"}, {"help"}, {"quit"}}},
+	{Title: "The run", Rows: [][]string{{"orchestrator"}, {"relaunch"}, {"open-issue"}, {"prototype"}, {"ask"}, {"closed"}, {"fold"}, {"refresh"}, {"help"}, {"quit"}}},
 }
 
 // helpNotes explain the board rather than drive it.
@@ -500,6 +511,9 @@ func (m *Model) key(k string) tea.Cmd {
 		m.helping = false // any key closes the help
 		return nil
 	}
+	if m.relaunching {
+		return m.answerRelaunch(k)
+	}
 	if m.sure != nil {
 		return m.answer(k)
 	}
@@ -564,6 +578,8 @@ func (m *Model) key(k string) tea.Cmd {
 		return tea.Batch(m.working(refreshing), m.reload())
 	case "o":
 		return m.goOrchestrator()
+	case "O":
+		return m.askRelaunch()
 	case "t":
 		if m.run != nil {
 			url := m.run.JiraURL
@@ -760,6 +776,9 @@ func (m *Model) View() string {
 	if m.closing != nil {
 		return m.closeView(b.String(), width, max(m.height, screen.LinesIn(b.String())+1))
 	}
+	if m.relaunching {
+		return m.relaunchView(b.String(), width, max(m.height, screen.LinesIn(b.String())+1))
+	}
 	if m.sure != nil {
 		return m.confirmView(b.String(), width, max(m.height, screen.LinesIn(b.String())+1))
 	}
@@ -887,7 +906,10 @@ func (m *Model) body(width, top int) string {
 		}
 	}
 	orch := titleStyle.Render(ic.With(look.Sitemap, orDash(r.Orchestrator.Label))) + "  " + said
-	items([]screen.Item{screen.Text(orch)}, []screen.Item{screen.Button(screen.Hint{Key: k("orchestrator"), Label: button})})
+	items([]screen.Item{screen.Text(orch)}, []screen.Item{
+		screen.Button(screen.Hint{Key: k("orchestrator"), Label: button}),
+		screen.Button(screen.Hint{Key: k("relaunch"), Label: "Relaunch"}),
+	})
 	b.WriteString("\n")
 
 	cols := m.kanbanColumns()

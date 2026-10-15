@@ -191,3 +191,95 @@ func envOr(name, fallback string) string {
 	}
 	return fallback
 }
+
+// deadBoards are the panes of tabs labelled "board" that hold nothing of the
+// plugin: a shell, with no agent and none of the plugin's pane titles. After a
+// server restart that is what a board's tab comes back as. A tab with more
+// than one pane is the person's own layout, and is left alone.
+func deadBoards(tabs []herdr.Tab, panes []herdr.Pane) []herdr.Pane {
+	var out []herdr.Pane
+	for _, t := range tabs {
+		if !strings.EqualFold(t.Label, boardTabLabel) {
+			continue
+		}
+		var in []herdr.Pane
+		for _, p := range panes {
+			if p.TabID == t.ID {
+				in = append(in, p)
+			}
+		}
+		if len(in) != 1 || in[0].Label != "" || in[0].Agent != nil && *in[0].Agent != "" {
+			continue
+		}
+		out = append(out, in[0])
+	}
+	return out
+}
+
+// reopenBoards replaces each dead board tab with a live board, in the same
+// workspace and place: the ticket board in a ticket's workspace, the space
+// kanban elsewhere.
+func reopenBoards(client *herdr.Client) error {
+	panes, err := client.Panes()
+	if err != nil {
+		return err
+	}
+	workspaces, err := client.Workspaces()
+	if err != nil {
+		return err
+	}
+	plugin := envOr("HERDR_PLUGIN_ID", "ekanban")
+	var failed []string
+	for _, ws := range workspaces {
+		tabs, err := client.Tabs(ws.ID)
+		if err != nil {
+			return err
+		}
+		for _, dead := range deadBoards(tabs, panes) {
+			if dead.WorkspaceID != ws.ID {
+				continue
+			}
+			if err := reopenBoard(client, plugin, ws.ID, tabs, dead); err != nil {
+				failed = append(failed, dead.TabID+": "+err.Error())
+			}
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+func reopenBoard(client *herdr.Client, plugin, workspace string, tabs []herdr.Tab, dead herdr.Pane) error {
+	entry, cwd := "tab", dead.Cwd
+	if dir, isTicket := ticketWorkspace(client, dead); isTicket {
+		entry, cwd = "ticket", dir
+	}
+	params := map[string]any{"placement": "tab", "workspace_id": workspace, "focus": false}
+	if cwd != "" {
+		params["cwd"] = cwd
+	}
+	if err := client.OpenPluginPane(plugin, entry, params); err != nil {
+		return err
+	}
+	after, err := client.Tabs(workspace)
+	if err != nil {
+		return err
+	}
+	added := newTabs(tabs, after)
+	if len(added) != 1 {
+		return fmt.Errorf("could not tell the new board's tab apart")
+	}
+	if err := client.RenameTab(added[0], boardTabLabel); err != nil {
+		return err
+	}
+	for i, t := range after {
+		if t.ID == dead.TabID {
+			_ = client.MoveTab(added[0], i)
+		}
+	}
+	if dead.Focused {
+		_ = client.FocusTab(added[0])
+	}
+	return client.CloseTab(dead.TabID)
+}

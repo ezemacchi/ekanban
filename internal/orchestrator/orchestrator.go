@@ -72,7 +72,7 @@ func freeName(run *ticket.Run, agents []herdr.Agent) string {
 		taken[strings.ToLower(a.Name)] = true
 	}
 	base := strings.ToLower(run.Key)
-	for i, name := 0, base; ; i++ {
+	for i, name := 0, herdrName(base, maxAgentName); ; i++ {
 		if !taken[name] {
 			return name
 		}
@@ -80,18 +80,46 @@ func freeName(run *ticket.Run, agents []herdr.Agent) string {
 		if i > 0 {
 			name = fmt.Sprintf("%s-%s-%d", base, run.Orchestrator.Tab, i+1)
 		}
+		name = herdrName(name, maxAgentName)
 	}
 }
 
-// freeAgentName is base, or base numbered: agent names are unique in Herdr.
+// maxAgentName is the longest agent name Herdr accepts.
+const maxAgentName = 32
+
+// herdrName makes s a name Herdr accepts: lower-case letters, digits, '-' and
+// '_', starting with a letter, at most max characters.
+func herdrName(s string, max int) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r + 'a' - 'A'
+		}
+		return '-'
+	}, s)
+	s = strings.TrimLeft(s, "-_0123456789")
+	if s == "" {
+		s = "agent"
+	}
+	if len(s) > max {
+		s = s[:max]
+	}
+	return strings.TrimRight(s, "-_")
+}
+
+// freeAgentName is base, or base numbered: agent names are unique in Herdr,
+// and at most maxAgentName characters.
 func freeAgentName(base string, agents []herdr.Agent) string {
 	taken := map[string]bool{}
 	for _, a := range agents {
 		taken[strings.ToLower(a.Name)] = true
 	}
-	name := base
+	name := herdrName(base, maxAgentName)
 	for i := 2; taken[name]; i++ {
-		name = fmt.Sprintf("%s-%d", base, i)
+		suffix := fmt.Sprintf("-%d", i)
+		name = herdrName(base, maxAgentName-len(suffix)) + suffix
 	}
 	return name
 }

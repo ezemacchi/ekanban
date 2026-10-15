@@ -114,3 +114,15 @@ func TestFreeNameCounts(t *testing.T) {
 		t.Fatalf("freeName = %q", got)
 	}
 }
+
+func TestFreeAgentNameFitsHerdr(t *testing.T) {
+	base := "abc-1-q-linked-tests-exported-marker"
+	got := freeAgentName(base, nil)
+	if len(got) > maxAgentName || got != herdrName(base, maxAgentName) {
+		t.Fatalf("freeAgentName = %q", got)
+	}
+	next := freeAgentName(base, []herdr.Agent{{Name: got}})
+	if len(next) > maxAgentName || next == got || !strings.HasSuffix(next, "-2") {
+		t.Fatalf("numbered = %q", next)
+	}
+}

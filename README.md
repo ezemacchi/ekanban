@@ -289,7 +289,18 @@ The ticket board opens as a tab of the ticket's workspace and shows one card per
 role of the run's team: pending, working, waiting on you, done. Under it are the
 run's objective, current step and open questions, and a list of what the agents
 did. `enter` goes to a role's tab, and `o` goes to the agent running the team
-(its orchestrator), or starts one with a prompt to resume the run.
+(its orchestrator), or starts one with a prompt to resume the run. `o` only goes
+to an orchestrator that is open, so for one that is dead, hung at an empty
+prompt, or on the wrong model there is `O` (the orchestrator line's Relaunch
+button). It asks (Y)es/(N)o first, then quits the running agent with two
+`ctrl+c`, keeps its tab, and starts a new agent there with the same resume
+prompt `o` uses. The new agent is a new conversation, not a resumed one: it reads
+the run's files to see where the run stopped. An agent that does not quit is
+reported, never killed, and nothing starts; with no orchestrator open it reuses
+the empty `orchestrator` tab a dead one left, or opens a new tab. A prompt whose
+Enter the CLI dropped just after starting is submitted with a later Enter. Which
+model it runs on comes from `args` in `[orchestrator]` of `config.toml`, such as
+`args = ["--model", "<model>", "--trust"]` for the Cursor CLI.
 
 The ticket and the prototype are buttons under the objective, and the
 orchestrator's line has a button that goes to it. A finished role takes one

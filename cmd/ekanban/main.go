@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -54,6 +55,9 @@ func run(args []string) error {
 		case "questions":
 			return questionsCmd(args[1:], os.Stdout)
 
+		case "history":
+			return historyCmd(args[1:], os.Stdout)
+
 		case "version", "--version", "-v":
 			fmt.Println(version.Version)
 			return nil
@@ -78,6 +82,12 @@ func run(args []string) error {
 			board, err := store.Load()
 			if err != nil {
 				return err
+			}
+			// Prune forgets an entry for good, so write down what it knew first.
+			// If that fails nothing is pruned: losing the record is the thing
+			// this exists to stop.
+			if _, err := board.RecordVanished(time.Now()); err != nil {
+				return fmt.Errorf("could not write the history, so nothing was pruned: %w", err)
 			}
 			n := board.Prune()
 			if err := board.Save(); err != nil {
@@ -363,6 +373,12 @@ func startup() error {
 	// from the board file, which does.
 	if err := sync(client, board); err != nil {
 		return err
+	}
+
+	// A server restart restores a board's tab as a bare shell: the plugin pane
+	// is not a process Herdr can bring back. Open the boards again.
+	if err := reopenBoards(client); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: reopen boards:", err)
 	}
 
 	spawnWatcher()
