@@ -86,6 +86,10 @@ type Accepted struct {
 	// Repo is the repository's shared .git directory, kept because the
 	// worktree may be deleted and then nothing on disk says where it was.
 	Repo string `json:"repo,omitempty"`
+	// Archive is the copy of the run's folder kept beside the board, laid out
+	// as the worktree held it, so its notes can be read once the worktree
+	// is gone; "" when none was made.
+	Archive string `json:"archive,omitempty"`
 }
 
 // Accept archives a space; Unaccept puts it back on the board.
@@ -133,6 +137,8 @@ type Board struct {
 	Entries    map[string]Entry `json:"entries"`
 
 	path string
+	// loaded is when the file was read, zero for a board not read from it.
+	loaded time.Time
 }
 
 const currentVersion = 1
@@ -195,6 +201,7 @@ func Load() (*Board, error) {
 		Default:   "triage",
 		Entries:   map[string]Entry{},
 		path:      path,
+		loaded:    time.Now().UTC(),
 	}
 
 	data, err := os.ReadFile(path)
@@ -217,6 +224,38 @@ func Load() (*Board, error) {
 	return b, nil
 }
 
+// keepAcceptedElsewhere takes the tickets another process accepted since this
+// board was read -- `ekanban close` while a board is open -- so writing this
+// copy does not undo them. Only an accept newer than the reading counts, and
+// only over an entry this board has not touched since: one the user
+// unaccepted or forgot here stays so.
+func (b *Board) keepAcceptedElsewhere() {
+	if b.loaded.IsZero() {
+		return
+	}
+	data, err := os.ReadFile(b.path)
+	if err != nil {
+		return
+	}
+	var disk Board
+	if json.Unmarshal(data, &disk) != nil {
+		return
+	}
+	for key, d := range disk.Entries {
+		if d.Accepted == nil || !d.Accepted.At.After(b.loaded) {
+			continue
+		}
+		e, ok := b.Entries[key]
+		switch {
+		case !ok:
+			b.Entries[key] = d
+		case e.Accepted == nil && e.UpdatedAt.Before(d.Accepted.At):
+			e.Accepted = d.Accepted
+			b.Entries[key] = e
+		}
+	}
+}
+
 // Save writes the board atomically so a crash mid-write cannot truncate it.
 func (b *Board) Save() error {
 	if b.path == "" {
@@ -225,6 +264,7 @@ func (b *Board) Save() error {
 	if err := os.MkdirAll(filepath.Dir(b.path), 0o755); err != nil {
 		return err
 	}
+	b.keepAcceptedElsewhere()
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err

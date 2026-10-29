@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ezemacchi/ekanban/internal/archive"
 	"github.com/ezemacchi/ekanban/internal/links"
 	"github.com/ezemacchi/ekanban/internal/look"
 	"github.com/ezemacchi/ekanban/internal/orchestrator"
@@ -373,7 +374,10 @@ func (m *Model) handlePipelineKey(key string) (bool, tea.Model, tea.Cmd) {
 	case "A":
 		m.archiveView = true
 		m.archiveIdx = 0
+		m.archRuns = nil // a ticket accepted again has a new copy
 		return true, m, nil
+	case "close-ticket":
+		return true, m, m.closeSelected()
 	case "orchestrator":
 		return true, m, m.goOrchestrator()
 	case "handoff":
@@ -532,11 +536,11 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 	}
 	info := m.pipeInfo[sp.Key]
 	// The column on screen, which may be one the card was moved to by hand.
-	if sp.StatusID != pipeline.ReadyQA {
-		m.status = "only tickets in " + m.columns.Label(pipeline.ReadyQA) + " can be accepted"
+	if !m.acceptable(sp.StatusID) {
+		m.status = "only tickets in " + m.acceptColumns() + " can be accepted"
 		return m, nil
 	}
-	m.board.Accept(sp.Key, store.Accepted{
+	rec := store.Accepted{
 		At:       time.Now().UTC(),
 		Ticket:   info.Key,
 		Title:    firstNonEmpty(info.Title, sp.Label),
@@ -546,9 +550,24 @@ func (m *Model) acceptSelected() (tea.Model, tea.Cmd) {
 		Deployed: info.Deployed,
 		Worktree: sp.Key,
 		Repo:     m.scope,
-	})
+	}
+	notes := ""
+	if info.RunDir != "" {
+		// A run's notes are a few files of text: copied here, they are in
+		// the Archive before anything can remove the worktree.
+		dest := archive.Path(m.stateDir, info.Key)
+		if _, err := archive.Snapshot(sp.Key, info.RunDir, dest); err == nil {
+			rec.Archive = dest
+		} else if _, old := archive.ReadMeta(dest); old == nil {
+			rec.Archive = dest
+			notes = ", with the notes as last copied (" + err.Error() + ")"
+		} else {
+			notes = ", but its notes were not copied: " + err.Error()
+		}
+	}
+	m.board.Accept(sp.Key, rec)
 	m.save()
-	m.status = info.Key + " accepted: it is in the Archive (A)"
+	m.status = info.Key + " accepted: it is in the Archive (A)" + notes
 	m.rebuild()
 	return m, nil
 }
@@ -654,7 +673,7 @@ func (m *Model) viewArchive() string {
 	b.WriteString(head + "\n\n")
 
 	if len(items) == 0 {
-		b.WriteString(screen.Say("  No accepted tickets yet"+pressWith(m.pipelineKey("accept"), "on a card in "+m.columns.Label(pipeline.ReadyQA)+" on the board")+".", dimStyle, 0) + "\n")
+		b.WriteString(screen.Say("  No accepted tickets yet"+pressWith(m.pipelineKey("accept"), "on a card in "+m.acceptColumns()+" on the board")+".", dimStyle, 0) + "\n")
 	}
 	width := max(m.width-4, 40)
 	for i, a := range items {
@@ -672,6 +691,11 @@ func (m *Model) viewArchive() string {
 		if facts != "" {
 			b.WriteString("     " + dimStyle.Render(truncate(facts, width-2)) + "\n")
 		}
+		if i == m.archiveIdx {
+			for _, line := range m.archivedNotes(a.rec) {
+				b.WriteString("     " + line + "\n")
+			}
+		}
 	}
 	k := m.hintKey
 	hints := []hint{{Key: k("open-issue"), Label: "Ticket"}, {Key: k("open-pull-request"), Label: "PR"},
@@ -681,6 +705,72 @@ func (m *Model) viewArchive() string {
 	m.placeFooter(linesIn(b.String()))
 	b.WriteString(footer)
 	return lipgloss.NewStyle().MaxHeight(max(m.height, 1)).Render(b.String())
+}
+
+type archivedRead struct {
+	run  *ticket.Run
+	meta archive.Meta
+	err  error
+}
+
+// archivedRun reads the run as its copy in the Archive kept it, once per
+// copy: a copy changes only when the ticket is accepted again.
+func (m *Model) archivedRun(path string) archivedRead {
+	if r, ok := m.archRuns[path]; ok {
+		return r
+	}
+	var r archivedRead
+	if r.meta, r.err = archive.ReadMeta(path); r.err == nil {
+		r.run, r.err = m.pipe.Run(path, ticket.Live{})
+	}
+	if m.archRuns == nil {
+		m.archRuns = map[string]archivedRead{}
+	}
+	m.archRuns[path] = r
+	return r
+}
+
+// archivedNotes are the lines under the selected ticket in the Archive: what
+// its run said when it was copied.
+func (m *Model) archivedNotes(a store.Accepted) []string {
+	width := max(m.width-8, 30)
+	if a.Archive == "" || m.pipe == nil {
+		return []string{dimStyle.Render("no copy of the run's notes")}
+	}
+	r := m.archivedRun(a.Archive)
+	if r.err != nil {
+		return []string{dimStyle.Render(truncate("the copy of the run's notes cannot be read: "+r.err.Error(), width))}
+	}
+	out := []string{dimStyle.Render(truncate("notes copied "+r.meta.At.Local().Format("2006-01-02 15:04")+" · "+a.Archive, width))}
+	add := func(label string, lines []string, most int) {
+		for i, line := range lines {
+			if i == most {
+				out = append(out, dimStyle.Render(fmt.Sprintf("  … %d more", len(lines)-most)))
+				break
+			}
+			if i == 0 {
+				line = label + line
+			} else {
+				line = strings.Repeat(" ", len(label)) + line
+			}
+			out = append(out, labelStyle.Render(truncate(line, width)))
+		}
+	}
+	add("Objective: ", r.run.Objective, 2)
+	add("Last step: ", r.run.CurrentStep, 2)
+	var forYou, others []string
+	for _, q := range r.run.ForYou {
+		forYou = append(forYou, q.Words)
+	}
+	for _, q := range r.run.Questions {
+		others = append(others, firstNonEmpty(q.To, "?")+": "+q.Words)
+	}
+	add("Left for you: ", forYou, 2)
+	add("Left for others: ", others, 2)
+	if len(r.meta.Skipped) > 0 {
+		out = append(out, dimStyle.Render(fmt.Sprintf("%d large file(s) were not copied", len(r.meta.Skipped))))
+	}
+	return out
 }
 
 func prefixed(p, v string) string {

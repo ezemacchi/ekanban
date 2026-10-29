@@ -69,6 +69,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyBroadcast(msg)
 		return m, nil
 
+	case closeCheckedMsg:
+		m.applyCloseChecked(msg)
+		return m, nil
+
+	case closedMsg:
+		return m, m.applyClosed(msg)
+
 	case pickRowsMsg:
 		return m, m.applyPickRows(msg)
 

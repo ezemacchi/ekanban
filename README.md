@@ -570,6 +570,49 @@ filters are `all` (the default), `pr`, `idle`, `working`, `done`,
 who gets what and asks before sending; `--yes` skips the question, for a
 caller that has already asked you.
 
+### Closing a finished ticket
+
+`C` on a card, or `ekanban close <worktree>` from a terminal, closes a ticket
+that is done: it is accepted into the Archive, its Herdr workspaces are
+closed and git removes the worktree. First it checks, and stops at the first
+check that fails with nothing changed:
+
+1. the worktree has no uncommitted changes;
+2. every commit is on a remote;
+3. its pull request merged, or its branch is already in its target
+   (`origin/<target>` contains it);
+4. `[close] check`, when set, exits 0.
+
+It lists what it found and asks before changing anything (`--yes` skips the
+question). It will not close the workspace it runs in, since that would stop
+it halfway: run it from the board, or a terminal outside that ticket.
+
+`[close] check` is your own last word, a command run in the worktree, for
+example one that asks your build server whether the change shipped. It names
+a program to start, so it is read from `config.toml` only:
+
+```toml
+[close]
+check = ["pwsh", "-NoProfile", "-File", "C:/tools/shipped.ps1", "{key}", "{repo}"]
+```
+
+`{key}`, `{worktree}`, `{branch}`, `{target}`, `{pr}` and `{repo}` are filled
+in. When it fails, what it printed is shown as the reason.
+
+`a` accepts a card in the last column. A team that accepts earlier lists the
+columns in `.ekanban.toml`:
+
+```toml
+[accept]
+from = ["to_deploy", "ready_qa"]
+```
+
+The Archive keeps a copy of each ticket's run folder beside the board, so its
+notes outlive the worktree. The watcher refreshes the copy while the run is
+alive, and accepting takes one last copy. The selected ticket in the Archive
+shows what the copy says: its objective, its last step and the questions left
+open. Files over 8 MB are left out of the copy and counted.
+
 ### Open questions
 
 A ticket whose run has open questions says how many in its card's top border
@@ -872,7 +915,8 @@ linked worktrees look for it there.
 | `q` | quit — `esc` only backs out (a box, a search, a filter) and never closes the board |
 
 In a repository the board adds its own: `a` accepts a ticket in the last column
-and moves it to the archive, `A` opens that archive, `o` goes to the ticket's
+and moves it to the archive, `C` closes a finished ticket (see Closing a
+finished ticket), `A` opens that archive, `o` goes to the ticket's
 orchestrator (so sorting the table moves to `ctrl+o`), `t` opens its Jira
 ticket, `p` its prototype, `P` its pull request, `Q` reads its open questions
 (where `r` replies, `D` discusses one and `x` closes one without an answer),
@@ -1008,6 +1052,7 @@ ekanban pipeline [repo] # where each worktree of a repository lands, as JSON
 ekanban state [--json] [repo]       # every ticket: branch, PR, column, agents, questions
 ekanban broadcast --message "..."   # one message to the chosen orchestrators
 ekanban update-branches [repo]      # fast-forward the local target branches
+ekanban close [--yes] <worktree>    # check, accept, close its workspaces, remove it
 ekanban config          # show the settings in force, and the repository file
 ekanban config --init   # write a commented settings template
 ekanban keys            # every action and the keys bound to it

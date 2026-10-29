@@ -270,6 +270,7 @@ type Model struct {
 	manualDefault  string
 	archiveView    bool
 	archiveIdx     int
+	archRuns       map[string]archivedRead // copies read, by path
 	spinner        look.Spinner
 
 	keys keyMaps // config.toml's [keys] applied; zero means the defaults
@@ -286,6 +287,8 @@ type Model struct {
 	bb bitbucketState
 	// rv is the pull requests waiting on your review; see reviews.go.
 	rv reviewState
+	// cl is where a card may be accepted from and the close check; close.go.
+	cl closeSettings
 }
 
 // New builds the initial model.

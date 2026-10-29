@@ -643,8 +643,11 @@ func (m *Model) ticketActions(sp *space) []cardAction {
 	if _, ok := m.placed(sp.Key); ok {
 		out = append(out, cardAction{"follow-board", "Undo", true, "Undo the move: back to " + m.columns.Label(info.Stage)})
 	}
-	if sp.StatusID == pipeline.ReadyQA {
+	if m.acceptable(sp.StatusID) {
 		out = append(out, cardAction{"accept", "Accept", false, "Accept: move it to the Archive"})
+	}
+	if info.Key != "" && m.acceptable(sp.StatusID) {
+		out = append(out, cardAction{"close-ticket", "Close", false, "Close it: accept it, close its workspace and remove the worktree"})
 	}
 	if m.whyNotPlace(sp) == "" {
 		out = append(out, cardAction{"status-picker", "Move", false, "Move to another column by hand"})

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ezemacchi/ekanban/internal/alert"
+	"github.com/ezemacchi/ekanban/internal/archive"
 	"github.com/ezemacchi/ekanban/internal/state"
 )
 
@@ -93,6 +94,16 @@ func ticketNotices(t state.Ticket, before *seen, now seen) []alert.Alert {
 	return out
 }
 
+// keepNotes copies the ticket's run folder beside the board when it changed,
+// so removing the worktree does not lose its notes. A ticket with no run has
+// nothing to keep; a copy that fails is tried again next poll.
+func keepNotes(stateDir string, t state.Ticket) {
+	if t.RunDir == "" {
+		return
+	}
+	_, _ = archive.Snapshot(t.Worktree, t.RunDir, archive.Path(stateDir, t.Key))
+}
+
 // seenStore is the file the watcher keeps what it last knew in.
 type seenStore struct {
 	Tickets map[string]seen `json:"tickets"`
@@ -136,6 +147,7 @@ func pollTickets(ctx context.Context, stateDir string, dirs []string, read Ticke
 	fresh := alert.Load(stateDir)
 	var raised []alert.Alert
 	for _, r := range rows {
+		keepNotes(stateDir, r.Ticket)
 		now := seenOf(r.Ticket)
 		next[r.Dir] = now
 		var before *seen

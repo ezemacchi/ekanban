@@ -76,6 +76,26 @@ type Config struct {
 	// Stack is stacked cards: related tickets drawn under a card. Off unless
 	// it names a source.
 	Stack stack.Config `toml:"stack"`
+	// Close is how a finished ticket is closed: the check run before it.
+	Close CloseConfig `toml:"close"`
+	// Accept is which columns a ticket may be accepted from.
+	Accept AcceptConfig `toml:"accept"`
+}
+
+// CloseConfig is the [close] table.
+type CloseConfig struct {
+	// Check is a program run in the worktree before a ticket is closed, with
+	// its arguments; {key}, {worktree}, {branch}, {target}, {pr} and {repo}
+	// are filled in. Anything but exit 0 stops the close, and what it printed
+	// is shown. It starts a program, so it is read from config.toml only.
+	Check []string `toml:"check"`
+}
+
+// AcceptConfig is the [accept] table.
+type AcceptConfig struct {
+	// From are the column ids a ticket may be accepted from; empty is the
+	// last one, ready_qa, alone.
+	From []string `toml:"from"`
 }
 
 // BroadcastConfig is the [broadcast] table.
@@ -169,6 +189,8 @@ type Settings struct {
 	Broadcast     []string                       // [broadcast] presets, defaults filled
 	Questions     orchestrator.Questions         // [questions], defaults filled
 	Stack         stack.Config                   // [stack]; no sources means off
+	CloseCheck    []string                       // [close] check, from config.toml only
+	AcceptFrom    []string                       // [accept] from; empty: the last column alone
 	// TargetDefaulted is true when [[pipeline.target]] named no branch and
 	// the one in Pipeline.Targets was taken from the repository instead.
 	TargetDefaulted bool
@@ -225,6 +247,7 @@ func LoadFor(dir string) Settings {
 		// rewrite the snapshot and let the repository file through.
 		orchestrator, account, server, ff := c.Orchestrator, c.Jira, c.Bitbucket, c.Pipeline.FastForward
 		reviewKind, reviewCommand := c.Reviews.Kind, slices.Clone(c.Reviews.Command)
+		closeCheck := slices.Clone(c.Close.Check)
 		small, large := c.Questions.Small, c.Questions.Large
 		small.Args, large.Args = slices.Clone(small.Args), slices.Clone(large.Args)
 		orchestrator.Args = slices.Clone(orchestrator.Args)
@@ -261,6 +284,11 @@ func LoadFor(dir string) Settings {
 		if c.Reviews.Kind != reviewKind || !slices.Equal(c.Reviews.Command, reviewCommand) {
 			s.Problems = append(s.Problems, fmt.Sprintf("%s: [reviews] kind and command are only read from config.toml — ignored", s.RepoPath))
 			c.Reviews.Kind, c.Reviews.Command = reviewKind, reviewCommand
+		}
+		// It starts a program, like [reviews] command.
+		if !slices.Equal(c.Close.Check, closeCheck) {
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: [close] check is only read from config.toml — ignored", s.RepoPath))
+			c.Close.Check = closeCheck
 		}
 	}
 	return resolve(c, s)
@@ -342,6 +370,12 @@ func resolve(c Config, s Settings) Settings {
 	s.Reviews = c.Reviews
 	s.Questions = c.Questions.WithDefaults()
 	s.Stack = c.Stack
+	s.CloseCheck = c.Close.Check
+	for _, id := range c.Accept.From {
+		if id = strings.TrimSpace(id); id != "" {
+			s.AcceptFrom = append(s.AcceptFrom, id)
+		}
+	}
 	s.Broadcast = c.Broadcast.Presets
 	if len(s.Broadcast) == 0 {
 		s.Broadcast = DefaultPresets
@@ -627,6 +661,17 @@ icons = false
 #   "Fetch and rebase your branch onto origin/{target}, run the checks, and push.",
 #   "Stop where you are and tell me in two lines what is done and what is left.",
 # ]
+
+# Closing a finished ticket (C, or ekanban close) checks it is committed,
+# pushed and merged, then runs check, when set, in its worktree: exit 0 lets
+# the close go on. {key} {worktree} {branch} {target} {pr} {repo} are filled
+# in. Read from this file only, since it starts a program.
+# [close]
+# check = ["pwsh", "-NoProfile", "-File", "C:/tools/shipped.ps1", "{key}"]
+
+# The columns a ticket may be accepted (a) from; the last one alone when unset.
+# [accept]
+# from = ["to_deploy", "ready_qa"]
 
 # A run's open questions. r on a question (Reply) types reply, or reply_you
 # for a question for you, into the ticket's orchestrator, unsent: {to} is who

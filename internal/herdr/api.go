@@ -85,6 +85,11 @@ func (c *Client) CloseTab(id string) error {
 	return c.Request("tab.close", map[string]any{"tab_id": id}, nil)
 }
 
+// CloseWorkspace closes a workspace with its tabs and panes.
+func (c *Client) CloseWorkspace(id string) error {
+	return c.Request("workspace.close", map[string]any{"workspace_id": id}, nil)
+}
+
 // OpenPluginPane launches one of a plugin's [[panes]] entrypoints; params are
 // plugin.pane.open's (placement, workspace_id, target_pane_id, cwd, focus).
 func (c *Client) OpenPluginPane(pluginID, entrypoint string, params map[string]any) error {

@@ -8,6 +8,7 @@
 package state
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -36,7 +37,9 @@ type Ticket struct {
 	Title    string `json:"title,omitempty"`
 	Worktree string `json:"worktree"`
 	Branch   string `json:"branch,omitempty"`
-	Git      Branch `json:"git"`
+	// RunDir is the run's folder, "" when the ticket has none.
+	RunDir string `json:"run_dir,omitempty"`
+	Git    Branch `json:"git"`
 
 	Column      string `json:"column"`
 	ColumnLabel string `json:"column_label,omitempty"`
@@ -116,6 +119,7 @@ func Row(worktree, branch, workspace string, info pipeline.Info, git Branch, col
 		Title:     info.Title,
 		Worktree:  worktree,
 		Branch:    branch,
+		RunDir:    info.RunDir,
 		Git:       git,
 		Column:    info.Stage,
 		Phase:     info.Phase,
@@ -154,6 +158,18 @@ func questions(qs []ticket.Question) []Question {
 		out = append(out, Question{Text: q.Words, To: q.To, Brief: q.FromWorktree, Problem: q.Problem})
 	}
 	return out
+}
+
+// Of classifies the worktree at path the way the board does and reads its
+// branch. ok is false when path holds no ticket run. pr is the pull request
+// the board remembers for it, for when the build server has dropped the job.
+func Of(ctx context.Context, src *pipeline.Source, live ticket.Live, path string, pr int, git Git) (Ticket, bool) {
+	info := src.Classify(ctx, path, live, pr)
+	if info.Key == "" {
+		return Ticket{}, false
+	}
+	target, from := TargetOf(info.Target, src.Targets())
+	return Row(path, ticket.ReadBranch(path), live.WorkspaceOf(path), info, Facts(git, path, target, from), src.Columns()), true
 }
 
 // TargetOf is the branch a worktree is compared with: the run's target when

@@ -66,6 +66,8 @@ type Info struct {
 	Orchestrator ticket.Agent
 	// Target is the branch the run says it merges into, "" when it does not say.
 	Target string
+	// RunDir is the run's folder in the worktree, "" without a run.
+	RunDir string
 	// Questions are the run's open questions for other people; ForYou those
 	// for the user.
 	Questions []ticket.Question
@@ -140,6 +142,9 @@ func (s *Source) Columns() columns.Set {
 
 // Source holds what was last read from the build server and git for one
 // repository.
+// Repo is the checkout the source reads git in.
+func (s *Source) Repo() string { return s.repo }
+
 type Source struct {
 	repo string
 	set  Settings
@@ -362,7 +367,7 @@ func describeRun(info *Info, run *ticket.Run) {
 	if run.OrchestratorPane != "" {
 		info.Orchestrator = ticket.Agent{Who: run.Orchestrator.Label, Pane: run.OrchestratorPane, Status: run.OrchestratorStatus, Title: run.OrchestratorTitle}
 	}
-	info.Target = run.Target
+	info.Target, info.RunDir = run.Target, run.Dir
 	info.Questions = append([]ticket.Question(nil), run.Questions...)
 	info.ForYou = append([]ticket.Question(nil), run.ForYou...)
 	if run.OrchestratorStatus == "blocked" {

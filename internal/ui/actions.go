@@ -57,7 +57,8 @@ var (
 		"set-status", "move to that column by hand, 1 being the first: marked so until the board catches up"),
 		"status-picker", "move the card to a column by hand: pick one, or click it; the board's own column is marked"),
 		keys.Action{Name: "follow-board", Keys: []string{"b"}, Canon: "follow-board", Help: "a card moved by hand: undo the move, back to the column the board computes", Short: "undo the move"},
-		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column: it moves to the Archive", Short: "accept"},
+		keys.Action{Name: "accept", Keys: []string{"a"}, Help: "accept a ticket in the last column, or in [accept] from: it moves to the Archive", Short: "accept"},
+		keys.Action{Name: "close-ticket", Keys: []string{"C"}, Canon: "close-ticket", Help: "close a finished ticket: checks it is pushed and merged, accepts it, closes its workspace and removes the worktree, asking first", Short: "close ticket"},
 		keys.Action{Name: "archive", Keys: []string{"A"}, Help: "Archive of accepted tickets", Short: "archive"},
 		keys.Action{Name: "orchestrator", Keys: []string{"o"}, Canon: "orchestrator", Help: "go to the ticket's orchestrator (the agent running its team), or open one", Short: "orchestrator"},
 		// t and p are the same keys as on the ticket tab. The pull request moved from p to P

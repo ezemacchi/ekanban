@@ -102,13 +102,9 @@ func readState(ctx context.Context, repo string) (state.Report, error) {
 func ticketRows(ctx context.Context, src *pipeline.Source, live ticket.Live, paths []string, known map[string]int) []state.Ticket {
 	out := []state.Ticket{}
 	for _, path := range paths {
-		info := src.Classify(ctx, path, live, known[store.Key(path)])
-		if info.Key == "" {
-			continue
+		if t, ok := state.Of(ctx, src, live, path, known[store.Key(path)], runGit); ok {
+			out = append(out, t)
 		}
-		target, from := state.TargetOf(info.Target, src.Targets())
-		facts := state.Facts(runGit, path, target, from)
-		out = append(out, state.Row(path, ticket.ReadBranch(path), live.WorkspaceOf(path), info, facts, src.Columns()))
 	}
 	return out
 }

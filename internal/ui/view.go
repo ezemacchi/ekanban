@@ -653,7 +653,7 @@ var helpLayout = []screen.HelpSection{
 	}},
 	{Title: "The selected card", Rows: [][]string{
 		{"jump"}, {"detail"}, {"menu"}, {"open-issue"}, {"prototype"}, {"open-pull-request"}, {"open-pr"},
-		{"orchestrator"}, {"questions"}, {"reply"}, {"discuss"}, {"close"}, {"yank"}, {"note"}, {"accept"}, {"handoff"}, {"status-picker"}, {"set-status"},
+		{"orchestrator"}, {"questions"}, {"reply"}, {"discuss"}, {"close"}, {"yank"}, {"note"}, {"accept"}, {"close-ticket"}, {"handoff"}, {"status-picker"}, {"set-status"},
 		{"grab"}, {"follow-board"}, {"rename"}, {"message"}, {"send-failure"}, {"forget"},
 	}},
 }
