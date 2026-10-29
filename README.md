@@ -187,6 +187,23 @@ and raises a Herdr notification when something actually changes:
 | clean → conflict | needs a rebase before it can land |
 | merged or closed | the work landed, or didn't |
 
+For a ticket worktree it also reads the same pipeline the repository board
+does -- the run's files, the agents in Herdr, git and the build server -- so
+these need no GitHub and work wherever the code is hosted:
+
+| | |
+|---|---|
+| the orchestrator finishes | its turn is over: look at what it did |
+| the orchestrator stops at a prompt | it is waiting for you to answer there |
+| a new question for you | the run wrote one in its state file |
+| its pull request merged | whoever merged it, as soon as the merge is fetched |
+| its branch is already in its target | its own commits reached the target without a merge of its pull request: a squash, a rebase, another branch that carried them |
+
+The target branches are fetched and the build server reread every five
+minutes at most; the polls between use the last reading. What it last saw of
+each ticket is kept in `tickets-seen.json` beside the board, so a restart does
+not announce anything twice, and a ticket first seen is not news.
+
 **Only changes, never states.** A failing check is announced once, not on every
 poll — notifying on state trains you to ignore the notifications.
 

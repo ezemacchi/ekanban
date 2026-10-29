@@ -75,10 +75,7 @@ func stateCmd(args []string, out io.Writer) error {
 // Herdr is optional: outside a session the rows have no agents, and the
 // report says why.
 func readState(ctx context.Context, repo string) (state.Report, error) {
-	cfg := config.LoadFor(repo)
-	defaultTarget(&cfg, repo)
-	set, _ := pipelineSettings(cfg)
-	src := pipeline.New(repo, set, gh.HideWindow)
+	src := repoSource(repo)
 	src.Refresh(ctx)
 
 	report := state.Report{Repo: repo, Targets: src.Targets(), Offline: src.Offline(), Tickets: []state.Ticket{}}
@@ -89,28 +86,51 @@ func readState(ctx context.Context, repo string) (state.Report, error) {
 		report.Herdr = "no agents: " + err.Error()
 	}
 
+	porcelain, err := runGit(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return report, fmt.Errorf("%s is not a git repository: %w", repo, err)
+	}
+	var paths []string
+	for _, path := range state.Worktrees(porcelain) {
+		paths = append(paths, filepath.Clean(path))
+	}
+	report.Tickets = ticketRows(ctx, src, live, paths, knownPRs())
+	return report, nil
+}
+
+// ticketRows classifies each of paths and keeps the ticket worktrees.
+func ticketRows(ctx context.Context, src *pipeline.Source, live ticket.Live, paths []string, known map[string]int) []state.Ticket {
+	out := []state.Ticket{}
+	for _, path := range paths {
+		info := src.Classify(ctx, path, live, known[store.Key(path)])
+		if info.Key == "" {
+			continue
+		}
+		target, from := state.TargetOf(info.Target, src.Targets())
+		facts := state.Facts(runGit, path, target, from)
+		out = append(out, state.Row(path, ticket.ReadBranch(path), live.WorkspaceOf(path), info, facts, src.Columns()))
+	}
+	return out
+}
+
+// knownPRs are the pull requests the board remembers by worktree, for when
+// the build server has dropped a closed one's job.
+func knownPRs() map[string]int {
 	known := map[string]int{}
 	if board, err := store.Load(); err == nil {
 		for key, e := range board.Entries {
 			known[key] = e.PR
 		}
 	}
+	return known
+}
 
-	porcelain, err := runGit(repo, "worktree", "list", "--porcelain")
-	if err != nil {
-		return report, fmt.Errorf("%s is not a git repository: %w", repo, err)
-	}
-	for _, path := range state.Worktrees(porcelain) {
-		path = filepath.Clean(path)
-		info := src.Classify(ctx, path, live, known[store.Key(path)])
-		if info.Key == "" {
-			continue
-		}
-		target, from := state.TargetOf(info.Target, report.Targets)
-		facts := state.Facts(runGit, path, target, from)
-		report.Tickets = append(report.Tickets, state.Row(path, ticket.ReadBranch(path), live.WorkspaceOf(path), info, facts, src.Columns()))
-	}
-	return report, nil
+// repoSource is the pipeline of repo with its config.toml and .ekanban.toml.
+func repoSource(repo string) *pipeline.Source {
+	cfg := config.LoadFor(repo)
+	defaultTarget(&cfg, repo)
+	set, _ := pipelineSettings(cfg)
+	return pipeline.New(repo, set, gh.HideWindow)
 }
 
 // runGit is state.Git over the git on PATH.

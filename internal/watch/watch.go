@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -62,8 +63,14 @@ func (l *Lock) Release() {
 	}
 }
 
-// Run polls until the context is cancelled or Herdr goes away.
-func Run(ctx context.Context, stateDir string, interval time.Duration) error {
+// refreshEvery is how often the tickets' targets are fetched and the build
+// server reread; the polls between answer from the last reading, which is
+// enough for what the agents and the run's files say.
+const refreshEvery = 5 * time.Minute
+
+// Run polls until the context is cancelled or Herdr goes away. tickets reads
+// the ticket worktrees for their notices; nil watches pull requests only.
+func Run(ctx context.Context, stateDir string, interval time.Duration, tickets Tickets) error {
 	lock, ok := Acquire(stateDir)
 	if !ok {
 		// Another watcher is already doing this work.
@@ -88,8 +95,13 @@ func Run(ctx context.Context, stateDir string, interval time.Duration) error {
 	settings := config.Load()
 	client := gh.NewBackground()
 
+	var refreshed time.Time
 	for {
-		if err := poll(ctx, stateDir, settings.Notifications, client); err != nil {
+		refresh := time.Since(refreshed) >= refreshEvery
+		if refresh {
+			refreshed = time.Now()
+		}
+		if err := poll(ctx, stateDir, settings.Notifications, client, tickets, refresh); err != nil {
 			// Herdr has stopped, so there is nothing to watch and nowhere to
 			// deliver a notification. Exiting beats spinning.
 			return err
@@ -153,12 +165,13 @@ func drain(ch <-chan struct{}, window time.Duration) {
 	}
 }
 
-// poll does one round: read the board, ask GitHub, notify on what changed.
+// poll does one round: read the board, ask GitHub and the tickets' pipeline,
+// notify on what changed.
 //
-// The GitHub client is passed in rather than built here, so this -- the part
-// that decides what is worth waking someone for -- can be tested without a
-// network.
-func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) error {
+// The GitHub client and the ticket reader are passed in rather than built
+// here, so this -- the part that decides what is worth waking someone for --
+// can be tested without a network.
+func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client, tickets Tickets, refresh bool) error {
 	client, err := herdr.New()
 	if err != nil {
 		return err
@@ -196,6 +209,33 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) err
 		return nil
 	}
 
+	raised, merged := prAlerts(ctx, stateDir, labels, prs)
+	dirs := make([]string, 0, len(labels))
+	for dir := range labels {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	raised = append(raised, pollTickets(ctx, stateDir, dirs, tickets, refresh, merged)...)
+
+	// Notify after saving: a toast the user never sees is still recorded, but
+	// a recorded alert the user was never told about is the worse failure.
+	// With notifications off the bell still appears -- quiet, not blind.
+	if notify {
+		for _, a := range raised {
+			_ = client.Notify(a.Title(), a.Text, a.Sound())
+		}
+	}
+	return nil
+}
+
+// prAlerts asks GitHub about every space's pull request and records what
+// changed; merged are the spaces whose pull request it saw merge. gh missing
+// or logged out is nothing to compare, and nothing worth waking the user for.
+func prAlerts(ctx context.Context, stateDir string, labels map[string]string, prs *gh.Client) (raised []alert.Alert, merged map[string]bool) {
+	merged = map[string]bool{}
+	if prs == nil {
+		return nil, merged
+	}
 	cache := gh.LoadCache(stateDir)
 	targets := make([]gh.Target, 0, len(labels))
 	for key := range labels {
@@ -204,13 +244,10 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) err
 
 	found, problem := prs.FetchAll(ctx, targets)
 	if problem != nil {
-		// gh is missing or logged out. Nothing to compare, and nothing worth
-		// waking the user for.
-		return nil
+		return nil, merged
 	}
 
 	fresh := alert.Load(stateDir)
-	var raised []alert.Alert
 
 	for dir, after := range found {
 		before := cache.Entries[dir]
@@ -222,6 +259,9 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) err
 			a.At = time.Now().UTC()
 			fresh.Add(dir, a)
 			raised = append(raised, a)
+			if a.Kind == alert.Merged {
+				merged[dir] = true
+			}
 		}
 		cache.Put(dir, after)
 	}
@@ -235,14 +275,5 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client) err
 	if len(raised) > 0 {
 		_ = fresh.Save()
 	}
-
-	// Notify after saving: a toast the user never sees is still recorded, but
-	// a recorded alert the user was never told about is the worse failure.
-	// With notifications off the bell still appears -- quiet, not blind.
-	if notify {
-		for _, a := range raised {
-			_ = client.Notify(a.Title(), a.Text, a.Sound())
-		}
-	}
-	return nil
+	return raised, merged
 }

@@ -73,7 +73,7 @@ func Transitions(label string, before, after gh.PR) []Alert {
 // the request cue; anything that merely finished uses done.
 func (a Alert) Sound() string {
 	switch a.Kind {
-	case ChecksFailed, ChangesAsked, Conflicted:
+	case ChecksFailed, ChangesAsked, Conflicted, OrchestratorBlocked, QuestionForYou:
 		return "request"
 	default:
 		return "done"
@@ -95,6 +95,14 @@ func (a Alert) Title() string {
 		return "Merged"
 	case Closed:
 		return "Closed"
+	case OrchestratorDone:
+		return "Orchestrator finished"
+	case OrchestratorBlocked:
+		return "Orchestrator waiting"
+	case QuestionForYou:
+		return "Question for you"
+	case Contained:
+		return "Already in its target"
 	default:
 		return "Pull request"
 	}

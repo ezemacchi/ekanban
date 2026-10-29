@@ -79,7 +79,7 @@ func run(args []string) error {
 			if err != nil {
 				return err
 			}
-			return watch.Run(context.Background(), dir, config.Load().PollInterval)
+			return watch.Run(context.Background(), dir, config.Load().PollInterval, newTicketReader().read)
 
 		case "startup":
 			// Herdr's [[startup]] hook: runs once after the server restores a

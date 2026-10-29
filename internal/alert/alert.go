@@ -24,6 +24,12 @@ const (
 	Conflicted     Kind = "conflicted"
 	Merged         Kind = "merged"
 	Closed         Kind = "closed"
+
+	// What a ticket's run did, from the pipeline rather than GitHub.
+	OrchestratorDone    Kind = "orchestrator_done"
+	OrchestratorBlocked Kind = "orchestrator_blocked"
+	QuestionForYou      Kind = "question_for_you"
+	Contained           Kind = "contained"
 )
 
 // Alert is one thing that happened.

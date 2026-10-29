@@ -74,7 +74,7 @@ func TestPollNotifiesOnATransition(t *testing.T) {
 	seedCache(t, state, key, gh.PR{Number: 7, State: "OPEN", Checks: gh.ChecksPass})
 	body := `{"number":7,"state":"OPEN","statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE","name":"test"}]}`
 
-	if err := poll(context.Background(), state, true, prClient(body)); err != nil {
+	if err := poll(context.Background(), state, true, prClient(body), nil, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -105,7 +105,7 @@ func TestPollRecordsEvenWithNotificationsOff(t *testing.T) {
 	seedCache(t, state, key, gh.PR{Number: 7, State: "OPEN", Checks: gh.ChecksPass})
 	body := `{"number":7,"state":"MERGED","statusCheckRollup":[]}`
 
-	if err := poll(context.Background(), state, false, prClient(body)); err != nil {
+	if err := poll(context.Background(), state, false, prClient(body), nil, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +130,7 @@ func TestPollIsSilentWhenNothingChanged(t *testing.T) {
 	seedCache(t, state, key, gh.PR{Number: 7, State: "OPEN", Checks: gh.ChecksFail})
 	body := `{"number":7,"state":"OPEN","statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE","name":"test"}]}`
 
-	if err := poll(context.Background(), state, true, prClient(body)); err != nil {
+	if err := poll(context.Background(), state, true, prClient(body), nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.Called("notification.show"); n != 0 {
@@ -148,7 +148,7 @@ func TestPollDoesNotAnnounceAPRItHasJustLearnedOf(t *testing.T) {
 	f.Route(map[string]any{"session.snapshot": snapshotWith(space, "api")})
 
 	body := `{"number":7,"state":"OPEN","reviewDecision":"CHANGES_REQUESTED","statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}]}`
-	if err := poll(context.Background(), state, true, prClient(body)); err != nil {
+	if err := poll(context.Background(), state, true, prClient(body), nil, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -191,7 +191,7 @@ func TestPollWatchesStoredEntriesWithNoLiveWorkspace(t *testing.T) {
 		},
 	}
 
-	if err := poll(context.Background(), state, true, client); err != nil {
+	if err := poll(context.Background(), state, true, client, nil, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,7 +222,7 @@ func TestPollStaysQuietWhenGhIsBroken(t *testing.T) {
 		},
 	}
 
-	if err := poll(context.Background(), state, true, client); err != nil {
+	if err := poll(context.Background(), state, true, client, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.Called("notification.show"); n != 0 {
@@ -239,7 +239,7 @@ func TestPollFailsWhenHerdrIsGone(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", state)
 	t.Setenv("HERDR_SOCKET_PATH", state+"/nothing.sock")
 
-	if err := poll(context.Background(), state, true, prClient("")); err == nil {
+	if err := poll(context.Background(), state, true, prClient(""), nil, false); err == nil {
 		t.Fatal("poll succeeded with no Herdr")
 	}
 }
@@ -254,7 +254,7 @@ func TestPollRecordsAnAbsence(t *testing.T) {
 	f := herdrtest.Start(t)
 	f.Route(map[string]any{"session.snapshot": snapshotWith(space, "api")})
 
-	if err := poll(context.Background(), state, true, prClient("")); err != nil {
+	if err := poll(context.Background(), state, true, prClient(""), nil, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +283,7 @@ func TestNotificationNamesTheSpace(t *testing.T) {
 	seedCache(t, state, key, gh.PR{Number: 3, State: "OPEN", Checks: gh.ChecksPass})
 	body := `{"number":3,"state":"OPEN","reviewDecision":"APPROVED","statusCheckRollup":[]}`
 
-	if err := poll(context.Background(), state, true, prClient(body)); err != nil {
+	if err := poll(context.Background(), state, true, prClient(body), nil, false); err != nil {
 		t.Fatal(err)
 	}
 

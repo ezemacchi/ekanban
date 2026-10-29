@@ -84,7 +84,7 @@ func TestExitsPromptlyWhenHerdrIsGone(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(dir, "nothing-listening.sock"))
 
 	done := make(chan error, 1)
-	go func() { done <- Run(context.Background(), dir, time.Hour) }()
+	go func() { done <- Run(context.Background(), dir, time.Hour, nil) }()
 
 	select {
 	case <-done:
@@ -100,7 +100,7 @@ func TestLockIsFreedOnExit(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
 	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(dir, "nothing-listening.sock"))
 
-	_ = Run(context.Background(), dir, time.Hour)
+	_ = Run(context.Background(), dir, time.Hour, nil)
 
 	lock, ok := Acquire(dir)
 	if !ok {
@@ -119,7 +119,7 @@ func TestContextCancelStops(t *testing.T) {
 	cancel()
 
 	done := make(chan struct{})
-	go func() { _ = Run(ctx, dir, time.Hour); close(done) }()
+	go func() { _ = Run(ctx, dir, time.Hour, nil); close(done) }()
 
 	select {
 	case <-done:
