@@ -58,6 +58,10 @@ func run(args []string) error {
 		case "history":
 			return historyCmd(args[1:], os.Stdout)
 
+		case "state":
+			// Herdr is optional here: without it the rows have no agents.
+			return stateCmd(args[1:], os.Stdout)
+
 		case "version", "--version", "-v":
 			fmt.Println(version.Version)
 			return nil

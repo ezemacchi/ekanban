@@ -62,6 +62,10 @@ type Info struct {
 	Lost    bool // a role was dispatched but has neither agent nor result
 	// Agents are the run's live agents with their Herdr status and title.
 	Agents []ticket.Agent
+	// Orchestrator is the run's orchestrator agent, zero when none is live.
+	Orchestrator ticket.Agent
+	// Target is the branch the run says it merges into, "" when it does not say.
+	Target string
 	// Questions are the run's open questions for other people; ForYou those
 	// for the user.
 	Questions []ticket.Question
@@ -355,6 +359,10 @@ func notStarted(run *ticket.Run) bool {
 
 func describeRun(info *Info, run *ticket.Run) {
 	info.Agents = run.Agents()
+	if run.OrchestratorPane != "" {
+		info.Orchestrator = ticket.Agent{Who: run.Orchestrator.Label, Pane: run.OrchestratorPane, Status: run.OrchestratorStatus, Title: run.OrchestratorTitle}
+	}
+	info.Target = run.Target
 	info.Questions = append([]ticket.Question(nil), run.Questions...)
 	info.ForYou = append([]ticket.Question(nil), run.ForYou...)
 	if run.OrchestratorStatus == "blocked" {
