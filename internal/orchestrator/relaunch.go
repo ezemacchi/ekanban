@@ -72,6 +72,7 @@ func Relaunch(c Relauncher, run *ticket.Run) (string, error) {
 	if err := c.StartAgent(name, run.Orchestrator.Kind, pane, run.Orchestrator.Args); err != nil {
 		return "", fmt.Errorf("start the %s in %s: %w", label, pane, err)
 	}
+	_ = ticket.Mark(c, pane, run.Key, ticket.RoleOrchestrator, run.Orchestrator.Label)
 	if err := c.PromptAgent(name, "Read "+slash(file)+" in full and follow it. It is your complete instructions."); err != nil {
 		return "", fmt.Errorf("send the %s its prompt: %w", label, err)
 	}

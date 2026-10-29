@@ -168,6 +168,11 @@ func TestWorkspaceAgentsAndOrchestrator(t *testing.T) {
 	if r.OrchestratorPane != "w:p1" || r.OrchestratorStatus != "idle" || r.Orchestrator.Label != "Orchestrator" {
 		t.Fatalf("orchestrator = %q %q %q", r.OrchestratorPane, r.OrchestratorStatus, r.Orchestrator.Label)
 	}
+	// Found by elimination: shown, but with no role, so the watcher does not
+	// mark a pane that may be some other agent.
+	if !r.OrchestratorGuessed || r.Agents()[0].Role != "" {
+		t.Fatalf("guessed %v, role %q", r.OrchestratorGuessed, r.Agents()[0].Role)
+	}
 	for _, c := range r.Cards {
 		if c.Role.ID == "implementer" && (c.Column != Working || c.PaneID != "w:p2") {
 			t.Fatalf("implementer: %+v", c)
@@ -178,8 +183,8 @@ func TestWorkspaceAgentsAndOrchestrator(t *testing.T) {
 	live.Tabs["w:t1"] = "notes"
 	live.Agents = append(live.Agents, herdr.Agent{Agent: &agent, AgentStatus: "working", PaneID: "w:p3", TabID: "w:t3", WorkspaceID: "w", Cwd: wt})
 	live.Tabs["w:t3"] = "orchestrator"
-	if r, _ = Load(wt, opts, live); r.OrchestratorPane != "w:p3" {
-		t.Fatalf("named orchestrator = %q", r.OrchestratorPane)
+	if r, _ = Load(wt, opts, live); r.OrchestratorPane != "w:p3" || r.OrchestratorGuessed || r.Agents()[0].Role != RoleOrchestrator {
+		t.Fatalf("named orchestrator = %q (guessed %v)", r.OrchestratorPane, r.OrchestratorGuessed)
 	}
 
 	// No workspace open: only agents inside the worktree count, and none is

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ezemacchi/ekanban/internal/herdr"
 	"github.com/ezemacchi/ekanban/internal/pipeline"
+	"github.com/ezemacchi/ekanban/internal/state"
 	"github.com/ezemacchi/ekanban/internal/store"
 	"github.com/ezemacchi/ekanban/internal/ticket"
 	"github.com/ezemacchi/ekanban/internal/watch"
@@ -28,7 +29,8 @@ func newTicketReader() *ticketReader {
 
 func (r *ticketReader) read(ctx context.Context, dirs []string, refresh bool) []watch.Row {
 	live := ticket.Live{}
-	if client, err := herdr.New(); err == nil {
+	client, err := herdr.New()
+	if err == nil {
 		live, _ = ticket.ReadLive(client)
 	}
 	known := knownPRs()
@@ -46,7 +48,32 @@ func (r *ticketReader) read(ctx context.Context, dirs []string, refresh bool) []
 			out = append(out, watch.Row{Dir: store.Key(t.Worktree), Ticket: t})
 		}
 	}
+	if client != nil {
+		markUnmarked(client, live.Agents, out)
+	}
 	return out
+}
+
+// markUnmarked marks the pane of each agent the tickets found by its name or
+// tab, so it is found by the mark once that name is gone. A pane already
+// marked, by whoever started its agent, is left as it is.
+func markUnmarked(m ticket.Marker, agents []herdr.Agent, rows []watch.Row) {
+	byPane := make(map[string]herdr.Agent, len(agents))
+	for _, a := range agents {
+		byPane[a.PaneID] = a
+	}
+	for _, row := range rows {
+		found := row.Ticket.Agents
+		if o := row.Ticket.Orchestrator; o != nil {
+			found = append([]state.Agent{*o}, found...)
+		}
+		for _, a := range found {
+			if live, ok := byPane[a.Pane]; ok && a.Role != "" && !ticket.Marked(live) {
+				_ = ticket.Mark(m, a.Pane, row.Ticket.Key, a.Role, a.Who)
+				byPane[a.Pane] = herdr.Agent{Tokens: map[string]string{ticket.TokenKey: row.Ticket.Key}}
+			}
+		}
+	}
 }
 
 // repoGroup is the watched folders of one repository.

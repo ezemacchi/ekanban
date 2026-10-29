@@ -374,6 +374,37 @@ Enter the CLI dropped just after starting is submitted with a later Enter. Which
 model it runs on comes from `args` in `[orchestrator]` of `config.toml`, such as
 `args = ["--model", "<model>", "--trust"]` for the Cursor CLI.
 
+#### How an agent is known to be a role's
+
+Herdr forgets an agent's name when the agent restarts, and a tab can be named
+anything, so a role found only by name or tab is lost the moment either
+changes. ekanban marks the pane instead, with Herdr's pane metadata
+(`pane.report_metadata`, reported as `plugin:ekanban`):
+
+| Token | Value |
+|---|---|
+| `ekanban_key` | the ticket key, `ABC-1` |
+| `ekanban_role` | a team role's id (`qa`, or `qa-2` for a second instance), `orchestrator`, or `question` |
+
+The Agents sidebar then shows the agent as `ABC-1 · Label`. The mark lasts
+while the pane does, across agent restarts, and Herdr drops it when the pane
+closes.
+
+The board marks the orchestrator it starts or relaunches, and a discussion it
+opens. Whatever starts the team's roles marks them the same way; from a script:
+
+```powershell
+herdr pane report-metadata <pane> --source plugin:ekanban `
+  --token ekanban_key=ABC-1 --token ekanban_role=reviewer --display-agent "ABC-1 · reviewer"
+```
+
+A marked pane is found by its mark before any name or tab, and a pane marked
+for another ticket is never this one's. Without marks -- an older Herdr, a pane
+the server forgot -- names and tabs still work as before, and the watcher marks
+an agent it found that way, so the next restart does not lose it. It never
+replaces a mark, and never marks an orchestrator it only guessed: the one
+agent in the ticket's workspace that plays no role.
+
 The ticket and the prototype are buttons under the objective, and the
 orchestrator's line has a button that goes to it. A finished role takes one
 line; a role waiting on you has a red border. The columns and the Now, Activity

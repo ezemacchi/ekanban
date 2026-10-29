@@ -221,6 +221,9 @@ type Agent struct {
 	// looked at it since: set while it sits idle after work, nil while it
 	// works, after a mere start, and from servers older than the field.
 	Completion *uint64 `json:"completion_seq"`
+	// Tokens are the named values reported on the pane (ReportPaneMetadata).
+	// They stay with the pane while its agent restarts.
+	Tokens map[string]string `json:"tokens"`
 }
 
 // Completed is Completion, 0 when there is none.
@@ -389,6 +392,18 @@ func (c *Client) StartAgent(name, kind, paneID string, args []string) error {
 // has no agent to name, and the keys are still how you find that out.
 func (c *Client) SendKeys(paneID string, keys ...string) error {
 	return c.Request("pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys}, nil)
+}
+
+// ReportPaneMetadata sets named tokens on a pane, and the agent name its
+// sidebar row shows when display is not "". Herdr keeps them until they are
+// replaced or the pane closes; they are display only and change no agent
+// state. source says who reports them.
+func (c *Client) ReportPaneMetadata(paneID, source, display string, tokens map[string]string) error {
+	params := map[string]any{"pane_id": paneID, "source": source, "tokens": tokens}
+	if display != "" {
+		params["display_agent"] = display
+	}
+	return c.Request("pane.report_metadata", params, nil)
 }
 
 // Ping is whether the server answers at all: what tells Herdr going away

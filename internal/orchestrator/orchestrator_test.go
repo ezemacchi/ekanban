@@ -18,9 +18,14 @@ type fake struct {
 	tabs    []string
 	started []string
 	prompts []string
+	marks   []string
 	failTab bool
 }
 
+func (f *fake) ReportPaneMetadata(pane, source, display string, tokens map[string]string) error {
+	f.marks = append(f.marks, pane+"|"+source+"|"+display+"|"+tokens["ekanban_key"]+"|"+tokens["ekanban_role"])
+	return nil
+}
 
 // Agents are the ones given, and each one started, working on its prompt.
 func (f *fake) Agents() ([]herdr.Agent, error) {
@@ -32,7 +37,7 @@ func (f *fake) Agents() ([]herdr.Agent, error) {
 	}
 	return out, nil
 }
-func (f *fake) FocusAgent(p string) error      { f.focused = append(f.focused, p); return nil }
+func (f *fake) FocusAgent(p string) error { f.focused = append(f.focused, p); return nil }
 func (f *fake) CreateTab(ws, cwd, label string) (string, string, error) {
 	if f.failTab {
 		return "", "", errors.New("no")
@@ -99,6 +104,10 @@ func TestGoOpensANewOrchestrator(t *testing.T) {
 	}
 	if len(f.focused) != 1 || f.focused[0] != "w:p9" || !strings.Contains(text, "abc-1-orchestrator") {
 		t.Fatalf("%q %q", text, f.focused)
+	}
+	// Its pane is marked, so it is found again once its name is gone.
+	if len(f.marks) != 1 || f.marks[0] != "w:p9|plugin:ekanban|ABC-1 · Orchestrator|ABC-1|orchestrator" {
+		t.Fatalf("marks %q", f.marks)
 	}
 }
 

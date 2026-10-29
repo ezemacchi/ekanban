@@ -22,6 +22,7 @@ type Herdr interface {
 	StartAgent(name, kind, paneID string, args []string) error
 	PromptAgent(target, text string) error
 	SendKeys(paneID string, keys ...string) error
+	ReportPaneMetadata(paneID, source, display string, tokens map[string]string) error
 }
 
 // Go focuses run's orchestrator, or opens a new one. The string says what happened.
@@ -62,6 +63,9 @@ func Go(c Herdr, run *ticket.Run) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("start the %s in tab %s: %w", label, run.Orchestrator.Tab, err)
 	}
+	// A Herdr without pane metadata still runs the orchestrator; it is then
+	// found by its name and tab, as before.
+	_ = ticket.Mark(c, pane, run.Key, ticket.RoleOrchestrator, run.Orchestrator.Label)
 	prompt := run.Orchestrator.Prompt
 	if resumed {
 		prompt = run.Orchestrator.ResumePrompt

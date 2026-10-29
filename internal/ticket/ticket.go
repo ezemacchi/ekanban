@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,6 +182,8 @@ type Agent struct {
 	// Completion is Herdr's id of the turn it last finished, 0 when none
 	// (herdr.Agent.Completion).
 	Completion uint64
+	// Role is the role's id, or RoleOrchestrator: what its pane is marked as.
+	Role string
 }
 
 // Change is an agent whose status moved since the last reading; From is ""
@@ -238,11 +241,15 @@ func Loudest(agents []Agent) (Agent, bool) {
 func (r *Run) Agents() []Agent {
 	var out []Agent
 	if r.OrchestratorPane != "" {
-		out = append(out, Agent{Who: r.Orchestrator.Label, Pane: r.OrchestratorPane, Status: r.OrchestratorStatus, Title: r.OrchestratorTitle, Completion: r.OrchestratorCompletion})
+		role := RoleOrchestrator
+		if r.OrchestratorGuessed {
+			role = ""
+		}
+		out = append(out, Agent{Who: r.Orchestrator.Label, Pane: r.OrchestratorPane, Status: r.OrchestratorStatus, Title: r.OrchestratorTitle, Completion: r.OrchestratorCompletion, Role: role})
 	}
 	for _, c := range r.Cards {
 		if c.PaneID != "" {
-			out = append(out, Agent{Who: c.Role.Label, Pane: c.PaneID, Status: c.Status, Title: c.Title})
+			out = append(out, Agent{Who: c.Role.Label, Pane: c.PaneID, Status: c.Status, Title: c.Title, Role: c.Role.ID})
 		}
 	}
 	return out
@@ -282,6 +289,10 @@ type Run struct {
 	OrchestratorTitle  string
 	// OrchestratorCompletion is the turn it last finished (Agent.Completion).
 	OrchestratorCompletion uint64
+	// OrchestratorGuessed is whether the orchestrator was found only as the
+	// one agent in the ticket's workspace that plays no role -- not by its
+	// mark, name or tab -- so it is shown but not marked.
+	OrchestratorGuessed bool
 	// Workspace is the Herdr workspace open on the worktree, or "".
 	Workspace string
 
@@ -390,6 +401,7 @@ func Load(worktree string, opts Options, live Live) (*Run, error) {
 	r.Workspace = live.WorkspaceOf(worktree)
 
 	mine := agentsIn(worktree, r.Workspace, live.Agents)
+	mine = slices.DeleteFunc(mine, func(a herdr.Agent) bool { return markedElsewhere(a, r.Key) })
 	r.placeOrchestrator(t.Roles, mine, live.Tabs)
 	r.placeRoles(t.Roles, mine, live.Tabs)
 	return r, nil
@@ -520,30 +532,46 @@ func describe(a herdr.Agent, tabLabels map[string]string) string {
 	return strings.ToLower(a.Name + " " + tabLabels[a.TabID])
 }
 
-// placeOrchestrator finds the orchestrator among the ticket's agents: one its match names,
-// else one named after the ticket, else one in the ticket's workspace that is
-// no role's (an orchestrator started by hand, in a tab nobody renamed).
+// plays is whether a is role's agent: by its pane's mark when it has one for
+// this ticket (the role's id, or a name the role's match takes, such as
+// "qa-2"), else by its name and tab label.
+func (r *Run) plays(a herdr.Agent, role team.Role, tabLabels map[string]string) bool {
+	if m := markOf(a, r.Key); m != "" {
+		return m != RoleOrchestrator && (m == role.ID || role.Matches(m))
+	}
+	return role.Matches(describe(a, tabLabels))
+}
+
+// placeOrchestrator finds the orchestrator among the ticket's agents: the one
+// whose pane is marked as it, else one its match names, else one named after
+// the ticket, else one in the ticket's workspace that is no role's (an
+// orchestrator started by hand, in a tab nobody renamed). An agent marked
+// with another role is never taken for it.
 func (r *Run) placeOrchestrator(roles []team.Role, agents []herdr.Agent, tabLabels map[string]string) {
 	key := strings.ToLower(r.Key)
+	unmarked := func(a herdr.Agent) bool { return markOf(a, r.Key) == "" }
 	isRole := func(a herdr.Agent) bool {
-		d := describe(a, tabLabels)
 		for _, role := range roles {
-			if role.Matches(d) {
+			if r.plays(a, role, tabLabels) {
 				return true
 			}
 		}
 		return false
 	}
 	tests := []func(herdr.Agent) bool{
-		func(a herdr.Agent) bool { return r.Orchestrator.Matches(describe(a, tabLabels)) },
-		func(a herdr.Agent) bool { return strings.ToLower(strings.TrimSpace(a.Name)) == key },
-		func(a herdr.Agent) bool { return r.Workspace != "" && a.WorkspaceID == r.Workspace && !isRole(a) },
+		func(a herdr.Agent) bool { return markOf(a, r.Key) == RoleOrchestrator },
+		func(a herdr.Agent) bool { return unmarked(a) && r.Orchestrator.Matches(describe(a, tabLabels)) },
+		func(a herdr.Agent) bool { return unmarked(a) && strings.ToLower(strings.TrimSpace(a.Name)) == key },
+		func(a herdr.Agent) bool {
+			return unmarked(a) && r.Workspace != "" && a.WorkspaceID == r.Workspace && !isRole(a)
+		},
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		for _, a := range agents {
 			if test(a) {
 				r.OrchestratorStatus, r.OrchestratorPane, r.OrchestratorTitle = a.AgentStatus, a.PaneID, titleOf(a)
 				r.OrchestratorCompletion = a.Completed()
+				r.OrchestratorGuessed = i == len(tests)-1
 				if a.Session != nil && a.Session.Kind == "id" && a.Session.Value != "" && a.Agent != nil {
 					RememberSession(r.Dir, *a.Agent, a.Session.Value)
 				}
@@ -565,7 +593,7 @@ func (r *Run) placeRoles(roles []team.Role, agents []herdr.Agent, tabLabels map[
 		}
 		var live *herdr.Agent
 		for i := range agents {
-			if !role.Matches(describe(agents[i], tabLabels)) {
+			if !r.plays(agents[i], role, tabLabels) {
 				continue
 			}
 			// A copy that asks more of the user says more than an idle leftover.

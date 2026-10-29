@@ -4,7 +4,42 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/state"
+	"github.com/ezemacchi/ekanban/internal/watch"
 )
+
+type marker struct{ got []string }
+
+func (m *marker) ReportPaneMetadata(pane, source, display string, tokens map[string]string) error {
+	m.got = append(m.got, pane+"|"+display+"|"+tokens["ekanban_role"])
+	return nil
+}
+
+// An agent found by its name or tab gets its pane marked; one already marked,
+// by whoever started it, keeps its mark.
+func TestMarkUnmarked(t *testing.T) {
+	agents := []herdr.Agent{
+		{PaneID: "w:p1"},
+		{PaneID: "w:p2", Tokens: map[string]string{"ekanban_key": "ABC-1", "ekanban_role": "qa"}},
+		{PaneID: "w:p3"},
+	}
+	rows := []watch.Row{{Ticket: state.Ticket{
+		Key:          "ABC-1",
+		Orchestrator: &state.Agent{Who: "Orchestrator", Pane: "w:p1", Role: "orchestrator"},
+		Agents: []state.Agent{
+			{Who: "QA", Pane: "w:p2", Role: "qa"},
+			{Who: "Reviewer", Pane: "w:p3", Role: "reviewer"},
+			{Who: "Gone", Pane: "w:p9", Role: "implementer"},
+		},
+	}}}
+	m := &marker{}
+	markUnmarked(m, agents, rows)
+	if len(m.got) != 2 || m.got[0] != "w:p1|ABC-1 · Orchestrator|orchestrator" || m.got[1] != "w:p3|ABC-1 · Reviewer|reviewer" {
+		t.Fatalf("marked %q", m.got)
+	}
+}
 
 // Folders are grouped by repository, and what is not a checkout -- a plain
 // folder the board lists as a space -- is left out.

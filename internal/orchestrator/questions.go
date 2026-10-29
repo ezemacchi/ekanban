@@ -122,6 +122,9 @@ func Discuss(c Herdr, run *ticket.Run, question ticket.Question, q Questions) (s
 	if err := c.StartAgent(name, agent.Kind, pane, agent.Args); err != nil {
 		return "", fmt.Errorf("start the discussion in tab %s: %w", tab, err)
 	}
+	// Marked so that, open in the ticket's workspace, it is never taken for
+	// the orchestrator.
+	_ = ticket.Mark(c, pane, run.Key, ticket.RoleQuestion, "question "+slug)
 	prompt := strings.NewReplacer("{brief}", slash(question.BriefFile)).Replace(q.Discuss)
 	file := filepath.Join(filepath.Dir(question.BriefFile), slug+"-discuss.md")
 	if err := os.WriteFile(file, []byte(Expand(prompt, run)+"\n"), 0o644); err != nil {
