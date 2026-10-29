@@ -4,8 +4,9 @@
 //	todo         To Do      no run yet, or nothing dispatched
 //	in_progress  Working    the team is working; the landing check has not passed
 //	on_review    Reviewing  landed, pull request open, waiting on reviewers and CI
-//	to_deploy    Shipping   merged into a target branch, not in its last publish yet
-//	ready_qa     To QA      the target's last publish includes it
+//	to_deploy    Shipping   merged into a target branch, not on the QA instance yet
+//	ready_qa     To QA      the QA instance runs a version that includes it; with
+//	                        no [pipeline.qa], the target's last publish includes it
 //
 // The ids are fixed; the names are defaults that config.toml can change.
 //
@@ -79,6 +80,10 @@ type Info struct {
 	MergedTo string // master or predev
 	// Deployed names the publish that includes the merge ("dev #212").
 	Deployed string
+	// QA is what the QA instance runs ("qa 0.1.68"), shown once merged; InQA
+	// says that version includes the merge.
+	QA   string
+	InQA bool
 	// Diverged: the merge names this branch but does not hold the
 	// worktree's commit, so the worktree differs from what merged.
 	Diverged bool
@@ -105,7 +110,9 @@ type Settings struct {
 	Teams        []team.Team       // nil: the built-in teams
 	Orchestrator team.Orchestrator // config.toml's [orchestrator], over each team's
 	Columns      columns.Set       // nil: DefaultColumns
-	Layout       *ticket.Layout    // nil: ticket.DefaultLayout
+	// QA is the instance testers use; nil: To QA means "in the last publish".
+	QA     *Instance
+	Layout *ticket.Layout // nil: ticket.DefaultLayout
 	// SpecRoot is spec_clone, the specifications clone a run's prototype is
 	// looked up in; without it a run has no prototype.
 	SpecRoot string
@@ -160,6 +167,8 @@ type Source struct {
 	deployed map[int]string
 	// synced is what the last fast-forward of the target branches did.
 	synced Synced
+	// qa is what the QA instance ran at the last refresh.
+	qa InstanceState
 }
 
 // New reads the build server and git for repo, any checkout of the worktrees.
@@ -193,6 +202,12 @@ func (s *Source) Refresh(ctx context.Context) {
 		if s.set.FastForward {
 			s.setSynced(s.fastForward(ctx, branches))
 		}
+	}
+	if s.set.QA != nil {
+		qa := s.readInstance(ctx)
+		s.mu.Lock()
+		s.qa = qa
+		s.mu.Unlock()
 	}
 	ci := s.set.CI
 	if ci == nil {
@@ -267,16 +282,19 @@ func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live
 	}
 
 	s.mu.Lock()
-	offline := s.offline
+	offline, qa := s.offline, s.qa
 	s.mu.Unlock()
 
-	facts := Facts{Key: info.Key, HasRun: err == nil, Offline: offline}
+	facts := Facts{Key: info.Key, HasRun: err == nil, Offline: offline, QAWatched: s.set.QA != nil}
 	if err == nil {
 		facts.NotStarted, facts.Landed = notStarted(run), run.Landed
 	}
 	defer func() {
 		facts.PR, facts.PROpen, facts.Build = info.PR, info.PROpen, info.Build
-		facts.MergedTo, facts.Deployed = info.MergedTo, info.Deployed
+		facts.MergedTo, facts.Deployed, facts.InQA = info.MergedTo, info.Deployed, info.InQA
+		if facts.QAWatched && info.MergedTo != "" {
+			facts.QAProblem = qa.Problem
+		}
 		d := Decide(s.set.Rules, facts)
 		info.Stage, info.Unknown = d.Stage, d.Note
 	}()
@@ -314,6 +332,12 @@ func (s *Source) Classify(ctx context.Context, worktree string, live ticket.Live
 			info.MergedTo = target
 			info.PROpen = false
 			info.Deployed = s.deployedIn(ctx, info.PR, sha, target)
+			if s.set.QA != nil && qa.Version != "" {
+				info.QA = s.set.QA.Name + " " + qa.Version
+				// Read every refresh, not remembered: an instance can be put
+				// back on an older version.
+				info.InQA = qa.SHA != "" && s.isAncestor(ctx, sha, qa.SHA)
+			}
 		}
 	}
 	return info

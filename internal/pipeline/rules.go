@@ -19,6 +19,11 @@ type Facts struct {
 	MergedTo   string // target branch the pull request was merged into, or ""
 	Deployed   string // publish that includes the merge ("dev #212"), or ""
 	Offline    string // why build server data is missing, or ""
+	// QAWatched: [pipeline.qa] names the instance testers use, so To QA means
+	// that instance runs the merge, not that a publish holds it.
+	QAWatched bool
+	InQA      bool   // the QA instance's version includes the merge
+	QAProblem string // why the QA instance's version or commit is unknown, or ""
 }
 
 // Decision is a rule's answer: the column, and an optional note shown on the

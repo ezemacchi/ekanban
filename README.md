@@ -255,6 +255,21 @@ chain of rules: deployed, merged, not started, working, landed. The first rule
 that decides wins. `[pipeline]` in the settings names the build server, the
 branches pull requests merge into, and the publish job that deploys each one.
 
+A publish does not always reach the instance people test on: QA may be
+upgraded by hand, later. `[pipeline.qa]` names that instance: its `url`, a
+`version` pattern whose first group is the version it runs (matched against
+the redirect's address first, then the page), and the git `tag` of a version
+(`v{version}` by default). With it set, a merged card moves to To QA only once
+the commit of that version's tag holds the merge; until then it stays in
+Shipping, and the card says *qa 1.2.3 runs an older build*. The version is
+read on every refresh, so a card moves as soon as QA is upgraded.
+
+```toml
+[pipeline.qa]
+url = "https://qa.example.com/"
+version = '[?&]v=([^&#]+)'
+```
+
 A pull request counts as merged when its merge commit holds the worktree's
 commit, or when the merge's subject names the worktree's branch. The second
 covers a branch rebased on the server before it merged: the card then says

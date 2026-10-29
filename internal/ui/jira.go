@@ -482,6 +482,13 @@ func yankText(f yankFacts) string {
 	}
 	line("Review asked of you", f.Review)
 	line("Shipped to", f.Info.Deployed)
+	if f.Info.QA != "" {
+		if f.Info.InQA {
+			line("On QA", f.Info.QA)
+		} else {
+			line("On QA", "not yet: "+f.Info.QA+" runs an older build")
+		}
+	}
 	line("Note", f.Note)
 	if r := f.Run; r != nil {
 		section(&b, "Current step", r.CurrentStep)

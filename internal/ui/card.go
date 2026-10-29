@@ -224,6 +224,13 @@ func (m *Model) facts(sp *space) []fact {
 		out = append(out, fact{glyph: look.Rocket, text: "shipped to " + info.Deployed, style: prPassStyle, weight: weightContext, kind: kindPR,
 			short: said(look.Rocket, info.Deployed, prPassStyle)})
 	}
+	if info.QA != "" {
+		if info.InQA {
+			out = append(out, fact{glyph: look.Check, text: "on " + info.QA, style: prPassStyle, weight: weightContext, kind: kindPR})
+		} else {
+			out = append(out, fact{glyph: look.Warning, text: info.QA + " runs an older build", style: dimStyle, weight: weightContext, kind: kindPR})
+		}
+	}
 	if info.Unknown != "" {
 		out = append(out, fact{glyph: look.Wifi, text: info.Unknown, style: dimStyle, weight: weightAside})
 	}

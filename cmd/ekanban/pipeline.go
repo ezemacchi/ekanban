@@ -87,7 +87,9 @@ func pipelineSettings(cfg config.Settings) (pipeline.Settings, []string) {
 	for _, t := range cfg.Pipeline.Targets {
 		set.Targets = append(set.Targets, pipeline.Target{Branch: t.Branch, Env: t.Env, Publish: t.Publish})
 	}
-	for _, more := range [][]string{teamProblems, colProblems, ciProblems, hostProblems, keyProblems} {
+	qa, qaProblems := pipeline.NewInstance(cfg.Pipeline.QA.Name, cfg.Pipeline.QA.URL, cfg.Pipeline.QA.Version, cfg.Pipeline.QA.Tag)
+	set.QA = qa
+	for _, more := range [][]string{teamProblems, colProblems, ciProblems, hostProblems, keyProblems, qaProblems} {
 		problems = append(problems, more...)
 	}
 	return set, problems

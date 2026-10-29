@@ -10,20 +10,28 @@ func init() {
 	Register(landedRule{})
 }
 
-// deployedRule: merged and included in the target's last publish.
+// deployedRule: merged and on the QA instance. With no QA instance set, merged
+// and included in the target's last publish.
 type deployedRule struct{}
 
 func (deployedRule) Name() string { return "deployed" }
 func (deployedRule) Decide(f Facts) (Decision, bool) {
+	if f.QAWatched {
+		return Decision{Stage: ReadyQA}, f.MergedTo != "" && f.InQA
+	}
 	return Decision{Stage: ReadyQA}, f.MergedTo != "" && f.Deployed != ""
 }
 
-// mergedRule: merged but not published yet.
+// mergedRule: merged but not where testers can see it yet.
 type mergedRule struct{}
 
 func (mergedRule) Name() string { return "merged" }
 func (mergedRule) Decide(f Facts) (Decision, bool) {
-	return Decision{Stage: ToDeploy, Note: f.Offline}, f.MergedTo != ""
+	note := f.Offline
+	if note == "" {
+		note = f.QAProblem
+	}
+	return Decision{Stage: ToDeploy, Note: note}, f.MergedTo != ""
 }
 
 // notStartedRule: no run, or a run with nothing dispatched.

@@ -136,6 +136,10 @@ type PipelineConfig struct {
 	// first, each with the publish job that deploys it. Empty when unset:
 	// the caller fills the repository's default branch (pipeline.DefaultBranch).
 	Targets []TargetConfig `toml:"target"`
+	// QA is the instance testers use. When set, To QA means that instance
+	// runs a version holding the merge; until then a merged ticket stays in
+	// Shipping, even when a publish holds it.
+	QA QAConfig `toml:"qa"`
 	// Columns rename, recolour, reorder or re-icon the computed columns, and
 	// add one for a custom rule to return.
 	Columns []columns.Column `toml:"column"`
@@ -160,6 +164,17 @@ type TargetConfig struct {
 	Branch  string `toml:"branch"`
 	Env     string `toml:"env"`
 	Publish string `toml:"publish"`
+}
+
+// QAConfig is the [pipeline.qa] table. No url means none.
+type QAConfig struct {
+	Name string `toml:"name"` // shown on cards; "qa" when empty
+	URL  string `toml:"url"`
+	// Version is a regular expression whose first group is the running
+	// version, matched against the redirect's Location, then the body.
+	Version string `toml:"version"`
+	// Tag is the git tag of a version, with {version}; "v{version}" when empty.
+	Tag string `toml:"tag"`
 }
 
 const (
@@ -530,6 +545,18 @@ icons = false
 # branch = "main"
 # env = "dev"
 # publish = "https://jenkins.example.com/job/Folder/job/Repo%20Publish"
+
+# The instance testers use. A publish only says the build exists; this says
+# what the instance runs. With it, a merged ticket stays in Shipping until the
+# instance's version holds the merge, then moves to To QA. The board asks url
+# without following redirects; version's first group is the running version,
+# matched against the redirect's Location, then the body. tag turns that
+# version into the git tag it was built from.
+# [pipeline.qa]
+# name = "qa"
+# url = "https://qa.example.com/"
+# version = '[?&]v=([^&#]+)'
+# tag = "v{version}"
 
 # The global board's columns. The id is what the rules return; label, color
 # (ANSI index or hex) and icon (a Nerd Font glyph) are how it looks. Listed

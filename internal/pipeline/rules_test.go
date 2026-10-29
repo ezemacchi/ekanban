@@ -23,6 +23,10 @@ func TestDefaultChainPlacesEveryStage(t *testing.T) {
 		{"deployed", Facts{Key: "ABC-1", HasRun: true, Landed: true, PR: 5, MergedTo: "main", Deployed: "dev #3"}, ReadyQA},
 		// A merge wins over the run: the run may never have been marked landed.
 		{"merged without landing", Facts{Key: "ABC-1", HasRun: true, PR: 5, MergedTo: "main"}, ToDeploy},
+		// With a QA instance watched, a publish is not enough: QA must run the merge.
+		{"published, QA behind", Facts{Key: "ABC-1", HasRun: true, PR: 5, MergedTo: "main", Deployed: "dev #3", QAWatched: true}, ToDeploy},
+		{"on QA", Facts{Key: "ABC-1", HasRun: true, PR: 5, MergedTo: "main", Deployed: "dev #3", QAWatched: true, InQA: true}, ReadyQA},
+		{"on QA before the publish is seen", Facts{Key: "ABC-1", HasRun: true, PR: 5, MergedTo: "main", QAWatched: true, InQA: true}, ReadyQA},
 	}
 	for _, c := range cases {
 		if got := Decide(rules, c.f).Stage; got != c.want {
@@ -36,6 +40,14 @@ func TestOfflineNoteRidesOnTheDecision(t *testing.T) {
 	d := Decide(rules, Facts{Key: "ABC-1", HasRun: true, Landed: true, Offline: "Jenkins no responde"})
 	if d.Stage != OnReview || d.Note == "" {
 		t.Fatalf("landed with Jenkins offline and no PR: %+v", d)
+	}
+}
+
+func TestQAProblemNoteRidesOnTheMerge(t *testing.T) {
+	rules, _ := Chain(nil)
+	d := Decide(rules, Facts{Key: "ABC-1", HasRun: true, PR: 5, MergedTo: "main", QAWatched: true, QAProblem: "qa unreachable"})
+	if d.Stage != ToDeploy || d.Note != "qa unreachable" {
+		t.Fatalf("merged with QA unreadable: %+v", d)
 	}
 }
 
