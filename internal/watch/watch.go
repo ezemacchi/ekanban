@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ezemacchi/ekanban/internal/alert"
 	"github.com/ezemacchi/ekanban/internal/config"
 	"github.com/ezemacchi/ekanban/internal/gh"
 	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/relay"
 	"github.com/ezemacchi/ekanban/internal/store"
 )
 
@@ -81,13 +83,15 @@ func Run(ctx context.Context, stateDir string, interval time.Duration, tickets T
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// An event subscription doubles as a liveness signal. Herdr closing drops
-	// the connection, which ends the watcher at once rather than leaving it to
-	// discover the loss on its next tick -- up to a whole interval later.
+	// The event subscription doubles as a liveness signal: Herdr closing
+	// ends the watcher at once rather than on its next tick, up to a whole
+	// interval later.
 	//
-	// It is also a nudge: a workspace appearing or closing changes what there
-	// is to watch, so the poll happens then instead of waiting out the timer.
-	nudge := subscribe(ctx, cancel)
+	// It is also the nudge. A workspace appearing or closing changes what
+	// there is to watch, so everything is polled then; an agent changing
+	// status, finishing a turn or stopping at a prompt, polls the tickets
+	// then rather than minutes later.
+	spaces, agents := subscribe(ctx, cancel)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -95,13 +99,19 @@ func Run(ctx context.Context, stateDir string, interval time.Duration, tickets T
 	settings := config.Load()
 	client := gh.NewBackground()
 
-	var refreshed time.Time
+	var refreshed, polled time.Time
+	full := true
 	for {
-		refresh := time.Since(refreshed) >= refreshEvery
+		prs := client
+		if !full {
+			prs = nil // an agent's status says nothing about pull requests
+		}
+		refresh := full && time.Since(refreshed) >= refreshEvery
 		if refresh {
 			refreshed = time.Now()
 		}
-		if err := poll(ctx, stateDir, settings.Notifications, client, tickets, refresh); err != nil {
+		polled = time.Now()
+		if err := poll(ctx, stateDir, settings.Notifications, prs, tickets, refresh); err != nil {
 			// Herdr has stopped, so there is nothing to watch and nowhere to
 			// deliver a notification. Exiting beats spinning.
 			return err
@@ -110,10 +120,17 @@ func Run(ctx context.Context, stateDir string, interval time.Duration, tickets T
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-		case <-nudge:
+			full = true
+		case <-spaces:
 			// Coalesce a burst of events into one poll: Herdr emits freely,
 			// and gh calls are the expensive part.
-			drain(nudge, settle)
+			settleBurst(settle, spaces, agents)
+			full = true
+		case <-agents:
+			// Busy agents change status all the time; reading the tickets on
+			// every change would keep the watcher reading for nothing.
+			wait := max(settle, agentGap-time.Since(polled))
+			full = settleBurst(wait, spaces, agents)
 		}
 	}
 }
@@ -121,46 +138,117 @@ func Run(ctx context.Context, stateDir string, interval time.Duration, tickets T
 // settle is how long to wait for an event burst to finish before polling.
 const settle = 2 * time.Second
 
-// subscribe streams Herdr events, cancelling ctx when the stream ends. The
-// returned channel carries a nudge per event.
-func subscribe(ctx context.Context, cancel context.CancelFunc) <-chan struct{} {
-	out := make(chan struct{}, 1)
+// agentGap is the least time between two polls brought on by agents alone.
+const agentGap = 10 * time.Second
 
+// Waits before subscribing again after Herdr dropped a subscription.
+const (
+	retryMin = time.Second
+	retryMax = 30 * time.Second
+)
+
+// subscribe streams Herdr's events for as long as Herdr runs: workspace events
+// nudge spaces, and agents coming, going or changing status nudge agents.
+//
+// Herdr ends a stream without going away: it drops a subscriber that fell
+// behind (events_lost) and rejects a subscription naming a pane that just
+// closed. Those are subscribed again, with a full poll to catch up on what was
+// missed. Only Herdr itself not answering cancels ctx.
+func subscribe(ctx context.Context, cancel context.CancelFunc) (spaces, agents <-chan struct{}) {
+	sp, ag := make(chan struct{}, 1), make(chan struct{}, 1)
 	client, err := herdr.New()
 	if err != nil {
 		cancel()
-		return out
+		return sp, ag
 	}
-
-	events := make(chan herdr.Event, 32)
 	go func() {
-		// Returns when Herdr goes away, which is exactly the signal wanted.
-		_ = client.Subscribe(ctx, herdr.WorkspaceSubscriptions, events)
-		cancel()
-		close(events)
-	}()
-
-	go func() {
-		for range events {
-			select {
-			case out <- struct{}{}:
-			default: // a nudge is already pending
+		defer cancel()
+		wait := retryMin
+		for ctx.Err() == nil {
+			started := time.Now()
+			if panes, err := agentPanes(client); err == nil {
+				stream(ctx, client, panes, sp, ag)
 			}
+			if ctx.Err() != nil || client.Ping() != nil {
+				return
+			}
+			poke(sp)
+			if time.Since(started) > time.Minute {
+				wait = retryMin
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = min(2*wait, retryMax)
 		}
 	}()
-	return out
+	return sp, ag
 }
 
-// drain swallows further nudges for a moment, so a burst of events costs one
-// poll rather than one per event.
-func drain(ch <-chan struct{}, window time.Duration) {
+// stream holds one subscription until it ends, or until the agent panes
+// change: status events are per pane, so a new agent needs a new subscription.
+func stream(ctx context.Context, client *herdr.Client, panes []string, spaces, agents chan struct{}) {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	events := make(chan herdr.Event, 64)
+	go func() {
+		_ = client.SubscribeTo(ctx, herdr.AgentSubscriptions(panes), events)
+		close(events)
+	}()
+	key := strings.Join(panes, ",")
+	for ev := range events {
+		if strings.HasPrefix(ev.Event, "workspace.") {
+			poke(spaces)
+			continue
+		}
+		poke(agents)
+		if ev.Event == herdr.StatusChanged {
+			continue
+		}
+		if now, err := agentPanes(client); err == nil && strings.Join(now, ",") != key {
+			stop()
+		}
+	}
+}
+
+// agentPanes are the panes running an agent, sorted.
+func agentPanes(client *herdr.Client) ([]string, error) {
+	list, err := client.Agents()
+	if err != nil {
+		return nil, err
+	}
+	var panes []string
+	for _, a := range list {
+		if a.Agent != nil {
+			panes = append(panes, a.PaneID)
+		}
+	}
+	sort.Strings(panes)
+	return panes, nil
+}
+
+// poke nudges ch, unless a nudge is already pending.
+func poke(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// settleBurst swallows further nudges for window, so a burst of events costs
+// one poll rather than one per event, and reports whether spaces had any.
+func settleBurst(window time.Duration, spaces, agents <-chan struct{}) (sawSpaces bool) {
 	timer := time.NewTimer(window)
 	defer timer.Stop()
 	for {
 		select {
-		case <-ch:
+		case <-spaces:
+			sawSpaces = true
+		case <-agents:
 		case <-timer.C:
-			return
+			return sawSpaces
 		}
 	}
 }
@@ -206,6 +294,7 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client, tic
 		}
 	}
 	if len(labels) == 0 {
+		relayNotices(stateDir, client, nil)
 		return nil
 	}
 
@@ -225,7 +314,30 @@ func poll(ctx context.Context, stateDir string, notify bool, prs *gh.Client, tic
 			_ = client.Notify(a.Title(), a.Text, a.Sound())
 		}
 	}
+	relayNotices(stateDir, client, raised)
 	return nil
+}
+
+// relayNotices keeps what was raised for the agent `ekanban relay` pointed the
+// notices at, and hands over whatever waits once that agent can take it. A
+// poll brought on by that agent going idle is what delivers what waited while
+// it worked.
+func relayNotices(stateDir string, client *herdr.Client, raised []alert.Alert) {
+	r := relay.Load(stateDir)
+	if !r.On() {
+		return
+	}
+	changed := r.Queue(raised)
+	agents, err := client.Agents()
+	panes, perr := client.Panes()
+	if err == nil && perr == nil {
+		if delivered, _ := r.Deliver(agents, panes, client.SubmitToAgent); delivered {
+			changed = true
+		}
+	}
+	if changed {
+		_ = r.Save()
+	}
 }
 
 // prAlerts asks GitHub about every space's pull request and records what

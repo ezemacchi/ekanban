@@ -93,6 +93,10 @@ type Agent struct {
 	Pane   string `json:"pane"`
 	Status string `json:"status"`
 	Title  string `json:"title,omitempty"`
+	// Completion is Herdr's id of the turn the agent last finished; it
+	// changes with every finished turn, looked at or not. Absent while the
+	// agent works.
+	Completion uint64 `json:"completion_seq,omitempty"`
 }
 
 // Questions are a run's open questions, by the state file section they sit
@@ -149,7 +153,7 @@ func Row(worktree, branch, workspace string, info pipeline.Info, git Branch, col
 }
 
 func agent(a ticket.Agent) Agent {
-	return Agent{Who: a.Who, Pane: a.Pane, Status: a.Status, Title: a.Title}
+	return Agent{Who: a.Who, Pane: a.Pane, Status: a.Status, Title: a.Title, Completion: a.Completion}
 }
 
 func questions(qs []ticket.Question) []Question {

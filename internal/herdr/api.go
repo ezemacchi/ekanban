@@ -217,6 +217,18 @@ type Agent struct {
 	// Session is the agent's own conversation, which it can be started again
 	// on; nil until the agent has reported one.
 	Session *AgentSession `json:"agent_session"`
+	// Completion identifies the turn the agent last finished, whoever has
+	// looked at it since: set while it sits idle after work, nil while it
+	// works, after a mere start, and from servers older than the field.
+	Completion *uint64 `json:"completion_seq"`
+}
+
+// Completed is Completion, 0 when there is none.
+func (a Agent) Completed() uint64 {
+	if a.Completion == nil {
+		return 0
+	}
+	return *a.Completion
 }
 
 // AgentSession names a conversation of an agent: Kind "id" means Value is its
@@ -377,6 +389,12 @@ func (c *Client) StartAgent(name, kind, paneID string, args []string) error {
 // has no agent to name, and the keys are still how you find that out.
 func (c *Client) SendKeys(paneID string, keys ...string) error {
 	return c.Request("pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys}, nil)
+}
+
+// Ping is whether the server answers at all: what tells Herdr going away
+// apart from Herdr only dropping a subscription.
+func (c *Client) Ping() error {
+	return c.Request("ping", map[string]any{}, nil)
 }
 
 // PromptAgent submits text to an agent, as if typed and sent.

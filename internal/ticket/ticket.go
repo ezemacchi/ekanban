@@ -178,6 +178,9 @@ type Agent struct {
 	Pane   string
 	Status string
 	Title  string
+	// Completion is Herdr's id of the turn it last finished, 0 when none
+	// (herdr.Agent.Completion).
+	Completion uint64
 }
 
 // Change is an agent whose status moved since the last reading; From is ""
@@ -235,11 +238,11 @@ func Loudest(agents []Agent) (Agent, bool) {
 func (r *Run) Agents() []Agent {
 	var out []Agent
 	if r.OrchestratorPane != "" {
-		out = append(out, Agent{r.Orchestrator.Label, r.OrchestratorPane, r.OrchestratorStatus, r.OrchestratorTitle})
+		out = append(out, Agent{Who: r.Orchestrator.Label, Pane: r.OrchestratorPane, Status: r.OrchestratorStatus, Title: r.OrchestratorTitle, Completion: r.OrchestratorCompletion})
 	}
 	for _, c := range r.Cards {
 		if c.PaneID != "" {
-			out = append(out, Agent{c.Role.Label, c.PaneID, c.Status, c.Title})
+			out = append(out, Agent{Who: c.Role.Label, Pane: c.PaneID, Status: c.Status, Title: c.Title})
 		}
 	}
 	return out
@@ -277,6 +280,8 @@ type Run struct {
 	OrchestratorStatus string
 	OrchestratorPane   string
 	OrchestratorTitle  string
+	// OrchestratorCompletion is the turn it last finished (Agent.Completion).
+	OrchestratorCompletion uint64
 	// Workspace is the Herdr workspace open on the worktree, or "".
 	Workspace string
 
@@ -538,6 +543,7 @@ func (r *Run) placeOrchestrator(roles []team.Role, agents []herdr.Agent, tabLabe
 		for _, a := range agents {
 			if test(a) {
 				r.OrchestratorStatus, r.OrchestratorPane, r.OrchestratorTitle = a.AgentStatus, a.PaneID, titleOf(a)
+				r.OrchestratorCompletion = a.Completed()
 				if a.Session != nil && a.Session.Kind == "id" && a.Session.Value != "" && a.Agent != nil {
 					RememberSession(r.Dir, *a.Agent, a.Session.Value)
 				}

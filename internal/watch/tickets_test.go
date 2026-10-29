@@ -61,6 +61,40 @@ func TestTicketNotices(t *testing.T) {
 	}
 }
 
+func finishedTurn(status string, completion uint64, pane string) state.Ticket {
+	t := ticketWith(status, nil, nil, 2)
+	t.Orchestrator.Completion, t.Orchestrator.Pane = completion, pane
+	return t
+}
+
+// Herdr's number for the finished turn says the orchestrator finished even
+// when you looked first (idle, not done) or it finished twice between polls.
+func TestTicketNoticesByFinishedTurn(t *testing.T) {
+	cases := []struct {
+		name          string
+		before, after state.Ticket
+		oldRecord     bool
+		want          []alert.Kind
+	}{
+		{"finished and already looked at", finishedTurn("working", 0, "w1:p1"), finishedTurn("idle", 40, "w1:p1"), false, []alert.Kind{alert.OrchestratorDone}},
+		{"two turns between polls", finishedTurn("idle", 33, "w1:p1"), finishedTurn("done", 40, "w1:p1"), false, []alert.Kind{alert.OrchestratorDone}},
+		{"the same turn, now seen", finishedTurn("done", 40, "w1:p1"), finishedTurn("idle", 40, "w1:p1"), false, nil},
+		{"working again", finishedTurn("idle", 40, "w1:p1"), finishedTurn("working", 0, "w1:p1"), false, nil},
+		{"another orchestrator in another pane", finishedTurn("idle", 40, "w1:p1"), finishedTurn("idle", 7, "w1:p9"), false, nil},
+		{"a record from before turns were kept", finishedTurn("idle", 0, "w1:p1"), finishedTurn("idle", 40, "w1:p1"), true, nil},
+	}
+	for _, c := range cases {
+		b := seenOf(c.before)
+		if c.oldRecord {
+			b.V = 0
+		}
+		got := kinds(ticketNotices(c.after, &b, seenOf(c.after)))
+		if strings.Join(toStrings(got), ",") != strings.Join(toStrings(c.want), ",") {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // Compared against another target is not the branch reaching its own.
 func TestTicketNoticesTargetChanged(t *testing.T) {
 	before := ticketWith("idle", nil, nil, 3)

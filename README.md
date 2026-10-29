@@ -204,6 +204,12 @@ minutes at most; the polls between use the last reading. What it last saw of
 each ticket is kept in `tickets-seen.json` beside the board, so a restart does
 not announce anything twice, and a ticket first seen is not news.
 
+"Finished" goes by the number Herdr gives each finished turn
+(`completion_seq`), not by the Done badge: Done only means finished and not
+yet looked at, so a turn you glanced at before the poll, or two turns between
+polls, would otherwise go unannounced. On a Herdr too old to send the number,
+the Done badge stands in.
+
 **Only changes, never states.** A failing check is announced once, not on every
 poll — notifying on state trains you to ignore the notifications.
 
@@ -219,8 +225,16 @@ after a live handoff — so a pull request going red reaches you whether or not
 you have opened the board. Opening the board starts one too, if none is
 running. It holds an event subscription, which does double duty: Herdr closing
 drops the connection so the watcher exits at once rather than discovering the
-loss on its next tick, and a workspace appearing or closing nudges it to poll
-then instead of waiting out the timer. A burst of events still costs one poll.
+loss on its next tick, and events nudge it to poll then instead of waiting out
+the timer. A workspace appearing or closing polls everything; an agent changing
+status -- an orchestrator finishing, or stopping at a prompt -- rereads the
+tickets only, at most every ten seconds, since an agent says nothing about pull
+requests. A burst of events still costs one poll.
+
+Herdr also ends a subscription while staying up: it drops a subscriber that
+fell behind (`events_lost`), and refuses one naming a pane that just closed.
+The watcher then subscribes again and polls everything to catch up; only Herdr
+not answering at all ends it.
 
 Lookups are both bounded and paced: a few calls run at once, and a token bucket
 meters how fast they leave. Concurrency alone is not enough — four workers will
@@ -235,6 +249,32 @@ board, and it covers every space across every repo. Run it by hand with
 
 It follows the Herdr session that started it. If you run named sessions
 side by side, spaces in the other one are outside its view.
+
+### Telling an agent
+
+A toast reaches you; an agent working for you -- one that keeps an eye on
+your runs -- hears nothing unless someone tells it, so it ends up asking "has
+it finished yet?" for you. `ekanban relay`, run in that agent's pane, points
+the watcher's notices at it as well:
+
+```powershell
+ekanban.exe relay                  # this pane's agent gets the notices
+ekanban.exe relay --pane w3:p2     # or another pane's
+ekanban.exe relay --show           # where they go, and what is waiting
+ekanban.exe relay --off
+```
+
+Every notice the watcher raises is then also sent to that agent, as one
+message starting with `[ekanban]`, once the agent is idle or done:
+`[ekanban] ABC-1 · orchestrator finished; #9 merged — ABC-2`. One that is
+working, or waiting at a dialog for you, is not interrupted; what is raised
+meanwhile waits, and goes in one message when it is free. The relay follows
+the pane rather than the agent's name, which Herdr clears when an agent
+restarts, and it ends by itself when the pane closes. There is one relay:
+pointing it at another pane moves it.
+
+The message is submitted like anything typed there, so text you have half
+written in that agent's input goes with it.
 
 ## Inside a repository
 
@@ -1068,6 +1108,7 @@ ekanban state [--json] [repo]       # every ticket: branch, PR, column, agents, 
 ekanban broadcast --message "..."   # one message to the chosen orchestrators
 ekanban update-branches [repo]      # fast-forward the local target branches
 ekanban close [--yes] <worktree>    # check, accept, close its workspaces, remove it
+ekanban relay [--pane <id>|--show|--off]  # send the watcher's notices to an agent too
 ekanban config          # show the settings in force, and the repository file
 ekanban config --init   # write a commented settings template
 ekanban keys            # every action and the keys bound to it

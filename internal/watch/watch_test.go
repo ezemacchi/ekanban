@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/ezemacchi/ekanban/internal/herdr"
+	"github.com/ezemacchi/ekanban/internal/herdrtest"
 )
 
 // The board spawns a watcher every time it opens, so without a working lock
@@ -130,19 +133,71 @@ func TestContextCancelStops(t *testing.T) {
 
 // Herdr emits events freely, and gh calls are the expensive part, so a burst
 // must cost one poll rather than one per event.
-func TestDrainCoalescesABurst(t *testing.T) {
-	ch := make(chan struct{}, 8)
+func TestSettleBurstCoalescesABurst(t *testing.T) {
+	spaces, agents := make(chan struct{}, 8), make(chan struct{}, 8)
 	for i := 0; i < 5; i++ {
-		ch <- struct{}{}
+		agents <- struct{}{}
 	}
 
 	start := time.Now()
-	drain(ch, 50*time.Millisecond)
-
-	if len(ch) != 0 {
-		t.Fatalf("%d nudges survived the drain", len(ch))
+	if settleBurst(50*time.Millisecond, spaces, agents) {
+		t.Fatal("agents alone were taken for a workspace event")
+	}
+	if len(agents) != 0 {
+		t.Fatalf("%d nudges survived the settle", len(agents))
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("drain took %s, far longer than its window", elapsed)
+		t.Fatalf("settle took %s, far longer than its window", elapsed)
+	}
+}
+
+// A workspace event inside an agents' burst still makes the poll a full one.
+func TestSettleBurstSeesAWorkspaceEvent(t *testing.T) {
+	spaces, agents := make(chan struct{}, 8), make(chan struct{}, 8)
+	agents <- struct{}{}
+	spaces <- struct{}{}
+	if !settleBurst(20*time.Millisecond, spaces, agents) {
+		t.Fatal("the workspace event was lost in the burst")
+	}
+}
+
+// Herdr dropping the subscription (events_lost) is not Herdr going away: the
+// watcher subscribes again, naming each agent's pane for its status.
+func TestSubscribesAgainWhenHerdrDropsTheStream(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	f := herdrtest.Start(t)
+	f.Route(map[string]any{
+		"agent.list": map[string]any{"agents": []map[string]any{
+			{"pane_id": "w1:p2", "agent": "cursor", "agent_status": "working"},
+			{"pane_id": "w1:p3", "agent_status": "idle"},
+		}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	spaces, _ := subscribe(ctx, cancel)
+	herdrtest.WaitFor(t, "the first subscription", func() bool { return f.Called("events.subscribe") == 1 })
+
+	sub := herdrtest.Params(t, f.Last(t, "events.subscribe"))
+	var status []string
+	for _, s := range sub["subscriptions"].([]any) {
+		if e := s.(map[string]any); e["type"] == herdr.StatusChanged {
+			status = append(status, e["pane_id"].(string))
+		}
+	}
+	if len(status) != 1 || status[0] != "w1:p2" {
+		t.Fatalf("status subscribed for %v, want only the agent's pane w1:p2", status)
+	}
+
+	f.Stream <- `{"id":"x","error":{"code":"events_lost","message":"fell behind"}}`
+	herdrtest.WaitFor(t, "a second subscription", func() bool { return f.Called("events.subscribe") == 2 })
+	select {
+	case <-spaces:
+	default:
+		t.Fatal("no full poll was asked for to catch up")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the watcher gave up while Herdr was still there")
 	}
 }

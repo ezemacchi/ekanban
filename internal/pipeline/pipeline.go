@@ -389,7 +389,7 @@ func notStarted(run *ticket.Run) bool {
 func describeRun(info *Info, run *ticket.Run) {
 	info.Agents = run.Agents()
 	if run.OrchestratorPane != "" {
-		info.Orchestrator = ticket.Agent{Who: run.Orchestrator.Label, Pane: run.OrchestratorPane, Status: run.OrchestratorStatus, Title: run.OrchestratorTitle}
+		info.Orchestrator = ticket.Agent{Who: run.Orchestrator.Label, Pane: run.OrchestratorPane, Status: run.OrchestratorStatus, Title: run.OrchestratorTitle, Completion: run.OrchestratorCompletion}
 	}
 	info.Target, info.RunDir = run.Target, run.Dir
 	info.Questions = append([]ticket.Question(nil), run.Questions...)

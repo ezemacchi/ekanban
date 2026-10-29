@@ -35,7 +35,12 @@ type Row struct {
 // seen is what the watcher last knew of a ticket, kept between polls and
 // across restarts so that nothing is announced twice.
 type seen struct {
+	// V is seenVersion when the record keeps the orchestrator's pane and
+	// finished turn; a record without them cannot be compared by turn.
+	V            int      `json:"v,omitempty"`
 	Orchestrator string   `json:"orchestrator,omitempty"`
+	Pane         string   `json:"pane,omitempty"`
+	Completion   uint64   `json:"completion,omitempty"`
 	ForYou       []string `json:"for_you,omitempty"`
 	PR           int      `json:"pr,omitempty"`
 	MergedTo     string   `json:"merged_to,omitempty"`
@@ -43,10 +48,12 @@ type seen struct {
 	Compared     string   `json:"compared,omitempty"`
 }
 
+const seenVersion = 1
+
 func seenOf(t state.Ticket) seen {
-	s := seen{Ahead: t.Git.Ahead, Compared: t.Git.Compared}
+	s := seen{V: seenVersion, Ahead: t.Git.Ahead, Compared: t.Git.Compared}
 	if t.Orchestrator != nil {
-		s.Orchestrator = t.Orchestrator.Status
+		s.Orchestrator, s.Pane, s.Completion = t.Orchestrator.Status, t.Orchestrator.Pane, t.Orchestrator.Completion
 	}
 	for _, q := range t.Questions.ForYou {
 		s.ForYou = append(s.ForYou, q.Text)
@@ -68,13 +75,11 @@ func ticketNotices(t state.Ticket, before *seen, now seen) []alert.Alert {
 		out = append(out, alert.Alert{Kind: k, Text: t.Key + " · " + fmt.Sprintf(format, args...)})
 	}
 
-	if now.Orchestrator != before.Orchestrator {
-		switch now.Orchestrator {
-		case "done":
-			say(alert.OrchestratorDone, "orchestrator finished")
-		case "blocked":
-			say(alert.OrchestratorBlocked, "orchestrator waiting at a prompt")
-		}
+	if finished(*before, now) {
+		say(alert.OrchestratorDone, "orchestrator finished")
+	}
+	if now.Orchestrator == "blocked" && before.Orchestrator != "blocked" {
+		say(alert.OrchestratorBlocked, "orchestrator waiting at a prompt")
 	}
 	for _, q := range now.ForYou {
 		if !slices.Contains(before.ForYou, q) {
@@ -92,6 +97,19 @@ func ticketNotices(t state.Ticket, before *seen, now seen) []alert.Alert {
 		say(alert.Contained, "branch is already in %s", now.Compared)
 	}
 	return out
+}
+
+// finished is whether the orchestrator finished a turn since before. Herdr
+// numbers each finished turn whether or not anyone has looked at it, so a turn
+// you glanced at before the poll, or two turns between polls, still count.
+// Herdr's "done" (finished and not yet seen) stands in when there is no number
+// to compare: a server older than it, another agent in the pane, or a record
+// written before the watcher kept one.
+func finished(before, now seen) bool {
+	if now.Completion != 0 && before.V >= seenVersion && now.Pane == before.Pane {
+		return now.Completion != before.Completion
+	}
+	return now.Orchestrator == "done" && before.Orchestrator != "done"
 }
 
 // keepNotes copies the ticket's run folder beside the board when it changed,

@@ -71,6 +71,9 @@ func run(args []string) error {
 		case "close":
 			return closeCmd(args[1:], os.Stdin, os.Stdout)
 
+		case "relay":
+			return relayCmd(args[1:], os.Stdout)
+
 		case "version", "--version", "-v":
 			fmt.Println(version.Version)
 			return nil
@@ -176,7 +179,7 @@ func run(args []string) error {
 			// sends you elsewhere. Same reason as sidebar for being a command.
 			inTab = true
 		default:
-			return fmt.Errorf("unknown command %q (want: sync, sidebar, tab, open, watch, startup, config, keys, version, prune, state, broadcast, update-branches, close)", args[0])
+			return fmt.Errorf("unknown command %q (want: sync, sidebar, tab, open, watch, startup, config, keys, version, prune, state, broadcast, update-branches, close, relay)", args[0])
 		}
 	}
 
