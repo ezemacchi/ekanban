@@ -51,11 +51,7 @@ func stateCmd(args []string, out io.Writer) error {
 	if len(rest) > 1 {
 		return fmt.Errorf("%s", stateUsage)
 	}
-	repo := "."
-	if len(rest) == 1 {
-		repo = rest[0]
-	}
-	repo, err := filepath.Abs(repo)
+	repo, err := repoArg(rest)
 	if err != nil {
 		return err
 	}

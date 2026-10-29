@@ -524,6 +524,35 @@ left alone, and the footer says so (`master ↓4 · local changes`). With
 `[pipeline] fast_forward = true` in config.toml it happens after every fetch.
 It moves your checkouts, so a repository file cannot turn it on.
 
+### The same from a terminal, for scripts and agents
+
+An agent working for you -- or a script -- can read the board and act on it
+without opening it. Each command takes the repository as its last argument,
+the current folder by default.
+
+```powershell
+ekanban.exe state                  # one line per ticket worktree
+ekanban.exe state --json           # the same as data
+ekanban.exe broadcast --message "rebase onto origin/{target}" --filter column=Working
+ekanban.exe broadcast --message "push your branch" --filter key=ABC-1,ABC-2 --yes
+ekanban.exe update-branches        # what U does
+```
+
+`state` gives, for each ticket worktree: its branch against its target
+(commits ahead and behind `origin/<target>`, uncommitted paths, commits on no
+remote), its pull request and column as the board computes them, the
+orchestrator and what it is doing, the other live agents, and the open
+questions split into those for you and those for others. Herdr is optional:
+outside a session the rows have no agents and the report says why.
+
+`broadcast` follows the box's rules: each orchestrator gets the message as
+its own, `{target}` and `{key}` filled in, and one waiting at a prompt never
+gets it -- it is named instead, as is a ticket with no orchestrator open. The
+filters are `all` (the default), `pr`, `idle`, `working`, `done`,
+`column=<id or name>` and `key=<KEY,...>`; several narrow together. It lists
+who gets what and asks before sending; `--yes` skips the question, for a
+caller that has already asked you.
+
 ### Open questions
 
 A ticket whose run has open questions says how many in its card's top border
@@ -959,6 +988,9 @@ ekanban sidebar         # the narrow board, for a split down the side
 ekanban open            # the show action: the board for wherever you are
 ekanban ticket [dir]    # the ticket board of the run in a worktree
 ekanban pipeline [repo] # where each worktree of a repository lands, as JSON
+ekanban state [--json] [repo]       # every ticket: branch, PR, column, agents, questions
+ekanban broadcast --message "..."   # one message to the chosen orchestrators
+ekanban update-branches [repo]      # fast-forward the local target branches
 ekanban config          # show the settings in force, and the repository file
 ekanban config --init   # write a commented settings template
 ekanban keys            # every action and the keys bound to it
